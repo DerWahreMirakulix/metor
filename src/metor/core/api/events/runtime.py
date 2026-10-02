@@ -1,7 +1,7 @@
 """Runtime, auth, settings, and config IPC event DTOs."""
 
 from dataclasses import dataclass, field
-from typing import ClassVar, Optional
+from typing import Optional
 
 # Local Package Imports
 from metor.core.api.base import IpcEvent
@@ -9,10 +9,7 @@ from metor.core.api.codes import (
     ClientUnlockMethod,
     EventType,
     NotificationPrivacy,
-    LockedAcceptPolicy,
 )
-from .entries import PendingConnectionEntry
-from .shared import NestedEntryCastingMixin
 from metor.core.api.registry import register_event
 
 
@@ -105,27 +102,18 @@ class ClientRestrictedEvent(IpcEvent):
     challenge: Optional[str] = None
     salt: Optional[str] = None
     device_lifecycle: bool = False
-    continued_live_target: Optional[str] = None
-    continued_live_context_generation: Optional[int] = None
+    accept_calls_locked: bool = False
     event_type: EventType = field(default=EventType.CLIENT_RESTRICTED, init=False)
 
 
 @register_event(EventType.RESTRICTED_CLIENT_STATE)
 @dataclass
-class RestrictedClientStateEvent(NestedEntryCastingMixin, IpcEvent):
-    """Projects only current per-client grants and notification-permitted call metadata."""
+class RestrictedClientStateEvent(IpcEvent):
+    """Projects only the requesting client's immutable restriction policy."""
 
     restricted: bool = False
-    continued_live_target: Optional[str] = None
-    continued_live_context_generation: Optional[int] = None
-    session_state: str = 'disconnected'
     notification_privacy: NotificationPrivacy = NotificationPrivacy.OFF
-    accept_while_locked: LockedAcceptPolicy = LockedAcceptPolicy.NONE
-    pending: list[PendingConnectionEntry] = field(default_factory=list)
-    accepted_handles: list[str] = field(default_factory=list)
-    _nested_entry_types: ClassVar[dict[str, type[object]]] = {
-        'pending': PendingConnectionEntry
-    }
+    accept_calls_locked: bool = False
     event_type: EventType = field(default=EventType.RESTRICTED_CLIENT_STATE, init=False)
 
 

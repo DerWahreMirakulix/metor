@@ -249,18 +249,27 @@ class ReleaseVoiceCommand(IpcCommand):
 @register_command(CommandType.COMMIT_VOICE)
 @dataclass
 class CommitVoiceCommand(IpcCommand):
-    """Commits one finalized DROP Voice draft to pending delivery."""
+    """Publishes one finalized local Voice draft after explicit Send."""
 
     target: str
     msg_id: str
     owner_token: Optional[str] = None
+    delivery: Optional[Delivery] = None
+    context_generation: Optional[int] = None
     command_type: CommandType = field(default=CommandType.COMMIT_VOICE, init=False)
+
+    def __post_init__(self) -> None:
+        """Rejects invalid explicit context assertions before Core admission."""
+        if self.context_generation is not None and (
+            type(self.context_generation) is not int or self.context_generation <= 0
+        ):
+            raise ValueError('Invalid LIVE context generation')
 
 
 @register_command(CommandType.CANCEL_VOICE)
 @dataclass
 class CancelVoiceCommand(IpcCommand):
-    """Cancels one unsent DROP Voice draft."""
+    """Cancels one unsent local Voice draft in either delivery mode."""
 
     target: str
     msg_id: str

@@ -117,7 +117,6 @@ class NativeLifecycleTests(unittest.TestCase):
         self.gui.inputs = Mock()
         self.gui.voice = Mock()
         self.gui.playback = Mock()
-        cast(Mock, self.gui.playback).auto.focused = True
         self.gui.security = Mock()
 
     def test_native_departure_revokes_input_and_both_audio_directions(self) -> None:
@@ -135,7 +134,7 @@ class NativeLifecycleTests(unittest.TestCase):
         cast(Mock, self.gui.security).lock.assert_not_called()
 
     def test_suspend_adds_privacy_cover_without_synthesizing_resume_input(self) -> None:
-        """Suspend disables auto-play and locks after the lost-input barrier.
+        """Suspend stops all message media and locks after the lost-input barrier.
 
         Args:
             None
@@ -143,7 +142,6 @@ class NativeLifecycleTests(unittest.TestCase):
             None
         """
         self.gui.suspend()
-        self.assertFalse(cast(Mock, self.gui.playback).auto.focused)
         cast(Mock, self.gui.inputs).focus_lost.assert_called_once_with()
         cast(Mock, self.gui.voice).depart.assert_called_once_with()
         cast(Mock, self.gui.playback).stop.assert_called_once_with()
@@ -157,7 +155,6 @@ class NativeLifecycleTests(unittest.TestCase):
 
         self.gui.resume()
 
-        self.assertFalse(cast(Mock, self.gui.playback).auto.focused)
         cast(Mock, self.gui.inputs).focus_lost.assert_called_once_with()
         cast(Mock, self.gui.voice).depart.assert_called_once_with()
         cast(Mock, self.gui.playback).stop.assert_called_once_with()
@@ -220,7 +217,7 @@ class GuiLifecycleCoreTests(unittest.TestCase):
                 return
         self.fail('Lifecycle worker did not complete')
 
-    def test_desktop_exit_releases_only_own_draft_and_preserves_other_live_client(
+    def test_desktop_exit_preserves_unsent_draft_and_other_live_client(
         self,
     ) -> None:
         """GUI-only exit never invokes global preparation and leaves another client's socket active.
@@ -235,9 +232,9 @@ class GuiLifecycleCoreTests(unittest.TestCase):
         self.addCleanup(peer.close)
         state = self.h.daemon._transport_state
         state.add_active_connection(self.h.onion, local)
-        self.h.capture('discard-on-close')
+        self.h.capture('preserve-on-close')
         self.h.client.request(
-            FinalizeVoiceCommand('discard-on-close', 20, self.h.owner),
+            FinalizeVoiceCommand('preserve-on-close', 20, self.h.owner),
             VoiceFinalizedEvent,
         )
         with patch.object(
@@ -258,11 +255,16 @@ class GuiLifecycleCoreTests(unittest.TestCase):
         retained = self.h.other.list_retained_messages(
             target=self.h.onion,
             direction=MessageDirectionCode.OUT,
-            msg_id='discard-on-close',
+            msg_id='preserve-on-close',
         )
         self.assertIsInstance(retained, RetainedMessagesEvent)
         assert retained is not None
-        self.assertEqual(retained.messages, [])
+        self.assertEqual(
+            [item.msg_id for item in retained.messages], ['preserve-on-close']
+        )
+        self.assertTrue(retained.messages[0].producer_interrupted)
+        self.assertTrue(retained.messages[0].can_retry_finalization)
+        self.assertTrue(retained.messages[0].finalized)
 
     def test_failed_target_after_actual_preparation_stays_covered_without_rollback(
         self,

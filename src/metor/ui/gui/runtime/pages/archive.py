@@ -101,7 +101,9 @@ class ArchivePages:
             GuiLimits.ARCHIVE_PAGE_BYTES if bounded else None,
         )
         if not controller.submit(
-            operation, lambda: client.request(command, MessagesDataEvent)
+            operation,
+            lambda: client.request(command, MessagesDataEvent),
+            background=True,
         ):
             return False
         self._serial, self._operation = serial, operation

@@ -34,7 +34,6 @@ from metor.core.api import (
     AuthenticateSessionCommand,
     ClientUnlockMethod,
     ConfigureQuickUnlockCommand,
-    Delivery,
     EventType,
     GetVoiceChunkCommand,
     IpcEvent,
@@ -226,10 +225,8 @@ class FinalRemediationContractTests(unittest.TestCase):
         cleanup.assert_called_once_with(Path('profile'))
         self.assertEqual(failures, [('preparation', True)])
 
-    def test_restricted_media_is_direction_delivery_and_context_bound(self) -> None:
-        """C09: locked reads/releases cannot escape the frozen LIVE context."""
-        token = object()
-        current_token: list[object] = [token]
+    def test_restricted_message_media_has_no_live_exception(self) -> None:
+        """C09: locked Voice reads/releases are rejected for both message directions."""
         conn = cast(socket.socket, object())
         access = SessionAccessController(
             require_auth=False,
@@ -237,27 +234,15 @@ class FinalRemediationContractTests(unittest.TestCase):
             lockout_timeout_callback=lambda: 30.0,
             failure_limit_callback=lambda: 3,
             live_consumer_available_callback=lambda: None,
-            resolve_target_callback=lambda target: {'alice': 'alice-onion'}.get(
-                target, target
-            ),
-            inbound_voice_delivery_callback=lambda onion, msg_id: (
-                Delivery.LIVE
-                if (onion, msg_id) == ('alice-onion', 'voice')
-                else Delivery.DROP
-            ),
-            live_context_callback=lambda _onion: current_token[0],
-            voice_context_callback=lambda _onion, _msg_id, _direction: token,
         )
         access.restrict(
             conn,
             RestrictClientCommand(
                 unlock_method=ClientUnlockMethod.NONE,
-                continued_live_target='alice',
-                live_while_locked=True,
                 notification_privacy=NotificationPrivacy.ANONYMIZE,
             ),
         )
-        self.assertTrue(
+        self.assertFalse(
             access.authorize(
                 GetVoiceChunkCommand('alice', 'voice', MessageDirectionCode.IN, 0, 10),
                 conn,
@@ -271,7 +256,6 @@ class FinalRemediationContractTests(unittest.TestCase):
                 True,
             )
         )
-        current_token[0] = object()
         self.assertFalse(
             access.authorize(ReleaseVoiceCommand('alice', 'voice'), conn, True)
         )

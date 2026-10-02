@@ -46,6 +46,7 @@ class PeerView(BoxLayout):
         heading.add_widget(self.name)
         heading.add_widget(self.subtitle)
         header.add_widget(heading)
+        header.add_widget(IconAction('phone', 'Call', self._call))
         header.add_widget(IconAction('ellipsis', 'Conversation actions', self._menu))
         self._end_identity: tuple[int | None, str | None] | None = None
         self.end = Action(
@@ -69,8 +70,6 @@ class PeerView(BoxLayout):
         Action.group(tuple(reversed(tabs.children)))
         self.add_widget(tabs)
         self.controls = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(12))
-        self.auto_play = Action('Auto-play: Off', self._toggle_auto)
-        self.controls.add_widget(self.auto_play)
         self._end_parent = header if wide else self.controls
         self.timeline = Timeline(controller, self.route, refresh)
         self.add_widget(self.timeline)
@@ -183,15 +182,15 @@ class PeerView(BoxLayout):
         self.controller.back()
         self.refresh()
 
-    def _toggle_auto(self) -> None:
-        """Changes the existing context override without playing old backlog.
+    def _call(self) -> None:
+        """Requests a separately authorized telephone call without changing chat mode.
 
         Args:
             None
         Returns:
             None
         """
-        self.controller.playback.auto.toggle(self.route.peer or '')
+        self.controller.calls.start(self.route.peer or '')
         self.refresh()
 
     def _tab(self, delivery: Delivery) -> None:
@@ -225,7 +224,7 @@ class PeerView(BoxLayout):
 
         Args:
             context_generation: Logical context captured when this control was created.
-            attempt_id: Calling attempt captured when this control was created.
+            attempt_id: Chat invitation attempt captured when this control was created.
         Returns:
             None
         """
@@ -241,11 +240,6 @@ class PeerView(BoxLayout):
             None
         """
         controller, state = self.controller, self.controller.state
-        self.auto_play.label.text = (
-            'Auto-play: On'
-            if controller.playback.auto.enabled(self.route.peer or '')
-            else 'Auto-play: Off'
-        )
         peer, snapshot = self.route.peer, state.snapshot
         live = (
             next((item for item in snapshot.live_contexts if item.onion == peer), None)
@@ -264,16 +258,16 @@ class PeerView(BoxLayout):
         active = live is not None and (
             live.session_state == 'connected' or live.recovery_eligible
         )
-        calling = bool(live and live.outbound_attempt_id and not active)
+        connecting = bool(live and live.outbound_attempt_id and not active)
         identity = (
             live.context_generation if live and active else None,
-            live.outbound_attempt_id if live and calling else None,
+            live.outbound_attempt_id if live and connecting else None,
         )
         if identity != self._end_identity:
             if self.end.parent is not None:
                 self.end.parent.remove_widget(self.end)
             self.end = Action(
-                'Cancel' if calling else 'End Live',
+                'Cancel' if connecting else 'End Live',
                 partial(self._end_live, *identity),
                 tone='danger',
                 size_hint_x=None,
@@ -289,27 +283,21 @@ class PeerView(BoxLayout):
             if live and live.session_state != 'connected' and live.recovery_eligible
             else 'Connected · Live'
             if active
-            else 'Calling…'
-            if calling
+            else 'Connecting chat…'
+            if connecting
             else 'Incoming Live request'
             if live and live.session_state == 'pending'
             else 'No Live connection'
         )
         if self.route.delivery is Delivery.LIVE:
-            if active and self.auto_play.parent is None:
-                self.controls.add_widget(
-                    self.auto_play, index=len(self.controls.children)
-                )
-            elif not active and self.auto_play.parent is self.controls:
-                self.controls.remove_widget(self.auto_play)
-            show_controls = active or calling and self._end_parent is self.controls
+            show_controls = (active or connecting) and self._end_parent is self.controls
             if show_controls and self.controls.parent is None:
                 self.add_widget(self.controls, index=len(self.children) - 2)
             elif not show_controls and self.controls.parent is self:
                 self.remove_widget(self.controls)
-            if (active or calling) and self.end.parent is None:
+            if (active or connecting) and self.end.parent is None:
                 self._end_parent.add_widget(self.end)
-            elif not (active or calling) and self.end.parent is not None:
+            elif not (active or connecting) and self.end.parent is not None:
                 self.end.parent.remove_widget(self.end)
         self.end.disabled = self.connect.disabled = (
             state.busy
@@ -326,7 +314,7 @@ class PeerView(BoxLayout):
         if (
             self.route.delivery is Delivery.LIVE
             and not active
-            and not calling
+            and not connecting
             and (live is None or live.session_state == 'disconnected')
         ):
             if self.connect.parent is None:
@@ -338,7 +326,22 @@ class PeerView(BoxLayout):
             self.add_widget(self.status, index=1 if self.composer.parent is self else 0)
         elif not state.status and self.status.parent is self:
             self.remove_widget(self.status)
-        if self.route.delivery is Delivery.DROP or active:
+        draft_owned = bool(
+            peer in controller.voice.reviews
+            and controller.voice.reviews[peer or ''].binding.delivery
+            is self.route.delivery
+        )
+        recording_owned = bool(
+            controller.voice.press.binding
+            and controller.voice.press.binding.peer == peer
+            and controller.voice.press.binding.delivery is self.route.delivery
+        )
+        if (
+            self.route.delivery is Delivery.DROP
+            or active
+            or draft_owned
+            or recording_owned
+        ):
             if self.composer.parent is None:
                 self.add_widget(self.composer)
             self.composer.update()
@@ -369,5 +372,42 @@ class PeerView(BoxLayout):
                     or controller.voice.running
                     or controller.voice.recovery.pending is not None
                 )
-        elif self.retry_recording is not None and self.retry_recording.parent is self:
-            self.remove_widget(self.retry_recording)
+        else:
+            page = controller.inventory.page
+            interrupted = (
+                next(
+                    (
+                        item
+                        for item in page.messages
+                        if item.onion == peer
+                        and item.delivery is self.route.delivery
+                        and item.producer_interrupted
+                        and item.can_retry_finalization
+                    ),
+                    None,
+                )
+                if page is not None and peer not in controller.voice.reviews
+                else None
+            )
+            if interrupted is not None:
+                identity = (state.generation, interrupted.msg_id)
+                if identity != self._recovery_identity:
+                    if self.retry_recording is not None and self.retry_recording.parent:
+                        self.remove_widget(self.retry_recording)
+                    self.retry_recording = Action(
+                        'Review interrupted recording',
+                        partial(controller.voice.recovery.claim, interrupted),
+                    )
+                    self._recovery_identity = identity
+                assert self.retry_recording is not None
+                if self.retry_recording.parent is None:
+                    self.add_widget(self.retry_recording)
+                self.retry_recording.disabled = (
+                    state.busy
+                    or controller.voice.running
+                    or controller.voice.recovery.pending is not None
+                )
+            elif (
+                self.retry_recording is not None and self.retry_recording.parent is self
+            ):
+                self.remove_widget(self.retry_recording)

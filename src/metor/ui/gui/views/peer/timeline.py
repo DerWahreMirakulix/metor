@@ -27,6 +27,7 @@ from metor.ui.gui.widgets.voice import VoiceCard
 
 # Local Package Imports
 from ..actions import message_menu
+from ..audio import show_audio_routes
 
 
 @dataclass(frozen=True)
@@ -137,7 +138,9 @@ def projection(controller: GuiController, route: Route) -> list[TimelineRow]:
                 MessageDirectionCode.OUT,
                 turn.binding.msg_id,
                 turn.order,
-                None,
+                'Voice message sent as Drop'
+                if turn.actual_delivery is Delivery.DROP
+                else None,
                 'Queued as Drop'
                 if turn.actual_delivery is Delivery.DROP
                 else turn.status.value.capitalize()
@@ -355,8 +358,16 @@ class Timeline(BoxLayout):
         for key in list(self._widgets):
             if key not in visible:
                 self.column.remove_widget(self._widgets.pop(key))
+        widgets_changed = False
         for row in selected:
             widget = self._widgets.get(row.key)
+            if widget is not None and (row.text is None) != isinstance(
+                widget, VoiceCard
+            ):
+                self.column.remove_widget(widget)
+                self._widgets.pop(row.key)
+                widget = None
+                widgets_changed = True
             if widget is None:
                 if row.text is None:
                     target = self.controller.playback.target(
@@ -375,6 +386,9 @@ class Timeline(BoxLayout):
                         if self.route.delivery is Delivery.DROP
                         or row.direction is MessageDirectionCode.OUT
                         else None,
+                        configure_audio=partial(
+                            show_audio_routes, self.controller, self.refresh
+                        ),
                     )
                 else:
                     widget = MessageBubble(
@@ -392,7 +406,7 @@ class Timeline(BoxLayout):
                 widget.update(row.size, row.finalized, row.codec, row.metadata)
             elif row.text is not None:
                 widget.set_content(row.text, row.metadata)
-        if visible != self._visible:
+        if visible != self._visible or widgets_changed:
             desired = [
                 self._widgets[key] for key in reversed(visible) if key in self._widgets
             ]

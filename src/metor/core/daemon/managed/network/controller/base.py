@@ -1,6 +1,7 @@
 """Thin facade class for the modular connection controller package."""
 
 import threading
+import socket
 from typing import TYPE_CHECKING, Callable, Optional
 
 from metor.core.api import IpcEvent
@@ -47,6 +48,9 @@ class ConnectionController(
         stop_flag: threading.Event,
         config: 'Config',
         operation_lock: Optional[threading.RLock] = None,
+        retain_call_transport: Optional[
+            Callable[[socket.socket], Optional[str]]
+        ] = None,
     ) -> None:
         """
         Initializes the ConnectionController.
@@ -79,6 +83,7 @@ class ConnectionController(
         self._stop_flag: threading.Event = stop_flag
         self._config: 'Config' = config
         self._operation_lock = operation_lock or threading.RLock()
+        self._retain_call_transport = retain_call_transport
 
         self._receiver: Optional['StreamReceiver'] = None
         self._live_reconnect_queue: list[str] = []

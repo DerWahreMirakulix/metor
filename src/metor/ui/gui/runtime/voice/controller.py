@@ -1,6 +1,6 @@
 """GUI PTT eligibility, bounded review state and generation-safe capture results."""
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict
 import json
 import secrets
 from typing import TYPE_CHECKING
@@ -9,7 +9,6 @@ from metor.client.platform import CapturePort
 from metor.core.api import (
     Delivery,
     MessageDirectionCode,
-    MessageStatusCode,
     RetainedMessagesEvent,
     VoiceChunkAcceptedEvent,
     VoiceFinalizedEvent,
@@ -21,6 +20,7 @@ from metor.ui.gui.state.mailbox import Update
 
 # Local Package Imports
 from .capture import CaptureWorker
+from .models import LocalVoiceTurn as LocalVoiceTurn, VoiceReview as VoiceReview
 from .press import CaptureBinding, PressMachine, PressPhase, PressSource
 from .review import ReviewActions
 from .recovery import CaptureRecovery
@@ -28,29 +28,6 @@ from .routes import AudioRoutes
 
 if TYPE_CHECKING:
     from ..controller import GuiController
-
-
-@dataclass
-class VoiceReview:
-    """Volatile exact-owner review metadata, never a local audio file or sent message."""
-
-    binding: CaptureBinding
-    size_bytes: int
-    duration_ms: int | None
-    unknown: bool = False
-
-
-@dataclass
-class LocalVoiceTurn:
-    """Stable same-runtime LIVE placeholder and canonical capture metadata."""
-
-    binding: CaptureBinding
-    size_bytes: int = 0
-    duration_ms: int | None = None
-    finalized: bool = False
-    actual_delivery: Delivery = Delivery.LIVE
-    status: MessageStatusCode = MessageStatusCode.PENDING
-    order: int = 0
 
 
 class VoiceController:
@@ -126,42 +103,35 @@ class VoiceController:
         """
         count = len(self.live_turns)
         size = sum(self._turn_size(turn) for turn in self.live_turns.values())
+        pending = {
+            review.binding.msg_id: LocalVoiceTurn(review.binding)
+            for review in self.reviews.values()
+            if review.binding.delivery is Delivery.LIVE
+        }
+        count += len(pending)
+        size += sum(self._turn_size(turn) for turn in pending.values())
         binding = self.press.binding
         if (
             binding is not None
             and binding.delivery is Delivery.LIVE
             and binding.msg_id not in self.live_turns
+            and binding.msg_id not in pending
         ):
             count += 1
             size += self._turn_size(LocalVoiceTurn(binding))
         return count, size
 
     def _scope(self) -> tuple[str, str, str, Delivery, int | None] | None:
-        """Reads a foreground or explicitly continued public media scope.
+        """Reads an unlocked foreground message-recording scope.
 
         Args:
             None
         Returns:
             tuple[str, str, str, Delivery, int | None] | None: Profile, epoch, peer, delivery and logical context.
         """
-        controller, state = self.controller, self.controller.state
+        state = self.controller.state
         if state.covered:
-            scope = controller.security.continuation.scope
-            if (
-                scope is None
-                or controller.security.restriction is None
-                or controller.security.restoring
-            ):
-                return None
-            if scope.session_state in {'disconnected', 'pending'}:
-                return None
-            return (
-                scope.profile_instance,
-                scope.epoch,
-                scope.peer,
-                Delivery.LIVE,
-                scope.context_generation,
-            )
+            return None
         route, snapshot = state.route, state.snapshot
         if (
             snapshot is None
@@ -210,6 +180,8 @@ class VoiceController:
         if (
             scope is None
             or controller.purge.active
+            or controller.calls.active
+            or controller.calls.media_active
             or state.busy
             or controller.client is None
             or controller.voice_owner.token is None
@@ -217,16 +189,16 @@ class VoiceController:
             or not self.headset_confirmed
             or self.running
             or self.press.phase is not PressPhase.IDLE
-            or 'disposable_voice_owner' not in state.capabilities
+            or 'protected_voice_owner' not in state.capabilities
             or 'retained_message_identity' not in state.capabilities
+            or 'staged_voice_review' not in state.capabilities
         ):
             return False
         peer, delivery = scope[2], scope[3]
+        if peer in self.reviews or len(self.reviews) >= GuiLimits.REVIEW_CONTEXTS:
+            return False
         if delivery is Delivery.DROP:
-            return (
-                peer not in self.reviews
-                and len(self.reviews) < GuiLimits.REVIEW_CONTEXTS
-            )
+            return True
         return (
             controller.transcript.capacity()[0] > 0
             and 'live_context_identity' in state.capabilities
@@ -259,7 +231,7 @@ class VoiceController:
         if not self.press.down(source, binding, self.available() and metadata_fits):
             state.status = (
                 'Send or delete this recording first'
-                if route.delivery is Delivery.DROP and route.peer in self.reviews
+                if route.peer in self.reviews
                 else 'Release PTT'
                 if self.press.held
                 else 'Recording is unavailable'
@@ -338,31 +310,20 @@ class VoiceController:
         operation = update.operation.split(':', 1)[0]
         if operation == 'voice-start':
             self.press.accepted(binding)
-            if binding.delivery is Delivery.LIVE:
-                self.live_turns.setdefault(
-                    binding.msg_id,
-                    LocalVoiceTurn(
-                        binding, order=self.controller.transcript.next_order()
-                    ),
-                )
             self.controller.state.status = 'Recording…'
         elif operation == 'voice-progress' and isinstance(
             event, VoiceChunkAcceptedEvent
         ):
             self.accepted_bytes = event.next_offset
-            if binding.msg_id in self.live_turns:
-                self.live_turns[binding.msg_id].size_bytes = event.next_offset
         elif operation == 'voice-finished':
             size: int | None = None
             duration: int | None = None
-            actual_delivery = binding.delivery
             if (
                 isinstance(event, VoiceFinalizedEvent)
                 and event.msg_id == binding.msg_id
                 and event.onion == binding.peer
             ):
                 size, duration = event.size_bytes, event.duration_ms
-                actual_delivery = event.delivery or binding.delivery
             elif isinstance(event, RetainedMessagesEvent):
                 item = next(
                     (
@@ -377,22 +338,15 @@ class VoiceController:
                 )
                 if item is not None:
                     size, duration = item.size_bytes, item.duration_ms
-                    actual_delivery = item.delivery
             if size is None:
                 self.press.complete(binding, confirmed=False)
                 return True
             self.accepted_bytes = size
-            if binding.delivery is Delivery.DROP and size > 0:
+            if size > 0:
                 self.reviews[binding.peer] = VoiceReview(binding, size, duration)
-            if binding.msg_id in self.live_turns:
-                turn = self.live_turns[binding.msg_id]
-                turn.size_bytes, turn.duration_ms, turn.finalized = size, duration, True
-                turn.actual_delivery = actual_delivery
             self.press.complete(binding, confirmed=True)
             self.controller.state.status = update.status or (
-                'Recording ready to review'
-                if binding.delivery is Delivery.DROP and size > 0
-                else 'Recording finished'
+                'Recording ready to review' if size > 0 else 'Recording finished'
             )
         elif operation in {'voice-empty', 'voice-rejected'}:
             self.press.complete(binding, confirmed=True)

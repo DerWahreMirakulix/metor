@@ -35,7 +35,6 @@ from metor.core.api import (
     VoiceOwnerRegisteredEvent,
     VoiceOwnerReleasedEvent,
     VoiceStartedEvent,
-    IpcEvent,
 )
 from metor.core.daemon.managed.engine import Daemon
 from metor.core.daemon.managed.local_auth import create_session_auth_context
@@ -199,30 +198,30 @@ class GuiProducerTests(unittest.TestCase):
             )
         self.assertIsNone(self.repository.get('collision'))
 
-    def test_release_cleans_only_owner_drafts_and_preserves_generic_drafts(
-        self,
-    ) -> None:
-        """Restricted screen lock preserves staging; explicit owner release deletes it."""
-        payload = self.capture('disposable')
+    def test_release_freezes_owned_drafts_without_publishing(self) -> None:
+        """Restriction and owner loss keep a protected unsent recording for review."""
+        payload = self.capture('protected')
         self.other.begin_voice(self.onion, Delivery.DROP, 'generic', 'opus')
         self.client.request(RestrictClientCommand(), ClientRestrictedEvent)
-        self.assertIsNotNone(self.repository.get('disposable'))
         result = self.client.request(
             ReleaseVoiceOwnerCommand(self.owner), VoiceOwnerReleasedEvent
         )
         self.assertFalse(result.cleanup_pending)
-        self.assertIsNone(self.repository.get('disposable'))
-        self.assertIsNone(
-            self.messages.get_voice_payload(
-                self.onion, 'disposable', MessageDirection.OUT
-            )
+        item = self.repository.get('protected')
+        self.assertIsNotNone(item)
+        self.assertTrue(item.interrupted)
+        record = self.messages.get_voice_payload(
+            self.onion, 'protected', MessageDirection.OUT
         )
+        self.assertEqual(record.status, 'draft')
+        self.assertTrue(json.loads(record.payload)['finalized'])
+        self.assertEqual(self.messages.get_pending_outbox(), [])
+        self.assertEqual(self.messages.get_pending_live_outbox(), [])
         self.assertIsNotNone(
             self.messages.get_voice_payload(self.onion, 'generic', MessageDirection.OUT)
         )
         for blob_id in [payload['blob_id'], *payload['chunk_ids']]:
-            self.assertFalse(self.blobs.exists(blob_id, BlobLifecycle.TEMPORARY))
-            self.assertFalse(self.blobs.exists(blob_id, BlobLifecycle.PERSISTENT))
+            self.assertTrue(self.blobs.exists(blob_id, BlobLifecycle.TEMPORARY))
 
     def test_committed_drop_survives_unknown_commit_response(self) -> None:
         """Cleanup reconciles a committed receipt even when transfer bookkeeping is lost."""
@@ -250,18 +249,16 @@ class GuiProducerTests(unittest.TestCase):
             self.blobs.exists(payload['chunk_ids'][0], BlobLifecycle.PERSISTENT)
         )
 
-    def test_failed_blob_cleanup_is_journaled_and_retryable_after_receipt_removal(
-        self,
-    ) -> None:
-        """A deletion failure after SQL cancellation retains all object identifiers."""
+    def test_failed_explicit_discard_is_journaled_and_retryable(self) -> None:
+        """A deletion failure retains its exact inventory after SQL cancellation."""
         payload = self.capture('cleanup-failure')
         with patch.object(
             self.blobs, 'delete', side_effect=OSError('injected deletion failure')
         ):
-            result = self.client.request(
-                ReleaseVoiceOwnerCommand(self.owner), VoiceOwnerReleasedEvent
-            )
-        self.assertTrue(result.cleanup_pending)
+            with self.assertRaises(MetorRequestRejectedError):
+                self.client.cancel_voice(
+                    self.onion, 'cleanup-failure', owner_token=self.owner
+                )
         item = self.repository.get('cleanup-failure')
         self.assertEqual(json.loads(item.cleanup_payload), payload)
         self.assertIsNone(
@@ -277,7 +274,7 @@ class GuiProducerTests(unittest.TestCase):
         )
 
     def test_interrupted_live_finalizes_the_accepted_prefix(self) -> None:
-        """Producer revocation preserves authorized LIVE bytes through normal fallback."""
+        """Producer loss freezes LIVE as a local unsent draft without fallback."""
         self.capture('interrupted', Delivery.LIVE)
         with patch.object(self.messages, 'update_retained_bytes', return_value=False):
             result = self.client.request(
@@ -298,145 +295,55 @@ class GuiProducerTests(unittest.TestCase):
         self.assertTrue(item.producer_interrupted)
         self.assertTrue(item.can_retry_finalization)
         self.other.request(FinalizeVoiceCommand('interrupted'), VoiceFinalizedEvent)
-        self.assertIsNone(self.repository.get('interrupted'))
+        self.assertIsNotNone(self.repository.get('interrupted'))
+        self.assertNotEqual(self.repository.get('interrupted').owner_token, self.owner)
         record = self.messages.get_voice_payload(
             self.onion, 'interrupted', MessageDirection.OUT
         )
         metadata = json.loads(record.payload)
         self.assertTrue(metadata['finalized'])
         self.assertEqual(metadata['size_bytes'], 640)
+        self.assertEqual(record.status, 'draft')
+        self.assertEqual(record.delivery, 'live')
+        self.assertEqual(self.messages.get_pending_outbox(), [])
+        self.other.commit_voice(self.onion, 'interrupted', delivery=Delivery.DROP)
+        self.other.runtime_snapshot()
+        self.assertIsNone(self.repository.get('interrupted'))
 
-    def test_recovery_response_waits_for_release_and_broadcasts_uncorrelated(
-        self,
-    ) -> None:
-        """The recovery request completes only after producer ownership is gone."""
+    def test_orphan_review_rebinds_only_the_explicit_exact_identity(self) -> None:
+        """A recovered prefix remains a draft and belongs to the reclaiming client."""
         self.capture('barrier', Delivery.LIVE)
-        with patch.object(self.messages, 'update_retained_bytes', return_value=False):
-            result = self.client.request(
-                ReleaseVoiceOwnerCommand(self.owner), VoiceOwnerReleasedEvent
-            )
-        self.assertTrue(result.cleanup_pending)
-
-        first_observed = threading.Event()
-        second_observed = threading.Event()
-        first_events: list[VoiceFinalizedEvent] = []
-        second_events: list[VoiceFinalizedEvent] = []
-
-        def observe_first(event: IpcEvent) -> None:
-            if isinstance(event, VoiceFinalizedEvent) and event.msg_id == 'barrier':
-                first_events.append(event)
-                first_observed.set()
-
-        def observe_second(event: IpcEvent) -> None:
-            if isinstance(event, VoiceFinalizedEvent) and event.msg_id == 'barrier':
-                second_events.append(event)
-                second_observed.set()
-
-        self.client._on_event = observe_first
-        self.other._on_event = observe_second
-        release_entered = threading.Event()
-        allow_release = threading.Event()
-        original_release = self.repository.release
-
-        def release_with_barrier(item: object) -> None:
-            release_entered.set()
-            if not allow_release.wait(_PRODUCER_FIXTURE_TIMEOUT_SEC):
-                raise TimeoutError('test release barrier timed out')
-            original_release(item)
-
-        command = FinalizeVoiceCommand('barrier')
-        request_result: list[VoiceFinalizedEvent] = []
-        request_error: list[BaseException] = []
-
-        def recover() -> None:
-            try:
-                recovered = self.other.request(command, VoiceFinalizedEvent)
-                if recovered is not None:
-                    request_result.append(recovered)
-            except BaseException as exc:
-                request_error.append(exc)
-
-        with patch.object(
-            self.repository,
-            'release',
-            side_effect=release_with_barrier,
-        ):
-            worker = threading.Thread(target=recover)
-            worker.start()
-            self.assertTrue(release_entered.wait(_PRODUCER_FIXTURE_TIMEOUT_SEC))
-            self.assertTrue(first_observed.wait(_PRODUCER_FIXTURE_TIMEOUT_SEC))
-            self.assertTrue(second_observed.wait(_PRODUCER_FIXTURE_TIMEOUT_SEC))
-            self.assertTrue(worker.is_alive())
-            self.assertIsNotNone(self.repository.get('barrier'))
-            allow_release.set()
-            worker.join(_PRODUCER_FIXTURE_TIMEOUT_SEC)
-
-        self.assertFalse(worker.is_alive())
-        self.assertEqual(request_error, [])
-        self.assertEqual(len(request_result), 1)
-        self.assertEqual(request_result[0].request_id, command.request_id)
-        self.assertIsNone(self.repository.get('barrier'))
-        self.assertEqual(len(first_events), 1)
-        self.assertEqual(len(second_events), 1)
-        self.assertIsNone(first_events[0].request_id)
-        self.assertIsNone(second_events[0].request_id)
-
-        repeated = self.other.request(
-            FinalizeVoiceCommand('barrier'), VoiceFinalizedEvent
+        self.client.request(
+            ReleaseVoiceOwnerCommand(self.owner), VoiceOwnerReleasedEvent
         )
-        self.assertIsNotNone(repeated)
+        result = self.other.finalize_voice('barrier')
+        self.assertIsNotNone(result)
+        self.assertEqual(result.size_bytes, 640)
+        self.assertIsNotNone(self.repository.get('barrier'))
+        self.assertNotEqual(self.repository.get('barrier').owner_token, self.owner)
+        self.assertEqual(self.messages.get_pending_live_outbox(), [])
+        self.assertEqual(self.messages.get_pending_outbox(), [])
+        repeated = self.other.finalize_voice('barrier')
         self.assertEqual(repeated.size_bytes, 640)
+        with self.assertRaises(MetorRequestRejectedError):
+            self.client.cancel_voice(self.onion, 'barrier')
+        self.other.cancel_voice(self.onion, 'barrier')
         self.assertIsNone(self.repository.get('barrier'))
 
-    def test_recovery_reclaim_false_returns_no_success(self) -> None:
-        """A failed reclaim remains retryable and rejects the correlated request."""
+    def test_failed_recovery_never_reports_publication_or_finalization(self) -> None:
+        """Storage failure preserves exact claimed bytes and rejects completion."""
         self.capture('reclaim-false', Delivery.LIVE)
         with patch.object(self.messages, 'update_retained_bytes', return_value=False):
             result = self.client.request(
                 ReleaseVoiceOwnerCommand(self.owner), VoiceOwnerReleasedEvent
             )
-        self.assertTrue(result.cleanup_pending)
-        service = self.daemon._command_dispatcher._producers
-        false_success = VoiceFinalizedEvent(
-            msg_id='reclaim-false',
-            onion=self.onion,
-            direction=MessageDirectionCode.OUT,
-            delivery=Delivery.LIVE,
-            size_bytes=640,
-        )
-
-        with (
-            patch.object(service._cleanup, 'reclaim', return_value=False),
-            patch.object(
-                service._cleanup,
-                'finalization_result',
-                return_value=false_success,
-            ),
-            self.assertRaises(MetorRequestRejectedError) as raised,
-        ):
-            self.other.request(
-                FinalizeVoiceCommand('reclaim-false'), VoiceFinalizedEvent
-            )
-
-        self.assertEqual(
-            raised.exception.event.reason,
-            'persistence_failed',
-        )
+            self.assertTrue(result.cleanup_pending)
+            with self.assertRaises(MetorRequestRejectedError) as rejected:
+                self.other.finalize_voice('reclaim-false')
+        self.assertEqual(rejected.exception.event.reason, 'persistence_failed')
         self.assertIsNotNone(self.repository.get('reclaim-false'))
-
-        with (
-            patch.object(
-                service._cleanup,
-                'reclaim',
-                side_effect=OSError('injected reclaim failure'),
-            ),
-            self.assertRaises(MetorRequestRejectedError) as failed,
-        ):
-            self.other.request(
-                FinalizeVoiceCommand('reclaim-false'), VoiceFinalizedEvent
-            )
-        self.assertEqual(failed.exception.event.reason, 'persistence_failed')
-        self.assertIsNotNone(self.repository.get('reclaim-false'))
+        self.assertEqual(self.messages.get_pending_live_outbox(), [])
+        self.assertEqual(self.messages.get_pending_outbox(), [])
 
     def test_prewrite_journal_retains_a_blob_after_failed_admission_and_delete(
         self,
@@ -475,8 +382,8 @@ class GuiProducerTests(unittest.TestCase):
         )
         self.assertIsNone(self.repository.get('prewrite'))
 
-    def test_confirmed_disconnect_invalidates_lease_and_reclaims_draft(self) -> None:
-        """The actual IPC disconnect callback performs owner revocation and cleanup."""
+    def test_confirmed_disconnect_freezes_protected_unsent_draft(self) -> None:
+        """The actual IPC disconnect revokes input ownership and preserves review bytes."""
         payload = self.capture('lost-client')
         service = self.daemon._command_dispatcher._producers
         original = service.disconnect
@@ -489,8 +396,15 @@ class GuiProducerTests(unittest.TestCase):
         with patch.object(service, 'disconnect', side_effect=observe):
             self.client.disconnect()
             self.assertTrue(finished.wait(_PRODUCER_FIXTURE_TIMEOUT_SEC))
-        self.assertIsNone(self.repository.get('lost-client'))
-        self.assertFalse(
+        self.assertIsNotNone(self.repository.get('lost-client'))
+        self.assertTrue(self.repository.get('lost-client').interrupted)
+        self.assertEqual(
+            self.messages.get_voice_payload(
+                self.onion, 'lost-client', MessageDirection.OUT
+            ).status,
+            'draft',
+        )
+        self.assertTrue(
             self.blobs.exists(payload['chunk_ids'][0], BlobLifecycle.TEMPORARY)
         )
         with self.assertRaises(MetorRequestRejectedError):
@@ -547,10 +461,10 @@ class GuiProducerTests(unittest.TestCase):
         self.client.runtime_snapshot()
         self.assertIsNone(self.repository.get('ended-context'))
 
-    def test_restarted_owner_service_reclaims_orphans_without_restoring_gui_drafts(
+    def test_restarted_service_freezes_orphans_without_publishing(
         self,
     ) -> None:
-        """Fresh runtime ownership reconstructs cleanup from SQL, not a GUI list."""
+        """Fresh runtime reconstructs unsent protected prefixes from canonical SQL."""
         try:
             payload = self.capture('restart-draft')
         finally:
@@ -579,8 +493,15 @@ class GuiProducerTests(unittest.TestCase):
         )
         with self.daemon._domain_operation_lock:
             self.assertTrue(fresh.retry())
-        self.assertIsNone(self.repository.get('restart-draft'))
-        self.assertFalse(
+        self.assertIsNotNone(self.repository.get('restart-draft'))
+        self.assertTrue(self.repository.get('restart-draft').interrupted)
+        self.assertEqual(
+            self.messages.get_voice_payload(
+                self.onion, 'restart-draft', MessageDirection.OUT
+            ).status,
+            'draft',
+        )
+        self.assertTrue(
             self.blobs.exists(payload['chunk_ids'][0], BlobLifecycle.TEMPORARY)
         )
         self.assertIsNotNone(

@@ -58,6 +58,20 @@ def contact_sheet(
             )
             refresh()
 
+        def call() -> None:
+            """Starts an explicit phone call while preserving the invoking route."""
+            sheet.dismiss(animation=False)
+            controller.calls.start(peer)
+            refresh()
+
+        body.add_widget(
+            Action(
+                'Call',
+                call,
+                disabled=controller.state.busy
+                or 'calls' not in controller.state.capabilities,
+            )
+        )
         body.add_widget(Action('Open Drop', partial(selected, Delivery.DROP)))
         body.add_widget(
             Action(

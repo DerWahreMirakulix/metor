@@ -1,4 +1,4 @@
-"""Stable editable composer, held recording strip and exact-owner DROP review."""
+"""Stable editable composer, held recording strip and exact-owner DROP/LIVE review."""
 
 from collections.abc import Callable
 
@@ -12,6 +12,10 @@ from metor.ui.gui.state import Route
 from metor.ui.gui.theme import color, font_path
 from metor.ui.gui.widgets import Action, Label, Panel, TextField
 from metor.ui.gui.widgets.ptt import PttAction
+from metor.ui.gui.widgets.symbol import IconAction
+
+# Local Package Imports
+from ..audio import show_audio_routes
 
 
 class Composer(BoxLayout):
@@ -58,11 +62,16 @@ class Composer(BoxLayout):
         self.entry.use_handles = False
         self.entry.bind(text=self._edit)
         self.ptt = PttAction(controller, refresh)
-        self.send = Action(
-            'Send Drop' if route.delivery is Delivery.DROP else 'Send',
+        self.send = IconAction(
+            'send',
+            'Send Drop' if route.delivery is Delivery.DROP else 'Send Live message',
             lambda: controller.send_text(route.peer or '', route.delivery),
             surface=route.delivery.value,
             tone='onAccent',
+        )
+        self.setup = Action(
+            'Set up audio',
+            lambda: show_audio_routes(controller, refresh),
             size_hint_x=None,
             width=dp(148),
         )
@@ -74,14 +83,16 @@ class Composer(BoxLayout):
             size_hint_y=None,
             height=dp(200),
         )
-        self.review.add_widget(Label('Voice Drop · Unsent', role='support'))
+        self.review.bind(minimum_height=self.review.setter('height'))
+        self.review_title = Label('Voice message · Unsent', role='support')
+        self.review.add_widget(self.review_title)
         self.preview = Action('Play', self._play_review, disabled=True)
         self.review.add_widget(self.preview)
         self.duration = Label('', role='caption', tone='textSecondary')
         self.review.add_widget(self.duration)
         actions = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(12))
         self.delete = Action(
-            'Delete', lambda: self._review_action(False), tone='danger'
+            'Discard', lambda: self._review_action(False), tone='danger'
         )
         self.commit = Action(
             'Send Drop',
@@ -92,6 +103,17 @@ class Composer(BoxLayout):
         actions.add_widget(self.delete)
         actions.add_widget(self.commit)
         self.review.add_widget(actions)
+        self.alternatives = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(12))
+        self.as_drop = Action(
+            'Send as Drop',
+            lambda: self._review_action(True, Delivery.DROP),
+            surface='drop',
+            tone='onAccent',
+        )
+        self.reconnect = Action(
+            'Reconnect chat',
+            lambda: controller.live.start(route.peer or ''),
+        )
         self.recheck = Action(
             'Recheck recording',
             lambda: controller.voice.review_actions.check(route.peer or ''),
@@ -116,16 +138,19 @@ class Composer(BoxLayout):
             state.status = 'Draft limit reached, finish another draft'
         self.refresh()
 
-    def _review_action(self, send: bool) -> None:
+    def _review_action(self, send: bool, delivery: Delivery | None = None) -> None:
         """Runs one deliberate action on this route's owned recording.
 
         Args:
-            send: Whether the user selected Send rather than Delete.
+            send: Whether the user selected Send rather than Discard.
+            delivery: Explicit destination mode, otherwise preserve the recording mode.
         Returns:
             None
         """
         self.controller.playback.stop()
-        self.controller.voice.review_actions.act(self.route.peer or '', send=send)
+        self.controller.voice.review_actions.act(
+            self.route.peer or '', send=send, delivery=delivery
+        )
         self.refresh()
 
     def _play_review(self) -> None:
@@ -143,7 +168,7 @@ class Composer(BoxLayout):
         playback = self.controller.playback
         target = playback.target(
             peer,
-            Delivery.DROP,
+            review.binding.delivery,
             MessageDirectionCode.OUT,
             review.binding.msg_id,
             review=True,
@@ -170,7 +195,9 @@ class Composer(BoxLayout):
         voice, state = self.controller.voice, self.controller.state
         review = (
             voice.reviews.get(self.route.peer or '')
-            if self.route.delivery is Delivery.DROP
+            if voice.reviews.get(self.route.peer or '') is not None
+            and voice.reviews[self.route.peer or ''].binding.delivery
+            is self.route.delivery
             else None
         )
         mode = 'review' if review is not None else 'composer'
@@ -186,7 +213,13 @@ class Composer(BoxLayout):
                 and progress.target.msg_id == review.binding.msg_id
                 and progress.target.peer == self.route.peer
             )
-            self.preview.disabled = playback.audio is None or review.unknown
+            self.preview.disabled = (
+                state.covered
+                or playback.audio is None
+                or review.unknown
+                or self.controller.calls.active
+                or self.controller.calls.media_active
+            )
             self.preview.label.text = (
                 'Pause' if matching and playback.running else 'Play'
             )
@@ -203,13 +236,36 @@ class Composer(BoxLayout):
             self.duration.text = (
                 f'{(review.duration_ms or 0) / PcmVoice.MILLISECONDS:.1f} seconds'
             )
-            self.delete.disabled = self.commit.disabled = (
-                state.busy or review.unknown or voice.press.active
+            blocked = (
+                state.covered or state.busy or review.unknown or voice.press.active
             )
+            is_live = review.binding.delivery is Delivery.LIVE
+            live_ready = voice.review_actions.live_ready(review)
+            self.review_title.text = (
+                'Live voice message · Unsent' if is_live else 'Voice Drop · Unsent'
+            )
+            self.commit.label.text = 'Send Live' if is_live else 'Send Drop'
+            self.commit.surface = review.binding.delivery.value
+            self.delete.disabled = self.as_drop.disabled = blocked
+            self.commit.disabled = blocked or is_live and not live_ready
+            self.reconnect.disabled = (
+                blocked or self.controller.live.pending is not None
+            )
+            self.alternatives.clear_widgets()
+            if is_live:
+                self.alternatives.add_widget(self.as_drop)
+                if not live_ready:
+                    self.alternatives.add_widget(self.reconnect)
+                if self.alternatives.parent is None:
+                    self.review.add_widget(self.alternatives)
+            elif self.alternatives.parent is self.review:
+                self.review.remove_widget(self.alternatives)
             self.note.text = (
                 'Outcome unconfirmed'
                 if review.unknown
-                else 'Send or delete this recording to continue.'
+                else 'Live chat ended. Reconnect or explicitly send as Drop.'
+                if is_live and not live_ready
+                else 'Play, send or discard this recording.'
             )
             if review.unknown and self.recheck.parent is None:
                 self.add_widget(self.recheck)
@@ -225,7 +281,15 @@ class Composer(BoxLayout):
         phase = voice.press.phase.value
         self.entry.readonly = voice.press.active
         self.entry.disabled = voice.press.active
-        action = self.ptt if voice.press.active or not draft.strip() else self.send
+        action = (
+            self.ptt
+            if voice.press.active
+            else self.send
+            if draft.strip()
+            else self.setup
+            if not voice.headset_confirmed
+            else self.ptt
+        )
         if self.entry.parent is None:
             self.bar.add_widget(self.entry)
         if action is not self._action:
@@ -234,6 +298,7 @@ class Composer(BoxLayout):
             self.bar.add_widget(action)
             self._action = action
         self.send.disabled = state.busy or voice.press.active
+        self.setup.disabled = state.covered or self.controller.simulator
         # Disabling a held native button can swallow its release callback.
         self.ptt.disabled = (
             not voice.press.active and not voice.press.held and not voice.available()
@@ -258,7 +323,7 @@ class Composer(BoxLayout):
             if phase == 'failed'
             else ''
             if voice.headset_confirmed
-            else 'Choose a headset in Settings to record.'
+            else ''
         )
         if self.entry.local_keyboard_visible:
             self.note.text = ''

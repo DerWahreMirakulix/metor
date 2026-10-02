@@ -200,7 +200,7 @@ class SettingsCoreTests(unittest.TestCase):
         newer = h.other.request(
             SetGuiPreferencesCommand(
                 displayed.preferences_revision,
-                replace(displayed.preferences, auto_play=True),
+                replace(displayed.preferences, show_profile_locked=True),
             ),
             GuiPreferencesEvent,
         )
@@ -218,7 +218,7 @@ class SettingsCoreTests(unittest.TestCase):
             if not gui.state.busy and not gui.preferences.refresh_needed:
                 break
         current = h.client.request(GetGuiPreferencesCommand(), GuiPreferencesEvent)
-        self.assertTrue(current.preferences.auto_play)
+        self.assertTrue(current.preferences.show_profile_locked)
         self.assertEqual(
             current.preferences.idle_seconds, displayed.preferences.idle_seconds
         )
@@ -439,7 +439,7 @@ class SettingsCoreTests(unittest.TestCase):
             return result
 
         with patch.object(h.client, 'request', side_effect=lost):
-            proposed = replace(displayed.preferences, auto_play=True)
+            proposed = replace(displayed.preferences, show_profile_locked=True)
             self.assertTrue(
                 gui.preferences.save(proposed, displayed.preferences_revision)
             )
@@ -447,7 +447,7 @@ class SettingsCoreTests(unittest.TestCase):
                 if gui._worker is not None:
                     gui._worker.join(5)
                 gui.poll()
-            self.assertFalse(gui.state.preferences.preferences.auto_play)
+            self.assertFalse(gui.state.preferences.preferences.show_profile_locked)
             self.assertFalse(
                 gui.preferences.save(proposed, displayed.preferences_revision)
             )
@@ -458,12 +458,12 @@ class SettingsCoreTests(unittest.TestCase):
                 if gui._worker is not None:
                     gui._worker.join(5)
                 gui.poll()
-            self.assertTrue(gui.state.preferences.preferences.auto_play)
+            self.assertTrue(gui.state.preferences.preferences.show_profile_locked)
             self.assertIn('unconfirmed', gui.state.status)
             current = gui.state.preferences
             self.assertTrue(
                 gui.preferences.save(
-                    replace(current.preferences, auto_play=False),
+                    replace(current.preferences, show_profile_locked=False),
                     current.preferences_revision,
                 )
             )
@@ -471,7 +471,7 @@ class SettingsCoreTests(unittest.TestCase):
                 gui._worker.join(5)
             gui.poll()
         self.assertEqual(len(writes), 2)
-        self.assertFalse(gui.state.preferences.preferences.auto_play)
+        self.assertFalse(gui.state.preferences.preferences.show_profile_locked)
 
     def settle(self, gui: GuiController) -> None:
         """Waits for finite local writes and their authoritative descriptor readback.

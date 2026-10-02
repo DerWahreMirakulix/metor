@@ -115,6 +115,32 @@ class DropCoreTests(unittest.TestCase):
         self.assertIsNone(self.gui.drop.pending)
         self.assertFalse(self.gui.receipts.busy)
 
+    def test_first_text_drop_appears_in_open_archive_without_live_connection(
+        self,
+    ) -> None:
+        """The production send/result/poll path updates the same route and clears its draft."""
+        route = Route('V08', self.h.onion, Delivery.DROP)
+        self.gui.navigate(route)
+        self.gui.state.set_draft(self.h.onion, Delivery.DROP, 'first drop')
+        for _ in range(12):
+            if self.gui._worker is not None:
+                self.gui._worker.join(5)
+            self.gui.poll()
+        self.assertFalse(self.gui.state.busy)
+        self.assertFalse(self.gui.state.snapshot.live_contexts)
+        self.gui.send_text(self.h.onion, Delivery.DROP)
+        for _ in range(12):
+            if self.gui._worker is not None:
+                self.gui._worker.join(5)
+            self.gui.poll()
+            if self.gui.messages is not None and self.gui.messages.messages:
+                break
+        self.assertEqual(self.gui.state.route, route)
+        self.assertNotIn((self.h.onion, Delivery.DROP), self.gui.state.drafts)
+        self.assertIsNotNone(self.gui.messages)
+        self.assertEqual(len(self.gui.messages.messages), 1)
+        self.assertEqual(self.gui.messages.messages[0].content.text, 'first drop')
+
     def test_lost_delete_result_reads_archive_presence_with_exact_direction(
         self,
     ) -> None:

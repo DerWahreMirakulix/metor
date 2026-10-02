@@ -82,7 +82,7 @@ class MessageRepository(
         if owner_token is None:
             clauses.append(
                 "NOT (r.direction = 'out' AND r.status = 'draft' AND EXISTS "
-                '(SELECT 1 FROM voice_producer_items AS p WHERE p.msg_id = r.msg_id))'
+                '(SELECT 1 FROM voice_producer_items AS p WHERE p.msg_id = r.msg_id AND p.interrupted = 0))'
             )
         else:
             clauses.append(
@@ -182,6 +182,7 @@ class MessageRepository(
         finalized = content_type is ContentType.TEXT
         codec: Optional[str] = None
         duration_ms: Optional[int] = None
+        context_generation: Optional[int] = None
         if content_type is ContentType.VOICE:
             payload = str(row[8])
             try:
@@ -196,6 +197,9 @@ class MessageRepository(
                 raw_duration = metadata.get('duration_ms')
                 if type(raw_duration) is int and raw_duration >= 0:
                     duration_ms = raw_duration
+                raw_context = metadata.get('context_generation')
+                if type(raw_context) is int and raw_context > 0:
+                    context_generation = raw_context
         return RetainedMessageRecord(
             peer_onion=str(row[1]),
             direction=MessageDirection(str(row[2])),
@@ -208,6 +212,7 @@ class MessageRepository(
             codec=codec,
             duration_ms=duration_ms,
             producer_interrupted=bool(row[9]),
+            context_generation=context_generation,
         )
 
     def list_retained_messages(
@@ -359,6 +364,7 @@ class MessageRepository(
         created_at: str = timestamp if timestamp else self._now()
         visible_in_history: int = int(
             delivery is Delivery.DROP
+            and status is not MessageStatus.DRAFT
             and (
                 content_type is not ContentType.VOICE
                 or self._voice_payload_finalized(payload)

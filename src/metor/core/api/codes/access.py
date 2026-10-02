@@ -11,14 +11,6 @@ class ClientUnlockMethod(str, Enum):
     NONE = 'none'
 
 
-class LockedAcceptPolicy(str, Enum):
-    """Incoming LIVE acceptance allowed to one restricted client."""
-
-    ALL = 'all'
-    SAVED_CONTACTS = 'saved_contacts'
-    NONE = 'none'
-
-
 class NotificationPrivacy(str, Enum):
     """Identity metadata visible to one restricted client."""
 

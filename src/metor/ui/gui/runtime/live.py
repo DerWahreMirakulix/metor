@@ -1,6 +1,5 @@
 """Explicit LIVE fallback and dismissal using canonical Core outcomes."""
 
-from collections import deque
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -97,7 +96,7 @@ class LiveActions:
         Args:
             peer: Immutable displayed peer.
             context_generation: Exact logical End Live identity.
-            attempt_id: Exact current calling identity for Cancel.
+            attempt_id: Exact current chat invitation identity for Cancel.
         Returns:
             bool: Whether the explicitly requested end sequence was admitted.
         """
@@ -108,7 +107,7 @@ class LiveActions:
             context_generation is None and attempt_id is None
         ):
             controller.state.status = (
-                'This service cannot safely identify the displayed call'
+                'This service cannot safely identify the displayed chat invitation'
             )
             return False
         binding = controller.voice.press.binding
@@ -175,6 +174,12 @@ class LiveActions:
         ):
             state.status = 'Confirm the pending send before closing Live'
             return False
+        review = controller.voice.reviews.get(peer)
+        if review is not None and review.binding.delivery is Delivery.LIVE:
+            state.status = (
+                'Send or discard the unsent voice recording before closing this chat'
+            )
+            return False
         binding = controller.voice.press.binding
         if binding is not None and binding.peer == peer:
             state.status = 'Finish recording before closing Live'
@@ -211,7 +216,7 @@ class LiveActions:
             kind: Internal explicit fallback/close operation.
             msg_ids: Optional direction-qualified outbound selection.
             context_generation: Original logical End identity.
-            attempt_id: Original calling identity.
+            attempt_id: Original chat invitation identity.
         Returns:
             bool: Whether the current client accepted the request.
         """
@@ -286,15 +291,17 @@ class LiveActions:
             and isinstance(event, ConnectionConnectingEvent)
             and event.onion == mutation.peer
         ):
-            status = 'Calling…'
+            status = 'Connecting chat…'
         elif (
             mutation.kind == 'end'
             and isinstance(event, LiveControlCompletedEvent)
             and event.onion == mutation.peer
         ):
-            status = 'Call cancelled' if mutation.attempt_id else 'Live ended'
+            status = (
+                'Chat invitation cancelled' if mutation.attempt_id else 'Live ended'
+            )
         elif isinstance(event, LiveControlRejectedEvent):
-            status = 'The call changed. Current state is being refreshed.'
+            status = 'The Live chat changed. Current state is being refreshed.'
         elif (
             mutation.kind == 'route'
             and isinstance(event, RetunnelInitiatedEvent)
@@ -314,6 +321,8 @@ class LiveActions:
             for msg_id in event.msg_ids:
                 self.confirm_fallback(mutation.peer, msg_id)
             controller.inventory.reset()
+            if controller.state.route == Route('V09', mutation.peer, Delivery.LIVE):
+                controller.navigate(Route('V08', mutation.peer, Delivery.DROP))
             status = (
                 str(event.count) + ' queued as Drop' + ('s' if event.count != 1 else '')
             )
@@ -375,13 +384,6 @@ class LiveActions:
         for msg_id, turn in tuple(controller.voice.live_turns.items()):
             if turn.binding.peer == peer:
                 del controller.voice.live_turns[msg_id]
-        auto = controller.playback.auto
-        auto.overrides = {
-            key: value for key, value in auto.overrides.items() if key[0] != peer
-        }
-        auto.queue = deque(
-            (target, key) for target, key in auto.queue if target.peer != peer
-        )
         if (
             controller.state.route.peer == peer
             and controller.state.route.delivery is Delivery.LIVE

@@ -61,7 +61,7 @@ class GuiMetadataTests(unittest.TestCase):
         self.assertEqual(initial.preferences, GuiPreferences())
         self.assertEqual(initial.preferences_revision, 0)
         self.assertEqual(len(initial.profile_instance_id), 32)
-        updated = replace(initial.preferences, auto_play=True, keyboard_layout='qwertz')
+        updated = replace(initial.preferences, keyboard_layout='qwertz')
         command = SetGuiPreferencesCommand(0, updated)
         wire = IpcCommand.from_dict(json.loads(command.to_json()))
         self.assertEqual(wire, command)
@@ -78,15 +78,59 @@ class GuiMetadataTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             IpcCommand.from_dict(payload)
 
+    def test_retired_privileges_migrate_without_authorizing_calls(self) -> None:
+        """Old message-media permissions never become Call consent under migration."""
+        legacy = {
+            'auto_play': True,
+            'keep_live_locked': True,
+            'accept_live_locked': 'all',
+            'keyboard_layout': 'qwertz',
+        }
+        self.sql.metadata.write_gui(0, json.dumps(legacy))
+        result = self.handler.handle(GetGuiPreferencesCommand(), self.connection)
+        self.assertIsInstance(result, GuiPreferencesEvent)
+        self.assertFalse(result.preferences.accept_calls_locked)
+        self.assertEqual(result.preferences.keyboard_layout, 'qwertz')
+        self.assertEqual(result.preferences_revision, 2)
+        stored = json.loads(self.sql.metadata.read_gui()[1])
+        self.assertNotIn('auto_play', stored)
+        self.assertNotIn('keep_live_locked', stored)
+        self.assertNotIn('accept_live_locked', stored)
+        self.assertFalse(stored['accept_calls_locked'])
+        again = self.handler.handle(GetGuiPreferencesCommand(), self.connection)
+        self.assertEqual(again.preferences_revision, 2)
+        self.assertEqual(self.notify.call_count, 1)
+
+    def test_call_lock_acceptance_requires_full_auth_and_retired_wire_is_rejected(
+        self,
+    ) -> None:
+        """A limited session cannot weaken locked consent or submit obsolete policies."""
+        self.full_auth.return_value = False
+        result = self.handler.handle(
+            SetGuiPreferencesCommand(0, GuiPreferences(accept_calls_locked=True)),
+            self.connection,
+        )
+        self.assertEqual(result.reason, GuiPreferenceFailure.FULL_AUTH_REQUIRED)
+        self.assertEqual(self.sql.metadata.read_gui(), (0, None))
+        for name, value in (
+            ('auto_play', True),
+            ('keep_live_locked', True),
+            ('accept_live_locked', 'all'),
+        ):
+            payload = json.loads(SetGuiPreferencesCommand().to_json())
+            payload['preferences'][name] = value
+            with self.subTest(name=name), self.assertRaises(TypeError):
+                IpcCommand.from_dict(payload)
+
     def test_stale_writer_cannot_overwrite_or_notify(self) -> None:
         """Compare-and-swap protects settings changed by another authenticated client."""
-        first = SetGuiPreferencesCommand(0, GuiPreferences(auto_play=True))
+        first = SetGuiPreferencesCommand(0, GuiPreferences(keyboard_layout='qwertz'))
         result = self.handler.handle(first, self.connection)
         self.assertIsInstance(result, GuiPreferencesEvent)
         stale = self.handler.handle(SetGuiPreferencesCommand(), self.connection)
         self.assertEqual(stale.reason, GuiPreferenceFailure.CONFLICT)
         current = self.handler.handle(GetGuiPreferencesCommand(), self.connection)
-        self.assertTrue(current.preferences.auto_play)
+        self.assertEqual(current.preferences.keyboard_layout, 'qwertz')
         self.assertEqual(current.preferences_revision, 1)
         self.assertEqual(self.notify.call_count, 1)
 
@@ -105,7 +149,8 @@ class GuiMetadataTests(unittest.TestCase):
         self.assertEqual(denied.reason, GuiPreferenceFailure.FULL_AUTH_REQUIRED)
         self.assertEqual(self.sql.metadata.read_gui(), (0, None))
         allowed = self.handler.handle(
-            SetGuiPreferencesCommand(0, GuiPreferences(auto_play=True)), self.connection
+            SetGuiPreferencesCommand(0, GuiPreferences(keyboard_layout='qwertz')),
+            self.connection,
         )
         self.assertIsInstance(allowed, GuiPreferencesEvent)
         self.full_auth.return_value = True
@@ -124,6 +169,19 @@ class GuiMetadataTests(unittest.TestCase):
             self.connection,
         )
         self.assertIsInstance(accepted, GuiPreferencesEvent)
+
+    def test_core_call_acceptance_reads_only_valid_protected_preferences(self) -> None:
+        """Restriction policy comes from SQL metadata rather than a client's claimed flag."""
+        self.assertFalse(self.handler.call_lock_acceptance_enabled())
+        result = self.handler.handle(
+            SetGuiPreferencesCommand(0, GuiPreferences(accept_calls_locked=True)),
+            self.connection,
+        )
+        self.assertIsInstance(result, GuiPreferencesEvent)
+        self.assertTrue(self.handler.call_lock_acceptance_enabled())
+        revision, _payload = self.sql.metadata.read_gui()
+        self.sql.metadata.write_gui(revision, '{"accept_calls_locked":1}')
+        self.assertFalse(self.handler.call_lock_acceptance_enabled())
 
     def test_plaintext_profile_never_persists_gui_peer_metadata(self) -> None:
         """No plaintext namespace is created when profile protection is unavailable."""
@@ -151,7 +209,7 @@ class GuiMetadataTests(unittest.TestCase):
         """Malformed identities, policy types and over-budget values never persist."""
         for kwargs in (
             {'idle_seconds': True},
-            {'auto_play': 1},
+            {'accept_calls_locked': 1},
             {'pins': ['invalid']},
             {'pins': ['x'] * 129},
             {'keyboard_layout': 'unknown'},

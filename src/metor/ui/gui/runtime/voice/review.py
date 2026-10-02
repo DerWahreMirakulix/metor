@@ -1,4 +1,4 @@
-"""Exact-ID DROP review actions and reconciliation of uncertain commit outcomes."""
+"""Exact-ID DROP/LIVE review actions and reconciliation of uncertain commit outcomes."""
 
 from typing import TYPE_CHECKING
 
@@ -10,8 +10,15 @@ from metor.core.api import (
     MessageStatusCode,
     VoiceCancelledEvent,
     VoiceCommittedEvent,
+    VoiceOperationRejectedEvent,
 )
+from metor.ui.gui.state import Route
 from metor.ui.gui.state.mailbox import Update
+from metor.ui.gui.state.media import PlaybackTarget
+from metor.ui.gui.constants import GuiLimits
+
+# Local Package Imports
+from .models import LocalVoiceTurn, VoiceReview
 
 if TYPE_CHECKING:
     from .controller import VoiceController
@@ -31,12 +38,13 @@ class ReviewActions:
         self.voice = voice
         self._checks: set[str] = set()
 
-    def act(self, peer: str, *, send: bool) -> bool:
-        """Explicitly commits or cancels one known owned DROP review.
+    def act(self, peer: str, *, send: bool, delivery: Delivery | None = None) -> bool:
+        """Explicitly publishes or cancels an exact owned message review.
 
         Args:
             peer: Canonical review peer captured by the control.
-            send: True commits the existing ID; False cancels it.
+            send: True publishes the existing ID; False cancels it.
+            delivery: Explicit DROP conversion, or the recording's original mode.
         Returns:
             bool: Whether the exact action was admitted.
         """
@@ -55,15 +63,83 @@ class ReviewActions:
         binding = review.binding
         if binding.generation != controller.state.generation:
             return False
+        selected = delivery or binding.delivery
+        if selected not in {binding.delivery, Delivery.DROP}:
+            return False
+        if send and selected is Delivery.LIVE and not self.live_ready(review):
+            controller.state.status = (
+                'Reconnect this Live chat or send the recording as Drop'
+            )
+            return False
         kind = 'commit' if send else 'cancel'
         return controller.submit(
             'review:' + kind + ':' + binding.msg_id,
             lambda: (
-                client.commit_voice(peer, binding.msg_id, owner_token=owner)
+                client.commit_voice(
+                    peer,
+                    binding.msg_id,
+                    owner_token=owner,
+                    delivery=selected,
+                    context_generation=binding.context_generation,
+                )
                 if send
                 else client.cancel_voice(peer, binding.msg_id, owner_token=owner)
             ),
         )
+
+    def live_ready(self, review: VoiceReview) -> bool:
+        """Checks the original chat identity without authorizing or opening a transport.
+
+        Args:
+            review: Exact draft whose target cannot follow a replaced chat.
+        Returns:
+            bool: Whether the same confirmed logical chat can publish now.
+        """
+        snapshot = self.voice.controller.state.snapshot
+        return bool(
+            snapshot
+            and review.binding.context_generation is not None
+            and any(
+                item.onion == review.binding.peer
+                and item.context_generation == review.binding.context_generation
+                and item.session_state == 'connected'
+                for item in snapshot.live_contexts
+            )
+        )
+
+    def _publish_cache(self, staged: PlaybackTarget) -> None:
+        """Retains confirmed local replay bytes only after actual LIVE publication.
+
+        Args:
+            staged: Exact-owner preview cache identity.
+        Returns:
+            None
+        """
+        cache = self.voice.controller.playback.cache
+        size = cache.complete_size(staged)
+        if size is None:
+            return
+        published = PlaybackTarget(
+            staged.generation,
+            staged.profile_instance,
+            staged.epoch,
+            staged.peer,
+            Delivery.LIVE,
+            staged.direction,
+            staged.msg_id,
+        )
+        offset = 0
+        while offset < size:
+            retained = cache.read(staged, offset, GuiLimits.MEDIA_CACHE_BLOCK_BYTES)
+            if retained is None:
+                return
+            payload, _size = retained
+            if not payload:
+                return
+            if not cache.append(published, offset, payload, complete=False):
+                return
+            offset += len(payload)
+        cache.mark_complete(published, size)
 
     def check(self, peer: str) -> bool:
         """Reads the exact receipt without retrying a send or discarding uncertain data.
@@ -87,6 +163,7 @@ class ReviewActions:
                 ),
                 MessageOutcomeEvent,
             ),
+            background=True,
         )
 
     def poll(self) -> None:
@@ -109,7 +186,7 @@ class ReviewActions:
         Args:
             update: Current-generation operation response.
         Returns:
-            bool: Whether the update belongs to DROP review orchestration.
+            bool: Whether the update belongs to message review orchestration.
         """
         if not update.operation.startswith('review:'):
             return False
@@ -136,7 +213,6 @@ class ReviewActions:
             and event.msg_id == msg_id
             and event.onion == peer
             and event.direction is MessageDirectionCode.OUT
-            and event.delivery is Delivery.DROP
         ):
             if event.status is MessageStatusCode.DRAFT:
                 review.unknown = False
@@ -147,11 +223,42 @@ class ReviewActions:
                 MessageStatusCode.DELIVERED,
                 MessageStatusCode.READ,
             }
+        if (
+            isinstance(event, VoiceOperationRejectedEvent)
+            and event.msg_id == msg_id
+            and event.onion == peer
+        ):
+            review.unknown = False
+            self.voice.controller.state.status = (
+                'Recording remains unsent. Reconnect or explicitly send as Drop.'
+                if review.binding.delivery is Delivery.LIVE
+                else 'Recording remains unsent'
+            )
+            return True
         if confirmed:
             playback = self.voice.controller.playback
             target = playback.target(
-                peer, Delivery.DROP, MessageDirectionCode.OUT, msg_id, review=True
+                peer,
+                review.binding.delivery,
+                MessageDirectionCode.OUT,
+                msg_id,
+                review=True,
             )
+            delivery = (
+                event.delivery
+                if isinstance(event, (VoiceCommittedEvent, MessageOutcomeEvent))
+                else review.binding.delivery
+            )
+            if delivery is Delivery.LIVE and not isinstance(event, VoiceCancelledEvent):
+                self.voice.live_turns[msg_id] = LocalVoiceTurn(
+                    review.binding,
+                    review.size_bytes,
+                    review.duration_ms,
+                    finalized=True,
+                    order=self.voice.controller.transcript.next_order(),
+                )
+                if target is not None:
+                    self._publish_cache(target)
             if target is not None:
                 playback.cache.discard(target)
             self.voice.reviews.pop(peer, None)
@@ -165,8 +272,18 @@ class ReviewActions:
                 else 'Drop delivered'
                 if isinstance(event, MessageOutcomeEvent)
                 and event.status is MessageStatusCode.DELIVERED
+                else 'Live voice message sent'
+                if delivery is Delivery.LIVE
                 else 'Drop queued'
             )
+            if (
+                delivery is Delivery.DROP
+                and review.binding.delivery is Delivery.LIVE
+                and not isinstance(event, VoiceCancelledEvent)
+                and self.voice.controller.state.route
+                == Route('V09', peer, Delivery.LIVE)
+            ):
+                self.voice.controller.navigate(Route('V08', peer, Delivery.DROP))
             self.voice.controller.refresh_state()
         else:
             review.unknown = True

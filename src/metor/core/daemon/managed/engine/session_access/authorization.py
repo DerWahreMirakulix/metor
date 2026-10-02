@@ -7,20 +7,18 @@ import time
 from typing import Optional
 
 from metor.core.api import (
+    AcceptCallCommand,
+    CancelCallCommand,
+    GetCallsCommand,
+    HangupCallCommand,
+    MuteCallCommand,
+    ReadCallAudioCommand,
+    RejectCallCommand,
+    SendCallAudioCommand,
     AuthenticateSessionCommand,
     AcceptCommand,
-    AppendVoiceChunkCommand,
-    BeginVoiceCommand,
     ReleaseVoiceOwnerCommand,
     ConfigureQuickUnlockCommand,
-    Delivery,
-    FinalizeVoiceCommand,
-    GetVoiceChunkCommand,
-    ListRetainedMessagesCommand,
-    MessageDirectionCode,
-    LockedAcceptPolicy,
-    NotificationPrivacy,
-    ReleaseVoiceCommand,
     ReauthorizeClientCommand,
     GetRestrictedClientStateCommand,
     RejectCommand,
@@ -29,7 +27,6 @@ from metor.core.api import (
     EventType,
     IpcCommand,
     create_event,
-    NoPendingConnectionEvent,
 )
 from metor.utils import Constants
 
@@ -40,8 +37,8 @@ from ...local_auth import (
 )
 from typing import TYPE_CHECKING
 
-from .calls import authorize_action
-from .continuation import restricted_state
+from .invitations import authorize_action
+from .restricted_state import restricted_state
 
 if TYPE_CHECKING:
     from .controller import SessionAccessController
@@ -74,23 +71,6 @@ def authorize(
             return False
         if isinstance(cmd, ReleaseVoiceOwnerCommand):
             return True
-        mapped_call_target = False
-        mapped_call_handle: Optional[str] = None
-        if isinstance(cmd, (AcceptCommand, RejectCommand)):
-            with self._lock:
-                mapped_target = self._call_handles.get(conn, {}).get(
-                    cmd.action_handle or cmd.target
-                )
-            if mapped_target is not None and self._valid_call_grant(
-                conn, mapped_target
-            ):
-                mapped_call_handle = cmd.action_handle or cmd.target
-                cmd.action_handle = mapped_call_handle
-                cmd.target = mapped_target.onion
-                mapped_call_target = True
-            if cmd.action_handle is not None and not mapped_call_target:
-                self._send(conn, NoPendingConnectionEvent(alias='unknown'))
-                return False
         if isinstance(cmd, ReauthorizeClientCommand):
             restricted_retry_after = self.retry_after_seconds()
             if restricted_retry_after is not None:
@@ -107,121 +87,24 @@ def authorize(
                 and not self._self_destruct_requires_unlock()
             ):
                 return True
-        if isinstance(cmd, RejectCommand):
-            if (
-                restricted_policy.notification_privacy is NotificationPrivacy.ANONYMIZE
-                and not mapped_call_target
-            ):
-                self._send(
-                    conn,
-                    create_event(
-                        EventType.CLIENT_ACCESS_RESTRICTED,
-                        {'command': cmd.command_type.value},
-                    ),
-                )
-                return False
-            if mapped_call_target:
-                self._consume_call_handle(conn, mapped_call_handle)
+        if isinstance(cmd, GetCallsCommand):
+            # Handler returns only privacy-scoped owned/incoming Call metadata.
             return True
-        if isinstance(cmd, AcceptCommand):
-            if (
-                restricted_policy.notification_privacy is NotificationPrivacy.ANONYMIZE
-                and not mapped_call_target
-            ):
-                self._send(
-                    conn,
-                    create_event(
-                        EventType.CLIENT_ACCESS_RESTRICTED,
-                        {'command': cmd.command_type.value},
-                    ),
-                )
-                return False
-            if restricted_policy.accept_while_locked is LockedAcceptPolicy.ALL:
-                if mapped_call_target:
-                    self._consume_call_handle(conn, mapped_call_handle)
-                return True
-            if (
-                restricted_policy.accept_while_locked
-                is LockedAcceptPolicy.SAVED_CONTACTS
-                and self._is_saved_contact(cmd.target)
-            ):
-                if mapped_call_target:
-                    self._consume_call_handle(conn, mapped_call_handle)
-                return True
-        if (
-            isinstance(cmd, BeginVoiceCommand)
-            and cmd.delivery is Delivery.LIVE
-            and restricted_policy.live_while_locked
-            and restricted_policy.continued_live_target
-            == self._resolve_target(cmd.target)
-            and restricted_policy.continued_live_context is not None
-            and self._live_context(restricted_policy.continued_live_target or '')
-            == restricted_policy.continued_live_context
-        ):
+        if isinstance(cmd, RejectCallCommand):
             return True
-        if isinstance(cmd, (AppendVoiceChunkCommand, FinalizeVoiceCommand)):
-            if (
-                restricted_policy.live_while_locked
-                and restricted_policy.continued_live_context is not None
-                and restricted_policy.continued_live_target
-                == self._voice_target(cmd.msg_id)
-                and self._voice_delivery(cmd.msg_id) is Delivery.LIVE
-                and self._voice_context(
-                    restricted_policy.continued_live_target or '', cmd.msg_id, 'out'
-                )
-                == restricted_policy.continued_live_context
-                and self._live_context(restricted_policy.continued_live_target or '')
-                == restricted_policy.continued_live_context
-            ):
-                return True
-        if isinstance(cmd, ListRetainedMessagesCommand):
-            target = (
-                self._resolve_target(cmd.target) if cmd.target is not None else None
-            )
-            if (
-                cmd.msg_id is not None
-                and cmd.owner_token is not None
-                and cmd.direction is MessageDirectionCode.OUT
-                and cmd.cursor is None
-                and restricted_policy.live_while_locked
-                and restricted_policy.continued_live_context is not None
-                and target is not None
-                and target == restricted_policy.continued_live_target
-                and self._voice_context(target, cmd.msg_id, 'out')
-                == restricted_policy.continued_live_context
-                and self._live_context(target)
-                == restricted_policy.continued_live_context
-            ):
-                return True
-        if isinstance(cmd, GetVoiceChunkCommand):
-            target = self._resolve_target(cmd.target)
-            if (
-                cmd.direction.value == 'in'
-                and restricted_policy.live_while_locked
-                and restricted_policy.continued_live_context is not None
-                and target == restricted_policy.continued_live_target
-                and target is not None
-                and self._inbound_voice_delivery(target, cmd.msg_id) is Delivery.LIVE
-                and self._voice_context(target, cmd.msg_id, 'in')
-                == restricted_policy.continued_live_context
-                and self._live_context(target)
-                == restricted_policy.continued_live_context
-            ):
-                return True
-        if isinstance(cmd, ReleaseVoiceCommand):
-            target = self._resolve_target(cmd.target)
-            if (
-                restricted_policy.live_while_locked
-                and restricted_policy.continued_live_context is not None
-                and target == restricted_policy.continued_live_target
-                and target is not None
-                and self._inbound_voice_delivery(target, cmd.msg_id) is Delivery.LIVE
-                and self._voice_context(target, cmd.msg_id, 'in')
-                == restricted_policy.continued_live_context
-                and self._live_context(target)
-                == restricted_policy.continued_live_context
-            ):
-                return True
+        if isinstance(cmd, AcceptCallCommand) and restricted_policy.accept_calls_locked:
+            return True
+        if isinstance(
+            cmd,
+            (
+                CancelCallCommand,
+                HangupCallCommand,
+                MuteCallCommand,
+                SendCallAudioCommand,
+                ReadCallAudioCommand,
+            ),
+        ) and self._authorize_call(conn, cmd):
+            return True
         self._send(
             conn,
             create_event(

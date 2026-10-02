@@ -104,6 +104,7 @@ class RetainedMessageEntry:
     duration_ms: Optional[int] = None
     producer_interrupted: bool = False
     can_retry_finalization: bool = False
+    context_generation: Optional[int] = None
 
     def __post_init__(self) -> None:
         """Coerces serialized enum fields into their typed representations.
@@ -192,7 +193,7 @@ class LiveContextEntry:
     disconnect_actor: Optional[ConnectionActor] = None
     disconnect_reason: Optional[ConnectionReasonCode] = None
     context_generation: Optional[int] = None
-    call_handle: Optional[str] = None
+    invitation_handle: Optional[str] = None
     outbound_attempt_id: Optional[str] = None
     route_changing: bool = False
 

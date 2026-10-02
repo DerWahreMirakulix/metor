@@ -50,7 +50,8 @@ class Help:
     SUBCOMMAND_DESC_COLUMN: int = 58
 
     CHAT_CATEGORIES: List[str] = [
-        'Session & Connection',
+        'Live Chat',
+        'Calls',
         'Messaging & Display',
         'Contact Management',
         'System',
@@ -60,56 +61,89 @@ class Help:
         'connect': CommandDef(
             name='connect',
             usage='/connect <onion|alias>',
-            description='Establish a new secure connection.',
-            category='Session & Connection',
+            description='Invite a peer to an ephemeral live chat.',
+            category='Live Chat',
         ),
         'accept': CommandDef(
             name='accept',
             usage='/accept [onion|alias]',
-            description='Accept a background connection request.',
-            category='Session & Connection',
+            description='Accept a live-chat invitation; this grants no call audio.',
+            category='Live Chat',
         ),
         'reject': CommandDef(
             name='reject',
             usage='/reject [onion|alias]',
-            description='Reject a background connection request.',
-            category='Session & Connection',
+            description='Reject a live-chat invitation.',
+            category='Live Chat',
         ),
         'switch': CommandDef(
             name='switch',
             usage='/switch [..|<onion|alias>]',
             description="Switch focus (use '..' to remove focus).",
-            category='Session & Connection',
+            category='Live Chat',
         ),
         'end': CommandDef(
             name='end',
             usage='/end [onion|alias]',
-            description='Terminate an active or pending connection.',
-            category='Session & Connection',
+            description='End an active or pending live chat.',
+            category='Live Chat',
         ),
         'fallback': CommandDef(
             name='fallback',
             usage='/fallback [onion|alias]',
             description='Force pending live messages into offline drops.',
-            category='Session & Connection',
+            category='Live Chat',
         ),
         'sessions': CommandDef(
             name='sessions',
             usage='/sessions',
-            description='List all active and pending sessions.',
-            category='Session & Connection',
+            description='List active live chats and pending chat invitations.',
+            category='Live Chat',
         ),
         'transport': CommandDef(
             name='transport',
             usage='/transport [onion|alias]',
             description='Show the current transport state for one peer or the focused session.',
-            category='Session & Connection',
+            category='Live Chat',
         ),
         'retunnel': CommandDef(
             name='retunnel',
             usage='/retunnel [onion|alias]',
             description='Force Tor circuit rotation (NEWNYM) and reconnect.',
-            category='Session & Connection',
+            category='Live Chat',
+        ),
+        'calls': CommandDef(
+            name='calls',
+            usage='/calls',
+            description='List telephone call signaling state without reading audio.',
+            category='Calls',
+        ),
+        'call': CommandDef(
+            name='call',
+            usage='/call <operation> <call-id>',
+            description='Control one exact call; Terminal has no local call audio adapter.',
+            category='Calls',
+            subcommands=[
+                SubCommandDef('reject <call-id>', 'Reject an incoming telephone call.'),
+                SubCommandDef(
+                    'cancel <call-id>', 'Cancel an outgoing call before acceptance.'
+                ),
+                SubCommandDef(
+                    'hangup <call-id>', 'Hang up a call owned by this client.'
+                ),
+                SubCommandDef('mute <call-id>', 'Mute a call owned by this client.'),
+                SubCommandDef(
+                    'unmute <call-id>', 'Unmute a call owned by this client.'
+                ),
+                SubCommandDef(
+                    'start <target>',
+                    'Requires a frontend with a local duplex audio adapter.',
+                ),
+                SubCommandDef(
+                    'accept <call-id>',
+                    'Requires a frontend with a local duplex audio adapter.',
+                ),
+            ],
         ),
         'inbox': CommandDef(
             name='inbox',

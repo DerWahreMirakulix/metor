@@ -51,6 +51,7 @@ class ConnectionControllerSupportMixin:
     _hm: HistoryManager
     _mm: MessageManager
     _crypto: Crypto
+    _retain_call_transport: Optional[Callable[[socket.socket], Optional[str]]]
     _state: StateTracker
     _router: MessageRouter
     _broadcast: Callable[[IpcEvent], None]

@@ -1,4 +1,4 @@
-"""Exact incoming-call actions across replacement, privacy and normal unlock."""
+"""Exact LIVE invitation actions across replacement, privacy and normal unlock."""
 
 import socket
 import time
@@ -15,7 +15,6 @@ from metor.core.api import (
     RestrictClientCommand,
     ReauthorizeClientCommand,
     NotificationPrivacy,
-    LockedAcceptPolicy,
     IncomingConnectionEvent,
     IpcEvent,
     ConnectionRejectedEvent,
@@ -24,7 +23,7 @@ from metor.core.api import (
 )
 
 
-class PendingCallCoreTests(unittest.TestCase):
+class PendingInvitationCoreTests(unittest.TestCase):
     """Exercises actual encrypted Core IPC with controlled socket-pair requests."""
 
     def setUp(self) -> None:
@@ -72,12 +71,11 @@ class PendingCallCoreTests(unittest.TestCase):
     def test_anonymous_denial_keeps_decline_and_normal_unlock_request_identity(
         self,
     ) -> None:
-        """Configured unlock preserves exact call selection without revealing identity early."""
+        """Configured unlock preserves exact invitation selection without revealing identity early."""
         self.h.client.request(
             RestrictClientCommand(
                 unlock_method=ClientUnlockMethod.NONE,
                 notification_privacy=NotificationPrivacy.ANONYMIZE,
-                accept_while_locked=LockedAcceptPolicy.NONE,
             ),
             ClientRestrictedEvent,
         )
@@ -91,9 +89,9 @@ class PendingCallCoreTests(unittest.TestCase):
         self.assertIsNone(projected.onion)
         self.assertEqual(projected.alias, 'unknown')
         handle = projected.action_handle
-        self.assertIsNotNone(handle)
+        self.assertIsNone(handle)
         self.assertIsInstance(
-            self.h.client.request(AcceptCommand(handle, handle), IpcEvent),
+            self.h.client.request(AcceptCommand(self.h.onion), IpcEvent),
             ClientAccessRestrictedEvent,
         )
         self.assertIs(self.state.pending_identity(self.h.onion)[0], original)
@@ -101,7 +99,8 @@ class PendingCallCoreTests(unittest.TestCase):
             ReauthorizeClientCommand(ClientUnlockMethod.NONE), ClientReauthorizedEvent
         )
         snapshot = self.h.client.runtime_snapshot()
-        self.assertEqual(snapshot.pending[0].action_handle, handle)
+        handle = snapshot.pending[0].action_handle
+        self.assertIsNotNone(handle)
         self.assertEqual(snapshot.pending[0].onion, self.h.onion)
         self.assertIsInstance(
             self.h.client.request(RejectCommand(self.h.onion, handle), IpcEvent),
@@ -124,7 +123,7 @@ class PendingCallCoreTests(unittest.TestCase):
         self.assertIsNotNone(self.h.client.runtime_snapshot().pending[0].action_handle)
 
     def test_accepted_handle_navigates_only_the_exact_live_context(self) -> None:
-        """Positive acceptance is discoverable after unlock and revoked by a later call."""
+        """Positive acceptance is discoverable after unlock and revoked by a later invitation."""
         from unittest.mock import patch
         from metor.core.api import ConnectedEvent
 
@@ -136,14 +135,18 @@ class PendingCallCoreTests(unittest.TestCase):
             )
         self.assertIsInstance(result, ConnectedEvent)
         live = self.h.client.runtime_snapshot().live_contexts[0]
-        self.assertEqual(live.call_handle, handle)
-        self.assertIsNone(self.h.other.runtime_snapshot().live_contexts[0].call_handle)
+        self.assertEqual(live.invitation_handle, handle)
+        self.assertIsNone(
+            self.h.other.runtime_snapshot().live_contexts[0].invitation_handle
+        )
         self.state.pop_any_connection(self.h.onion)
         replacement, remote = socket.socketpair()
         self.addCleanup(replacement.close)
         self.addCleanup(remote.close)
         self.state.add_active_connection(self.h.onion, replacement)
-        self.assertIsNone(self.h.client.runtime_snapshot().live_contexts[0].call_handle)
+        self.assertIsNone(
+            self.h.client.runtime_snapshot().live_contexts[0].invitation_handle
+        )
 
     def test_late_expiry_does_not_revoke_the_replacement_handle(self) -> None:
         """An expired old request cannot invalidate a newly projected request from that peer."""
@@ -156,7 +159,9 @@ class PendingCallCoreTests(unittest.TestCase):
         current = self.h.client.runtime_snapshot().pending[0].action_handle
         access = self.h.daemon._session_access
         recipient = next(
-            conn for conn, handles in access._call_handles.items() if current in handles
+            conn
+            for conn, handles in access._invitation_handles.items()
+            if current in handles
         )
         expiry = access.filter_restricted_event(
             recipient, PendingConnectionExpiredEvent('peer', self.h.onion)
@@ -170,7 +175,7 @@ class PendingCallCoreTests(unittest.TestCase):
         )
 
     def test_other_client_acceptance_preserves_only_the_observed_request(self) -> None:
-        """A GUI can open the call it saw even when a different local client accepted it.
+        """A GUI can open the invitation it saw even when a different local client accepted it.
 
         Args:
             None
@@ -187,10 +192,11 @@ class PendingCallCoreTests(unittest.TestCase):
             result = self.h.other.request(AcceptCommand(self.h.onion, other), IpcEvent)
         self.assertIsInstance(result, ConnectedEvent)
         self.assertEqual(
-            self.h.client.runtime_snapshot().live_contexts[0].call_handle, observed
+            self.h.client.runtime_snapshot().live_contexts[0].invitation_handle,
+            observed,
         )
         self.assertEqual(
-            self.h.other.runtime_snapshot().live_contexts[0].call_handle, other
+            self.h.other.runtime_snapshot().live_contexts[0].invitation_handle, other
         )
         self.assertIsInstance(
             self.h.client.request(RejectCommand(self.h.onion, observed), IpcEvent),
@@ -198,7 +204,7 @@ class PendingCallCoreTests(unittest.TestCase):
         )
 
 
-class CallPresentationTests(unittest.TestCase):
+class InvitationPresentationTests(unittest.TestCase):
     """Tests explicit GUI intentions with DTOs, without socket or toolkit mocks as evidence."""
 
     def setUp(self) -> None:
@@ -232,7 +238,7 @@ class CallPresentationTests(unittest.TestCase):
             return True
 
         self.gui.submit = submit
-        self.calls = self.gui.calls
+        self.invitations = self.gui.live_invitations
 
     def snapshot(self, *, pending=(), accepted=()) -> None:
         """Publishes a fresh content-free snapshot through the public model."""
@@ -241,48 +247,95 @@ class CallPresentationTests(unittest.TestCase):
         self.gui.state.snapshot = RuntimeSnapshotEvent(
             'fixture', 'self', pending=list(pending), live_contexts=list(accepted)
         )
-        self.calls.poll()
+        self.invitations.poll()
 
     def test_accept_stays_elsewhere_and_open_requires_current_accepted_handle(
         self,
     ) -> None:
-        """Accept and Open are separate actions; neither issues an outgoing call."""
+        """Accept and Open are separate actions; neither issues an outgoing connection."""
         from metor.core.api import ConnectedEvent, LiveContextEntry, Delivery
         from metor.ui.gui.state import Route
         from metor.ui.gui.state.mailbox import Update
 
-        self.calls.observe(IncomingConnectionEvent('Bob', 'bob', 'one'))
-        self.assertTrue(self.calls.perform('one', 'accept'))
+        self.invitations.observe(IncomingConnectionEvent('Bob', 'bob', 'one'))
+        self.assertTrue(self.invitations.perform('one', 'accept'))
         self.work()
         self.assertIsInstance(self.gui.client.request.call_args.args[0], AcceptCommand)
-        self.calls.install(Update(0, self.operation, ConnectedEvent('Bob', 'bob')))
+        self.invitations.install(
+            Update(0, self.operation, ConnectedEvent('Bob', 'bob'))
+        )
         live = LiveContextEntry(
-            'Bob', 'bob', True, 'connected', context_generation=1, call_handle='one'
+            'Bob',
+            'bob',
+            True,
+            'connected',
+            context_generation=1,
+            invitation_handle='one',
         )
         self.snapshot(accepted=[live])
         self.assertEqual(self.gui.state.route, Route('V08', 'alice'))
-        self.assertTrue(self.calls.perform('one', 'open'))
+        self.assertTrue(self.invitations.perform('one', 'open'))
         self.snapshot(accepted=[live])
         self.assertEqual(self.gui.state.route, Route('V09', 'bob', Delivery.LIVE))
         self.assertEqual(self.gui.client.request.call_count, 1)
 
-    def test_multiple_call_arrival_preserves_target_and_expired_open_never_calls_back(
+    def test_multiple_invitation_arrival_preserves_target_and_expired_open_never_calls_back(
         self,
     ) -> None:
         """Arrival leaves the selected button's handle intact; stale Open is inert."""
-        self.calls.observe(IncomingConnectionEvent('Bob', 'bob', 'one'))
-        self.calls.observe(IncomingConnectionEvent('Carol', 'carol', 'two'))
-        self.assertEqual(self.calls.selected, 'one')
+        self.invitations.observe(IncomingConnectionEvent('Bob', 'bob', 'one'))
+        self.invitations.observe(IncomingConnectionEvent('Carol', 'carol', 'two'))
+        self.assertEqual(self.invitations.selected, 'one')
         self.assertEqual(self.gui.state.route.peer, 'alice')
-        self.assertTrue(self.calls.perform('one', 'decline'))
+        self.assertTrue(self.invitations.perform('one', 'decline'))
         self.work()
         command = self.gui.client.request.call_args.args[0]
         self.assertEqual((command.target, command.action_handle), ('bob', 'one'))
         self.snapshot()
-        self.assertFalse(self.calls.perform('one', 'open'))
+        self.assertFalse(self.invitations.perform('one', 'open'))
         self.assertEqual(self.gui.client.request.call_count, 1)
 
-    def test_locked_off_and_anonymize_sanitize_before_retaining_call_metadata(
+    def test_recovery_snapshot_does_not_reopen_dismissed_invitation_surface(
+        self,
+    ) -> None:
+        """Recovery metadata remains discoverable without presenting another LIVE invitation."""
+        from metor.core.api import (
+            ConnectionOrigin,
+            PendingConnectionEntry,
+            PendingConnectionReasonCode,
+        )
+
+        self.invitations.observe(IncomingConnectionEvent('Bob', 'bob', 'one'))
+        self.invitations.dismiss()
+        self.snapshot(
+            pending=[
+                PendingConnectionEntry(
+                    'Bob',
+                    'bob',
+                    ConnectionOrigin.GRACE_RECONNECT,
+                    PendingConnectionReasonCode.CONSUMER_ABSENT,
+                    action_handle='recovery',
+                )
+            ]
+        )
+        self.assertFalse(self.invitations.visible)
+        self.assertEqual(self.invitations.selected, 'recovery')
+        self.invitations.show()
+        self.assertTrue(self.invitations.visible)
+
+    def test_ended_invitations_are_skipped_and_cannot_reopen_the_surface(self) -> None:
+        """Expired history never remains as a close-only LIVE invitation page."""
+        self.invitations.observe(IncomingConnectionEvent('Bob', 'bob', 'one'))
+        self.snapshot()
+        self.assertFalse(self.invitations.visible)
+        self.invitations.show('one')
+        self.assertFalse(self.invitations.visible)
+        self.invitations.observe(IncomingConnectionEvent('Carol', 'carol', 'two'))
+        self.assertEqual(self.invitations.selected, 'two')
+        self.invitations.step(-1)
+        self.assertEqual(self.invitations.selected, 'two')
+
+    def test_locked_off_and_anonymize_sanitize_before_retaining_invitation_metadata(
         self,
     ) -> None:
         """Even a delayed event cannot inject identity into an anonymous covered surface."""
@@ -294,19 +347,16 @@ class CallPresentationTests(unittest.TestCase):
         security._policy = replace(
             security._policy, notifications_locked=NotificationPrivacy.OFF
         )
-        self.calls.observe(
+        self.invitations.observe(
             IncomingConnectionEvent('Private Alias', 'private-peer', 'one')
         )
-        self.assertFalse(self.calls.entries)
+        self.assertFalse(self.invitations.entries)
         security._policy = replace(
             security._policy, notifications_locked=NotificationPrivacy.ANONYMIZE
         )
-        self.calls.observe(
+        self.invitations.observe(
             IncomingConnectionEvent('Private Alias', 'private-peer', 'two')
         )
-        entry = self.calls.entries['two']
-        self.assertIsNone(entry.peer)
-        self.assertEqual(entry.label, 'Incoming Live')
-        self.assertTrue(self.calls.perform('two', 'open'))
+        self.assertFalse(self.invitations.entries)
+        self.assertFalse(self.invitations.perform('two', 'open'))
         self.assertIsNone(self.work)
-        self.assertIn('Unlock', self.gui.state.status)

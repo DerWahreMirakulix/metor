@@ -12,8 +12,6 @@ from metor.core.api import (
     MessageDirectionCode,
     VoiceDataEvent,
     VoiceReleasedEvent,
-    GuiPreferences,
-    GuiPreferencesEvent,
     LiveContextEntry,
     RuntimeSnapshotEvent,
     VoiceIncomingStartedEvent,
@@ -304,11 +302,11 @@ class PlaybackTests(unittest.TestCase):
         self.client.release_voice.assert_not_called()
 
 
-class AutoPlaybackTests(unittest.TestCase):
-    """Checks foreground boundaries and one-time logical-context preference inheritance."""
+class ManualPlaybackTests(unittest.TestCase):
+    """Checks that received voice never starts output and all lock modes deny media."""
 
     def setUp(self) -> None:
-        """Creates an inert GUI with synthetic public context descriptors."""
+        """Creates an inert GUI with public context descriptors and no native devices."""
         self.gui = GuiController(
             FrontendLaunchContext(
                 'fixture',
@@ -319,6 +317,7 @@ class AutoPlaybackTests(unittest.TestCase):
                 ),
             )
         )
+        self.addCleanup(self.gui.close)
         self.gui.state.covered = False
         self.gui.state.route = Route('V09', 'peer', Delivery.LIVE)
         self.gui.state.snapshot = RuntimeSnapshotEvent(
@@ -332,79 +331,43 @@ class AutoPlaybackTests(unittest.TestCase):
                 )
             ],
         )
-        self.gui.state.preferences = GuiPreferencesEvent(
-            'instance', preferences=GuiPreferences(auto_play=True)
-        )
         self.gui.playback.audio = Mock()
-        self.auto = self.gui.playback.auto
-        self.auto.reconcile()
 
-    def start(self, identity: str) -> None:
-        """Publishes an explicitly new incoming turn for the foreground fixture peer."""
-        self.auto.incoming(
-            VoiceIncomingStartedEvent(
-                'Peer', identity, Delivery.LIVE, PcmVoice.CODEC, 0, 'peer'
-            )
+    def test_new_inbound_live_voice_and_navigation_keep_output_closed(self) -> None:
+        """Incoming events and switching away/back cannot grant manual playback consent."""
+        event = VoiceIncomingStartedEvent(
+            'Peer', 'received', Delivery.LIVE, PcmVoice.CODEC, 0, 'peer'
         )
+        self.assertTrue(self.gui.transcript.install(event))
+        self.gui.playback.poll()
+        self.assertFalse(self.gui.playback.running)
+        self.gui.playback.audio.play_frame.assert_not_called()
+        self.gui.navigate(Route('V08', 'peer', Delivery.DROP))
+        self.gui.navigate(Route('V09', 'peer', Delivery.LIVE))
+        self.gui.playback.poll()
+        self.gui.playback.audio.play_frame.assert_not_called()
 
-    def test_default_copied_once_recovery_keeps_override_and_new_context_resets(
-        self,
-    ) -> None:
-        """A protected default change cannot silently change a current context override."""
-        self.assertTrue(self.auto.enabled('peer'))
-        self.auto.toggle('peer')
-        self.auto.reconcile()
-        self.assertFalse(self.auto.enabled('peer'))
-        self.gui.state.snapshot.live_contexts[0].session_state = 'reconnecting'
-        self.auto.reconcile()
-        self.assertFalse(self.auto.enabled('peer'))
-        self.gui.state.snapshot.live_contexts[0].context_generation = 2
-        self.auto.reconcile()
-        self.assertTrue(self.auto.enabled('peer'))
-
-    def test_focus_navigation_and_manual_playback_leave_backlog_silent(self) -> None:
-        """Only a start while currently eligible may queue automatic output."""
-        self.auto.focused = False
-        self.start('background')
-        self.assertFalse(self.auto.queue)
-        self.auto.focused = True
-        self.start('fresh')
-        self.assertEqual(len(self.auto.queue), 1)
-        self.gui.playback.stop()
-        self.assertFalse(self.auto.queue)
-        self.auto.manual = True
-        self.gui.playback.worker = Mock()
-        self.gui.playback.worker.done.is_set.return_value = False
-        self.start('during-manual')
-        self.assertFalse(self.auto.queue)
-
-    def test_old_context_queue_cannot_play_into_a_new_generation(self) -> None:
-        """A stale queued start cannot cross a terminal context replacement."""
-        self.start('old-context')
-        self.assertEqual(len(self.auto.queue), 1)
-        self.gui.state.snapshot.live_contexts[0].context_generation = 2
-        self.gui.playback.play = Mock()
-        self.auto.poll()
-        self.gui.playback.play.assert_not_called()
-
-    def test_incoming_output_remains_eligible_during_local_capture(self) -> None:
-        """A held local PTT worker never imposes a half-duplex output gate.
-
-        Args:
-            None
-        Returns:
-            None
-        """
-        self.gui.voice.worker = Mock()
-        self.gui.voice.worker.done.is_set.return_value = False
-        self.gui.playback.play = Mock(return_value=True)
-        self.start('duplex')
-        self.assertEqual(len(self.auto.queue), 1)
-        self.auto.poll()
-        self.gui.playback.play.assert_called_once()
-        target = self.gui.playback.play.call_args.args[0]
-        self.assertEqual(target.msg_id, 'duplex')
-        self.assertTrue(self.gui.playback.play.call_args.kwargs['automatic'])
+    def test_covered_messages_have_no_output_target_or_play_permission(self) -> None:
+        """Neither DROP nor LIVE can use a pre-lock control to open output while locked."""
+        for delivery in (Delivery.DROP, Delivery.LIVE):
+            with self.subTest(delivery=delivery):
+                self.gui.state.route = Route(
+                    'V08' if delivery is Delivery.DROP else 'V09', 'peer', delivery
+                )
+                self.gui.state.covered = False
+                target = self.gui.playback.target(
+                    'peer', delivery, MessageDirectionCode.IN, 'received'
+                )
+                self.assertIsNotNone(target)
+                assert target is not None
+                self.gui.state.covered = True
+                self.assertIsNone(
+                    self.gui.playback.target(
+                        'peer', delivery, MessageDirectionCode.IN, 'received'
+                    )
+                )
+                self.assertFalse(self.gui.playback.play(target))
+        self.gui.playback.audio.play_frame.assert_not_called()
 
 
 if __name__ == '__main__':

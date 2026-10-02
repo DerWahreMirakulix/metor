@@ -149,7 +149,7 @@ class ProfileActivation:
             raise RuntimeError('Consumer registration failed')
         snapshot = client.runtime_snapshot()
         owner = None
-        if 'disposable_voice_owner' in initialized.capabilities:
+        if 'protected_voice_owner' in initialized.capabilities:
             owner = VoiceOwnerLease.register(client)
             if owner is None or not owner.owner_token:
                 raise RuntimeError('Voice ownership unavailable')

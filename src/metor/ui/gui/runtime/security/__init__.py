@@ -1,6 +1,5 @@
-"""Per-client lock, normal reauthorization and exact continued-media facade."""
+"""Per-client application cover and normal Core reauthorization facade."""
 
 from .controller import SecurityController
-from .continuation import ContinuedScope
 
-__all__ = ['SecurityController', 'ContinuedScope']
+__all__ = ['SecurityController']

@@ -22,7 +22,6 @@ from metor.core.api import (
     RejectCommand,
     ChangePasswordCommand,
     ConfigureQuickUnlockCommand,
-    Delivery,
     create_event,
     IpcEvent,
     IpcCommand,
@@ -30,6 +29,7 @@ from metor.core.api import (
     FrontendLeaseCommand,
     FrontendLeaseEvent,
     RestrictClientCommand,
+    NotificationPrivacy,
     PrepareProfileExitCommand,
     SelfDestructCommand,
     UnlockCommand,
@@ -245,34 +245,33 @@ class Daemon(DaemonLifecycleMixin):
             failure_limit_callback=self._get_local_auth_failure_limit,
             live_consumer_available_callback=self._on_live_consumer_available,
             quick_unlock_store=quick_unlock_store,
-            is_saved_contact_callback=self._is_saved_contact_target,
-            resolve_target_callback=self._resolve_contact_target,
-            voice_target_callback=self._voice_target,
             pending_token_callback=lambda onion: self._transport_state.pending_token(
                 onion
             ),
             active_connection_callback=lambda onion: (
                 self._transport_state.get_connection(onion)
             ),
-            pending_call_callback=lambda onion: self._transport_state.pending_identity(
-                onion
+            pending_invitation_callback=lambda onion: (
+                self._transport_state.pending_identity(onion)
             ),
-            voice_context_callback=self._voice_context,
-            voice_delivery_callback=self._voice_delivery,
-            inbound_voice_delivery_callback=self._inbound_voice_delivery,
             live_context_callback=self._live_context_token,
             live_generation_callback=lambda onion: (
                 self._network.known_live_context_generation(onion)
                 if self._network is not None
                 else None
             ),
-            live_state_callback=lambda onion: (
-                self._network.get_live_state(onion).value
-                if self._network is not None
-                else 'disconnected'
+            call_lock_acceptance_callback=lambda: (
+                self._command_dispatcher.call_lock_acceptance_enabled()
             ),
-            pending_projection_callback=lambda: (
-                self._command_dispatcher.pending_call_entries()
+            call_authorization_callback=lambda conn, cmd: (
+                self._network.calls.authorize_call(conn, cmd)
+                if self._network is not None
+                else False
+            ),
+            call_event_projection_callback=lambda conn, event, privacy: (
+                self._network.calls.project_event(conn, event, privacy)
+                if self._network is not None
+                else None
             ),
             self_destruct_requires_unlock_callback=lambda: self._pm.config.get_bool(
                 SettingKey.SELF_DESTRUCT_REQUIRES_UNLOCK
@@ -457,6 +456,11 @@ class Daemon(DaemonLifecycleMixin):
             current_revision_cb=self._ipc.current_revision,
             profile_instance_cb=metadata_handler.instance_id,
             voice_owner_available=voice_owner_available,
+            call_privacy_cb=lambda conn: (
+                policy.notification_privacy
+                if (policy := self._session_access.restricted_policy(conn)) is not None
+                else NotificationPrivacy.SHOW_ALL
+            ),
             authenticated_client_count_cb=lambda: len(
                 self._session_access.authenticated_recipients()
             ),
@@ -504,7 +508,7 @@ class Daemon(DaemonLifecycleMixin):
                 return
             if event.event_type is not EventType.RUNTIME_STATE_CHANGED:
                 stamp_request_id(event)
-            self._session_access.observe_call_transition(event)
+            self._session_access.observe_invitation_transition(event)
             recipients = (
                 self._session_access.authenticated_recipients()
                 if self._session_access.requires_auth()
@@ -824,22 +828,6 @@ class Daemon(DaemonLifecycleMixin):
         """
         return max(1, self._pm.config.get_int(SettingKey.LOCAL_AUTH_FAILURE_LIMIT))
 
-    def _is_saved_contact_target(self, target: str) -> bool:
-        """Checks whether a target resolves to a saved contact in the active runtime.
-
-        Args:
-            target (str): Alias or onion identity.
-
-        Returns:
-            bool: True only for an active-runtime saved contact.
-        """
-        if self._cm is None:
-            return False
-        resolved = self._cm.resolve_target(target)
-        if resolved is None:
-            return False
-        return resolved[0] in self._cm.get_all_contacts()
-
     def _resolve_contact_target(self, target: str) -> Optional[str]:
         """Resolves aliases to the stable onion identity used by lock policy.
 
@@ -853,17 +841,6 @@ class Daemon(DaemonLifecycleMixin):
             return None
         resolved = self._cm.resolve_target(target)
         return resolved[1] if resolved is not None else None
-
-    def _voice_target(self, msg_id: str) -> Optional[str]:
-        """Returns the stable target bound to an active outbound Voice turn.
-
-        Args:
-            msg_id (str): The msg id input.
-
-        Returns:
-            Optional[str]: The resulting value.
-        """
-        return self._network.voice_target(msg_id) if self._network is not None else None
 
     def _voice_context(self, onion: str, msg_id: str, direction: str) -> int | None:
         """Returns immutable recording ownership from the active runtime.
@@ -882,37 +859,8 @@ class Daemon(DaemonLifecycleMixin):
             else None
         )
 
-    def _voice_delivery(self, msg_id: str) -> Optional[Delivery]:
-        """Returns delivery semantics bound to an active outbound Voice turn.
-
-        Args:
-            msg_id (str): The msg id input.
-
-        Returns:
-            Optional[Delivery]: The resulting value.
-        """
-        return (
-            self._network.voice_delivery(msg_id) if self._network is not None else None
-        )
-
-    def _inbound_voice_delivery(self, onion: str, msg_id: str) -> Optional[Delivery]:
-        """Returns exact retained inbound Voice delivery semantics.
-
-        Args:
-            onion (str): Stable peer identity.
-            msg_id (str): Stable Voice identity.
-
-        Returns:
-            Optional[Delivery]: Retained delivery semantics, if available.
-        """
-        return (
-            self._network.inbound_voice_delivery(onion, msg_id)
-            if self._network is not None
-            else None
-        )
-
     def _live_context_token(self, onion: str) -> object | None:
-        """Returns logical ownership for a restricted LIVE context.
+        """Returns the logical generation of one confirmed LIVE chat.
 
         Args:
             onion (str): Stable peer identity.
@@ -1037,7 +985,7 @@ class Daemon(DaemonLifecycleMixin):
                 ):
                     generation = self._network.known_live_context_generation(cmd.target)
                     if generation is not None:
-                        self._session_access.record_accepted_call(
+                        self._session_access.record_accepted_invitation(
                             conn, cmd.action_handle, cmd.target, generation
                         )
                 return
@@ -1219,6 +1167,7 @@ class Daemon(DaemonLifecycleMixin):
             return
 
         if isinstance(cmd, RestrictClientCommand):
+            self._command_dispatcher.finalize_voice_owner_for_restriction(conn)
             self._ipc.send_to(conn, self._session_access.restrict(conn, cmd))
             return
 

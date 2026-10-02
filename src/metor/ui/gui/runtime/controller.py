@@ -28,9 +28,6 @@ from metor.core.api import (
     RuntimeSnapshotEvent,
     RuntimeStateChangedEvent,
     SelfDestructInitiatedEvent,
-    VoiceChunkReceivedEvent,
-    VoiceFinalizedEvent,
-    VoiceIncomingStartedEvent,
     VoiceOwnerRegisteredEvent,
 )
 from metor.ui.gui.constants import GuiLimits
@@ -40,7 +37,7 @@ from metor.ui.gui.state.mailbox import Mailbox, Update
 
 # Local Package Imports
 from .activation import ProfileActivation
-from .calls import IncomingCalls
+from .calls import CallActions
 from .contacts import ContactFlow
 from .device import DeviceLifecycle
 from .drop import DropActions
@@ -48,6 +45,7 @@ from .handoff import TextHandoff
 from .history import ActivityHistory
 from .interaction import Interactions
 from .live import LiveActions
+from .live_invitation import LiveInvitations
 from .notifications import Notifications
 from .pages import ArchivePages, InventoryPages
 from .playback import PlaybackController
@@ -116,7 +114,8 @@ class GuiController:
         self.inventory = InventoryPages(self)
         self.contacts = ContactFlow(self)
         self.notifications = Notifications(self)
-        self.calls = IncomingCalls(self)
+        self.live_invitations = LiveInvitations(self)
+        self.calls = CallActions(self)
         self._unknown_actions: set[str] = set()
         self.profiles = ProfileCatalog(self)
         self.initial_missing_profile: str | None = None
@@ -196,7 +195,15 @@ class GuiController:
         Returns:
             None
         """
-        self.playback.auto.focused = False
+        self.calls.suspend()
+        self.screen_lock()
+
+    def screen_lock(self) -> None:
+        """Covers messages and stops their media while an accepted call continues.
+
+        A desktop lock or display cover does not imply system suspend. Only the
+        existing exact call can keep its separately authorized audio streams.
+        """
         self.native_departure()
         self.security.lock()
 
@@ -208,7 +215,6 @@ class GuiController:
         Returns:
             None
         """
-        self.playback.auto.focused = False
         self.native_departure()
         if self.client is not None and not self.client.is_connected:
             self.close()
@@ -499,6 +505,7 @@ class GuiController:
                 continue
             if update.event is not None:
                 self.notifications.observe(update.event)
+                self.live_invitations.observe(update.event)
                 self.calls.observe(update.event)
                 if not self.state.covered and update.event.event_type in {
                     EventType.CONNECTED,
@@ -546,6 +553,8 @@ class GuiController:
                 continue
             if self.receipts.install(update):
                 continue
+            if self.live_invitations.install(update):
+                continue
             if self.calls.install(update):
                 continue
             if self.core_settings.install(update):
@@ -592,20 +601,6 @@ class GuiController:
             if update.status:
                 continue
             if self.state.covered and self.state.route.view == 'V05':
-                scope = self.security.continuation.scope
-                if (
-                    scope is not None
-                    and isinstance(
-                        update.event,
-                        (
-                            VoiceIncomingStartedEvent,
-                            VoiceChunkReceivedEvent,
-                            VoiceFinalizedEvent,
-                        ),
-                    )
-                    and update.event.onion == scope.peer
-                ):
-                    self.transcript.install(update.event)
                 continue
             if update.event is not None and self.transcript.install(update.event):
                 continue
@@ -663,6 +658,11 @@ class GuiController:
             elif isinstance(update.event, RuntimeStateChangedEvent):
                 if update.event.scope == 'inbox':
                     self.handoff.needed = True
+                if update.event.scope in {'messages', 'inbox'} and (
+                    update.event.onion is None
+                    or update.event.onion == self.state.route.peer
+                ):
+                    self._messages_needed = True
                 if update.event.scope == 'ui.gui':
                     self.preferences.refresh_needed = True
                 else:
@@ -688,7 +688,7 @@ class GuiController:
             and self.client is not None
         ):
             client = self.client
-            if self.submit('snapshot', client.runtime_snapshot):
+            if self.submit('snapshot', client.runtime_snapshot, background=True):
                 self._refresh_needed = False
         self.security.poll()
         self.preferences.poll()
@@ -700,7 +700,6 @@ class GuiController:
         self.text.poll()
         self.voice.review_actions.poll()
         self.playback.poll()
-        self.playback.auto.poll()
         self.handoff.poll()
         self.archive.poll()
         self.inventory.poll()
@@ -708,6 +707,7 @@ class GuiController:
         self.drop.poll()
         self.live.poll()
         changed = self.notifications.poll() or changed
+        changed = self.live_invitations.poll() or changed
         changed = self.calls.poll() or changed
         if (
             self._messages_needed
@@ -750,6 +750,8 @@ class GuiController:
             self.lifecycle.cancel()
             if self.interactions is not preserve_interactions:
                 self.interactions.cancel()
+            self.calls.clear()
+            self.live_invitations.clear()
             self.resend.clear()
             self.contacts.book.stop()
             self.voice.abandon(purge=purging)
@@ -775,7 +777,8 @@ class GuiController:
         self.live = LiveActions(self)
         self.receipts = ReceiptReconciliation(self)
         self.notifications = Notifications(self)
-        self.calls = IncomingCalls(self)
+        self.live_invitations = LiveInvitations(self)
+        self.calls = CallActions(self)
         self.profiles = ProfileCatalog(self)
         self.voice = VoiceController(self)
         self._unknown_actions.clear()

@@ -160,7 +160,7 @@ class Notifications:
         for call in snapshot.pending:
             if call.onion:
                 yield Notice(
-                    NoticeKind.CALL,
+                    NoticeKind.INVITATION,
                     call.onion,
                     fingerprint((snapshot.epoch, call.action_handle, call.expires_at)),
                 )
@@ -270,12 +270,12 @@ class Notifications:
             self.store.dismiss({key})
             state.status = 'Item no longer available'
             return
-        if entry.kind is NoticeKind.CALL:
+        if entry.kind is NoticeKind.INVITATION:
             call = next(
                 (item for item in snapshot.pending if item.onion == entry.peer), None
             )
             if call is not None and call.action_handle is not None:
-                self.controller.calls.show(call.action_handle)
+                self.controller.live_invitations.show(call.action_handle)
                 return
         self.controller.navigate(
             Route(

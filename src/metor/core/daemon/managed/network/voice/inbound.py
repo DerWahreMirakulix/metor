@@ -478,7 +478,7 @@ class VoiceInboundMixin:
             if self._purge_fence.is_set():
                 return FrameAdmission.PURGING
             turn = self._inbound.get((onion, msg_id))
-            if turn is None or turn.finalized or offset > turn.size_bytes:
+            if turn is None or offset > turn.size_bytes:
                 return FrameAdmission.MALFORMED
             if offset < turn.size_bytes:
                 duplicate_end = offset + len(chunk)
@@ -488,6 +488,8 @@ class VoiceInboundMixin:
                 ):
                     return FrameAdmission.MALFORMED
             else:
+                if turn.finalized:
+                    return FrameAdmission.MALFORMED
                 limit = self._limit()
                 if (
                     len(turn.chunk_ids) >= Constants.VOICE_MAX_SEGMENTS

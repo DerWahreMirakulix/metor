@@ -166,6 +166,8 @@ class LifecycleCoordinator:
         resume: Callable[[], None],
         refresh: Callable[[], None],
         failure: Callable[[], None] | None = None,
+        *,
+        screen_lock: Callable[[], None] | None = None,
     ) -> None:
         """Bind the sole UI-thread lifecycle actions.
 
@@ -184,6 +186,7 @@ class LifecycleCoordinator:
         self._resume = resume
         self._refresh = refresh
         self._failure = failure
+        self._screen_lock = screen_lock or suspend
 
     def apply(self, event: DesktopLifecycleEvent) -> None:
         """Fence departures before controller work and never reveal on resume.
@@ -200,7 +203,10 @@ class LifecycleCoordinator:
             DesktopLifecycleEvent.SOURCE_LOST,
         }:
             self._revoke()
-            self._suspend()
+            if event is DesktopLifecycleEvent.LOCK:
+                self._screen_lock()
+            else:
+                self._suspend()
             if event is DesktopLifecycleEvent.SOURCE_LOST and self._failure is not None:
                 self._failure()
         else:

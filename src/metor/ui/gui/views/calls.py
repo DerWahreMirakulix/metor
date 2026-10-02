@@ -1,262 +1,330 @@
-"""Nonmodal incoming-call surface preserving underlying typing and PTT ownership."""
+"""Reduced telephone controls with privacy-projected identity and persistent App-Lock audio."""
 
 from collections.abc import Callable
-from functools import partial
+import time
 
-from kivy.metrics import dp, sp
-from kivy.core.text import Label as CoreLabel
+from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.scrollview import ScrollView
 from kivy.input.motionevent import MotionEvent
 
-from metor.ui.gui.constants import Geometry
-from metor.ui.gui.theme import font_path, TYPE
+from metor.core.api import CallState, NotificationPrivacy
 from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.widgets import Action, Label, Panel
 from metor.ui.gui.widgets.symbol import IconAction
-from metor.ui.gui.widgets.sheet import ActionSheet
+
+# Local Package Imports
+from .audio import show_audio_routes
 
 
 class CallPanel(Panel):
-    """Consumes touches inside its surface while leaving the surrounding view usable."""
+    """Consumes touches within telephone controls without a native modal focus grab."""
 
     def on_touch_down(self, touch: MotionEvent) -> bool:
-        """Prevents a call-surface press from activating obscured underlying controls.
-
-        Args:
-            touch: Native pointer event.
-        Returns:
-            bool: Whether this panel or one of its controls owns the press.
-        """
+        """Keeps a phone control press from reaching obscured chat controls."""
         return bool(super().on_touch_down(touch) or self.collide_point(*touch.pos))
 
 
 class CallOverlay(FloatLayout):
-    """Paints call metadata without native modal focus grabs or unsolicited navigation."""
+    """Shows accepted duplex and exact-request actions over either chat or lock cover."""
 
     def __init__(
         self, controller: GuiController, refresh: Callable[[], None], **kwargs: object
     ) -> None:
-        """Creates an initially empty overlay in the application viewport.
-
-        Args:
-            controller: Public GUI service controller.
-            refresh: Coalesced native repaint request.
-            kwargs: Native overlay properties.
-        Returns:
-            None
-        """
+        """Creates empty native presentation without probing or opening audio."""
         super().__init__(**kwargs)
-        self.controller = controller
-        self.refresh = refresh
-        self._key: tuple[object, ...] | None = None
+        self.controller, self.refresh = controller, refresh
         self.bottom_inset = 0.0
+        self.occupied_height = 0.0
+        self._key: tuple[object, ...] | None = None
+        self._duration: Label | None = None
+        self._status: Label | None = None
         self.bind(size=lambda *_args: self.refresh())
 
     def render(self) -> None:
-        """Reconciles only permitted call content, retaining stable controls between updates.
-
-        Args:
-            None
-        Returns:
-            None
-        """
-        calls = self.controller.calls
-        state = self.controller.state
-        modal = (
-            ActionSheet.current is not None
-            or self.controller.interactions.prompt is not None
+        """Updates duration without replacing controls or exposing locked chat identity."""
+        controller, calls = self.controller, self.controller.calls
+        state, current = controller.state, calls.current
+        active = calls.active
+        seconds = (
+            max(0, int(time.time() - current.started_at))
+            if active and current is not None and current.started_at is not None
+            else 0
         )
+        if self._duration is not None:
+            self._duration.text = f'{seconds // 60:02d}:{seconds % 60:02d}'
+        if self._status is not None:
+            self._status.text = calls.status
+        privacy = (
+            controller.security.notification_privacy
+            if state.covered
+            else NotificationPrivacy.SHOW_ALL
+        )
+        incoming = current is not None and current.state is CallState.INCOMING
         key = (
             state.generation,
             state.covered,
+            state.busy,
             calls.revision,
+            calls.ready,
+            calls.media_active,
             self.size[:],
-            modal,
             self.bottom_inset,
+            privacy,
         )
         if key == self._key:
             return
         self._key = key
         self.clear_widgets()
-        entry = calls.entries.get(calls.selected or '')
-        if entry is None:
+        self.occupied_height = 0.0
+        self._duration = self._status = None
+        if incoming and state.covered and privacy is NotificationPrivacy.OFF:
             return
-        if not calls.visible or modal:
-            if not calls.visible and not any(
-                item.phase != 'ended' for item in calls.entries.values()
-            ):
-                return
-            indicator = Action(
-                'Incoming Live',
-                self._show,
-                size_hint_x=None,
-                width=dp(160),
-                pos_hint={'right': 1, 'top': 1},
-            )
-            self.add_widget(indicator)
+        if current is None and calls.pending_peer is None:
             return
-        width = min(dp(480), self.width - dp(48))
+        if not calls.visible:
+            if current is not None and current.state is not CallState.ENDED:
+                self.add_widget(
+                    Action(
+                        'Phone call',
+                        self._show,
+                        size_hint=(None, None),
+                        width=dp(160),
+                        pos_hint={'right': 1, 'top': 1},
+                    )
+                )
+            return
+        if state.covered and active and self.bottom_inset:
+            self._keyboard_call_panel()
+            return
         panel = CallPanel(
             orientation='vertical',
-            padding=dp(24),
-            spacing=dp(16),
+            padding=dp(20),
+            spacing=dp(12),
             size_hint=(None, None),
-            width=width,
+            width=min(dp(420), max(dp(48), self.width - dp(48))),
         )
         header = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(12))
-        title = Label('Incoming Live', role='title')
+        title = Label('Phone call', role='title')
         title.bind(
             height=lambda _widget, height: setattr(
                 header, 'height', max(dp(48), height)
             )
         )
         header.add_widget(title)
-        header.add_widget(IconAction('x', 'Close call', self._dismiss))
+        header.add_widget(IconAction('x', 'Hide call controls', self._hide))
         panel.add_widget(header)
         scroll = ScrollView(do_scroll_x=False)
-        body = BoxLayout(orientation='vertical', size_hint_y=None, spacing=dp(12))
+        body = BoxLayout(orientation='vertical', spacing=dp(12), size_hint_y=None)
         body.bind(minimum_height=body.setter('height'))
-        if entry.label != 'Incoming Live':
-            body.add_widget(Label(entry.label))
-        body.add_widget(
-            Label(
-                'Accept keeps this view. Open switches to Live.',
-                role='support',
-                tone='textSecondary',
+        if current is not None:
+            if privacy is NotificationPrivacy.SHOW_ALL and current.alias:
+                body.add_widget(Label(current.alias, role='peer'))
+            phase = {
+                CallState.CONNECTING: 'Connecting call…',
+                CallState.OUTGOING: 'Ringing…',
+                CallState.INCOMING: 'Incoming phone call',
+                CallState.ACTIVE: 'Connected · microphone muted'
+                if current.muted
+                else 'Connected · headset audio',
+                CallState.ENDED: 'Call ended'
+                + (
+                    ' · ' + current.reason.value.replace('_', ' ')
+                    if current.reason is not None
+                    else ''
+                ),
+            }[current.state]
+            body.add_widget(Label(phase, role='support'))
+        if active:
+            self._duration = Label(
+                f'{seconds // 60:02d}:{seconds % 60:02d}', role='peer'
             )
-        )
-        if entry.status:
-            body.add_widget(Label(entry.status, role='support', tone='textSecondary'))
-        if len(calls.entries) > 1:
-            pager = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(12))
-            pager.add_widget(
-                IconAction('chevron-left', 'Previous call', lambda: self._step(-1))
-            )
-            pager.add_widget(
+            body.add_widget(self._duration)
+        elif not state.covered:
+            body.add_widget(
                 Label(
-                    f'{list(calls.entries).index(entry.handle) + 1} of {len(calls.entries)}',
-                    wrap=False,
+                    'Headset operation · no speaker echo cancellation',
+                    role='support',
+                    tone='textSecondary',
                 )
             )
-            pager.add_widget(
-                IconAction('chevron-right', 'Next call', lambda: self._step(1))
+        self._status = Label(calls.status, role='support', tone='textSecondary')
+        body.add_widget(self._status)
+        if not calls.ready and not state.covered:
+            body.add_widget(
+                Action(
+                    'Set up headset',
+                    lambda: show_audio_routes(controller, self.refresh),
+                )
             )
-            body.add_widget(pager)
+        if current is None and calls.pending_peer is not None:
+            peer = calls.pending_peer
+            body.add_widget(
+                Action(
+                    'Call',
+                    lambda: self._act(lambda: calls.start(peer)),
+                    disabled=not calls.ready or state.busy,
+                )
+            )
         scroll.add_widget(body)
         panel.add_widget(scroll)
-        button_size, _line, weight = TYPE['button']
-        longest = CoreLabel(
-            text='Unlock to accept' if entry.denied else 'Open Live',
-            font_name=font_path(weight),
-            font_size=sp(button_size),
-        )
-        longest.refresh()
-        stacked = width - dp(48) < max(
-            dp(360), 3 * (longest.texture.size[0] + dp(24)) + dp(24)
-        )
+        compact = state.covered and active
         actions = BoxLayout(
-            orientation='vertical' if stacked else 'horizontal',
+            orientation='horizontal' if compact else 'vertical',
             size_hint_y=None,
-            height=dp(168 if stacked else 48),
+            height=dp(48) if compact else 0,
             spacing=dp(12),
         )
-        if entry.phase == 'ended':
-            actions.height = dp(48)
-            actions.add_widget(Action('Close', self._dismiss))
-        else:
-            for label, intent in (
-                ('Decline', 'decline'),
-                ('Unlock to accept' if entry.denied else 'Accept', 'accept'),
-                ('Open Live', 'open'),
-            ):
-                handle = entry.handle
-                action = Action(
-                    label,
-                    partial(self._perform, handle, intent),
-                    disabled=state.busy
-                    or (entry.phase != 'pending' and intent != 'open'),
+        actions.bind(minimum_height=actions.setter('height'))
+        if current is not None:
+            call_id = current.call_id
+            if incoming:
+                can_locked = (
+                    not state.covered or controller.security.accept_calls_locked
                 )
-                actions.add_widget(action)
+                actions.add_widget(
+                    Action(
+                        'Decline',
+                        lambda: self._act(lambda: calls.reject(call_id)),
+                        disabled=state.busy,
+                    )
+                )
+                actions.add_widget(
+                    Action(
+                        'Accept' if can_locked else 'Unlock to accept',
+                        lambda: self._act(lambda: calls.accept(call_id)),
+                        disabled=state.busy,
+                    )
+                )
+            elif active:
+                actions.add_widget(
+                    Action(
+                        ('Unmute' if current.muted else 'Mute')
+                        if state.covered
+                        else (
+                            'Unmute microphone' if current.muted else 'Mute microphone'
+                        ),
+                        lambda: self._act(calls.mute),
+                        disabled=state.busy,
+                    )
+                )
+                actions.add_widget(
+                    Action(
+                        'Hang up',
+                        lambda: self._act(calls.end),
+                        tone='danger',
+                        disabled=state.busy,
+                    )
+                )
+            elif current.state in {CallState.CONNECTING, CallState.OUTGOING}:
+                actions.add_widget(
+                    Action(
+                        'Cancel call',
+                        lambda: self._act(calls.end),
+                        disabled=state.busy or not current.owned,
+                    )
+                )
+            else:
+                actions.add_widget(Action('Close', self._hide))
         panel.add_widget(actions)
         self.add_widget(panel)
 
         def measure(*_args: object) -> None:
-            """Keeps scrollable content within the viewport with persistent call actions.
-
-            Args:
-                _args: Native layout updates.
-            Returns:
-                None
-            """
+            """Keeps call controls reachable above keyboard and within a compact viewport."""
             panel.height = min(
-                self.height - dp(48) - self.bottom_inset,
-                body.height + actions.height + header.height + dp(80),
+                max(dp(48), self.height - dp(48) - self.bottom_inset),
+                body.height + actions.height + header.height + dp(72),
             )
             panel.x = self.x + (self.width - panel.width) / 2
-            panel.y = (
-                self.y
-                + self.bottom_inset
-                + (self.height - self.bottom_inset - panel.height) / 2
-                if self.width >= dp(Geometry.BREAKPOINT)
-                else self.y + dp(24) + self.bottom_inset
-            )
+            panel.y = self.y + dp(24) + self.bottom_inset
+            self.occupied_height = panel.height + dp(48) + self.bottom_inset
 
         body.bind(height=measure)
+        actions.bind(height=measure)
+        header.bind(height=measure)
+        measure()
+
+    def _keyboard_call_panel(self) -> None:
+        """Keeps accepted phone controls and auth scroll usable above a touch keyboard."""
+        calls = self.controller.calls
+        current = calls.current
+        assert current is not None
+        panel = CallPanel(
+            orientation='vertical',
+            padding=dp(12),
+            spacing=dp(8),
+            size_hint=(None, None),
+            width=min(dp(420), self.width - dp(48)),
+        )
+        header = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(8))
+        title = Label(
+            'Call · muted' if current.muted else 'Call · connected', role='support'
+        )
+        title.bind(
+            height=lambda _widget, height: setattr(
+                header, 'height', max(dp(48), height)
+            )
+        )
+        header.add_widget(title)
+        seconds = (
+            max(0, int(time.time() - current.started_at))
+            if current.started_at is not None
+            else 0
+        )
+        self._duration = Label(
+            f'{seconds // 60:02d}:{seconds % 60:02d}',
+            role='support',
+            size_hint_x=None,
+            width=dp(72),
+        )
+        header.add_widget(self._duration)
+        header.add_widget(IconAction('x', 'Hide call controls', self._hide))
+        panel.add_widget(header)
+        actions = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(8))
+        actions.add_widget(
+            Action(
+                'Unmute' if current.muted else 'Mute',
+                lambda: self._act(calls.mute),
+                disabled=self.controller.state.busy,
+            )
+        )
+        actions.add_widget(
+            Action(
+                'Hang up',
+                lambda: self._act(calls.end),
+                tone='danger',
+                disabled=self.controller.state.busy,
+            )
+        )
+        panel.add_widget(actions)
+        self.add_widget(panel)
+
+        def measure(*_args: object) -> None:
+            """Reserves exactly the compact control extent above the keyboard."""
+            panel.height = header.height + actions.height + dp(32)
+            panel.x = self.x + (self.width - panel.width) / 2
+            panel.y = self.y + self.bottom_inset + dp(24)
+            self.occupied_height = self.bottom_inset + panel.height + dp(48)
+
         header.bind(height=measure)
         measure()
 
     def _show(self) -> None:
-        """Switches from an explicitly dismissed modal to the current call surface.
-
-        Args:
-            None
-        Returns:
-            None
-        """
-        if self.controller.interactions.prompt is not None:
-            return
-        if ActionSheet.current is not None:
-            ActionSheet.current.dismiss()
-        self.controller.calls.show()
+        """Explicitly restores phone controls without navigating or accepting a Call."""
+        calls = self.controller.calls
+        calls.visible = True
+        calls.revision += 1
         self.refresh()
 
-    def _dismiss(self) -> None:
-        """Hides presentation without declining a call.
-
-        Args:
-            None
-        Returns:
-            None
-        """
-        self.controller.calls.dismiss()
+    def _hide(self) -> None:
+        """Hides full controls; an active Call remains reachable through a compact badge."""
+        calls = self.controller.calls
+        calls.visible = False
+        calls.revision += 1
         self.refresh()
 
-    def _step(self, delta: int) -> None:
-        """Selects another exact request without activating it.
-
-        Args:
-            delta: Signed Previous/Next displacement.
-        Returns:
-            None
-        """
-        self.controller.calls.step(delta)
-        self.refresh()
-
-    def _perform(self, handle: str, action: str) -> None:
-        """Activates only the handle originally displayed by the pressed control.
-
-        Args:
-            handle: Bound per-client call identity.
-            action: Explicit control intent.
-        Returns:
-            None
-        """
-        if action == 'accept':
-            self.controller.calls.perform(handle, 'accept')
-        elif action == 'decline':
-            self.controller.calls.perform(handle, 'decline')
-        elif action == 'open':
-            self.controller.calls.perform(handle, 'open')
+    def _act(self, action: Callable[[], object]) -> None:
+        """Activates an exact displayed Call action and requests native repaint."""
+        action()
         self.refresh()

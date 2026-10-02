@@ -190,8 +190,12 @@ class LiveCoreTests(unittest.TestCase):
             {'first', 'second'},
         )
         self.assertEqual(len(self.gui.transcript.items), 2)
+        self.gui.state.route = Route('V09', self.h.onion, Delivery.LIVE)
         self.assertTrue(self.gui.live.fallback(self.h.onion, ('first',)))
         self.settle()
+        self.assertEqual(
+            self.gui.state.route, Route('V08', self.h.onion, Delivery.DROP)
+        )
         self.assertEqual(self.gui.state.status, '1 queued as Drop', self.observed)
         self.assertEqual(
             [
@@ -302,7 +306,7 @@ class LocalLiveTests(unittest.TestCase):
             )
         )
 
-    def test_local_close_releases_hidden_media_draft_and_override(self) -> None:
+    def test_local_close_releases_hidden_media_and_text_draft(self) -> None:
         """All local LIVE references disappear while unrelated DROP content remains.
 
         Args:
@@ -312,7 +316,6 @@ class LocalLiveTests(unittest.TestCase):
         """
         self.gui.state.set_draft('peer', Delivery.LIVE, 'unsent')
         self.gui.state.set_draft('peer', Delivery.DROP, 'keep')
-        self.gui.playback.auto.overrides[('peer', 1)] = True
         target = PlaybackTarget(
             0,
             'instance',
@@ -328,7 +331,6 @@ class LocalLiveTests(unittest.TestCase):
         self.assertIsNone(self.gui.playback.cache.read(target, 0, 2))
         self.assertNotIn(('peer', Delivery.LIVE), self.gui.state.drafts)
         self.assertEqual(self.gui.state.drafts[('peer', Delivery.DROP)], 'keep')
-        self.assertFalse(self.gui.playback.auto.overrides)
 
     def test_unknown_fallback_preserves_source_and_never_repeats(self) -> None:
         """A lost result cannot fabricate conversion or create another send operation.

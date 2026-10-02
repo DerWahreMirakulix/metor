@@ -42,43 +42,18 @@ def restrict(
         IpcEvent: Typed restriction event with optional proof challenge.
     """
     with self._lock:
-        device_lifecycle = cmd.device_lifecycle and conn in self._authenticated_clients
+        authenticated = conn in self._authenticated_clients
+        device_lifecycle = cmd.device_lifecycle and authenticated
         self._full_auth_clients.discard(conn)
         self._sensitive_auth_pending.pop(conn, None)
         self._sensitive_auth_grants.pop(conn, None)
-    continued_target = (
-        self._resolve_target(cmd.continued_live_target)
-        if cmd.live_while_locked and cmd.continued_live_target is not None
-        else None
-    )
-    continued_context = (
-        self._live_context(continued_target) if continued_target is not None else None
-    )
-    generation = (
-        self._live_generation(continued_target)
-        if continued_target is not None
-        else None
-    )
-    if (
-        cmd.continued_live_context_generation is not None
-        and generation != cmd.continued_live_context_generation
-    ) or (
-        type(continued_context) is int
-        and generation is not None
-        and continued_context != generation
-    ):
-        continued_target = None
-        continued_context = None
-        generation = None
     policy = RestrictedSessionPolicy(
         unlock_method=cmd.unlock_method,
-        continued_live_target=continued_target,
-        live_while_locked=cmd.live_while_locked,
-        accept_while_locked=cmd.accept_while_locked,
         notification_privacy=cmd.notification_privacy,
-        continued_live_context=continued_context,
+        accept_calls_locked=(
+            authenticated and cmd.accept_calls_locked and self._call_lock_acceptance()
+        ),
         device_lifecycle=device_lifecycle,
-        continued_live_generation=generation,
     )
     challenge: Optional[str] = None
     salt: Optional[str] = None
@@ -86,9 +61,9 @@ def restrict(
         self._restriction_generations[conn] = (
             self._restriction_generations.get(conn, 0) + 1
         )
-        self._call_handles.pop(conn, None)
-        self._accepted_calls.pop(conn, None)
-        self._authorized_calls.pop(conn, None)
+        self._invitation_handles.pop(conn, None)
+        self._accepted_invitations.pop(conn, None)
+        self._authorized_invitations.pop(conn, None)
         self._restricted[conn] = policy
         self._pin_failures.pop(conn, None)
         self._pin_disabled.discard(conn)
@@ -116,12 +91,7 @@ def restrict(
             'challenge': challenge,
             'salt': salt,
             'device_lifecycle': policy.device_lifecycle,
-            'continued_live_target': policy.continued_live_target
-            if policy.continued_live_context is not None
-            else None,
-            'continued_live_context_generation': policy.continued_live_generation
-            if policy.continued_live_context is not None
-            else None,
+            'accept_calls_locked': policy.accept_calls_locked,
         },
     )
 
@@ -310,7 +280,7 @@ def _complete_reauthorization(
         self._pin_disabled.discard(conn)
         self._sensitive_auth_pending.pop(conn, None)
         self._sensitive_auth_grants.pop(conn, None)
-        self._authorized_calls.pop(conn, None)
+        self._authorized_invitations.pop(conn, None)
         if full_password:
             self._full_auth_clients.add(conn)
         else:

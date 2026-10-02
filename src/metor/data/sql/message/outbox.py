@@ -59,28 +59,35 @@ class MessageOutboxMixin(MessageReceiptStore):
             for row in rows
         ]
 
-    def get_voice_draft_payloads(self) -> List[str]:
-        """Returns outbound DROP Voice metadata awaiting commit or cancellation.
-
-        Args:
-            None
-
-        Returns:
-            List[str]: Ordered draft metadata documents.
-        """
+    def get_voice_drafts(self) -> List[PendingLiveRecord]:
+        """Returns local uncommitted Voice drafts in either delivery mode."""
         rows = self._sql.fetchall(
-            'SELECT o.payload FROM message_receipts AS r '
+            'SELECT r.id, r.peer_onion, r.content_type, o.payload, r.msg_id, r.created_at '
+            'FROM message_receipts AS r '
             'INNER JOIN outbox_spool AS o ON o.receipt_id = r.id '
-            'WHERE r.direction = ? AND r.delivery = ? '
-            'AND r.content_type = ? AND r.status = ? ORDER BY r.id ASC',
+            'WHERE r.direction = ? AND r.content_type = ? AND r.status = ? '
+            'ORDER BY r.id ASC',
             (
                 MessageDirection.OUT.value,
-                Delivery.DROP.value,
                 ContentType.VOICE.value,
                 MessageStatus.DRAFT.value,
             ),
         )
-        return [str(row[0]) for row in rows]
+        return [
+            PendingLiveRecord(
+                receipt_id=int(str(row[0])),
+                peer_onion=str(row[1]),
+                content_type=str(row[2]),
+                payload=str(row[3]),
+                msg_id=str(row[4]),
+                timestamp=str(row[5]),
+            )
+            for row in rows
+        ]
+
+    def get_voice_draft_payloads(self) -> List[str]:
+        """Returns local draft metadata without granting publication."""
+        return [record.payload for record in self.get_voice_drafts()]
 
     def get_pending_live_outbox(
         self,
@@ -299,26 +306,38 @@ class MessageOutboxMixin(MessageReceiptStore):
             )
             return PendingLiveAdmission.ACCEPTED
 
-    def commit_voice_draft(self, contact_onion: str, msg_id: str) -> bool:
-        """Publishes one finalized outbound DROP Voice draft to the outbox.
+    def commit_voice_draft(
+        self,
+        contact_onion: str,
+        msg_id: str,
+        delivery: Delivery | None = None,
+        max_count: int = -1,
+        max_bytes: int = -1,
+    ) -> bool:
+        """Atomically publishes a finalized local draft with idempotent identity.
 
         Args:
-            contact_onion (str): Peer onion identity.
-            msg_id (str): Stable draft identity.
-
+            contact_onion: Exact immutable target.
+            msg_id: Local recording identity.
+            delivery: Explicit requested semantics; omitted preserves the draft mode.
+            max_count: Shared published LIVE pending-count bound.
+            max_bytes: Shared published LIVE byte bound.
         Returns:
-            bool: True when the draft became pending delivery.
+            bool: Confirmed pending/delivered publication, never a second message.
         """
         with self._sql.transaction() as cursor:
             receipt = self._get_receipt(
                 clean_onion(contact_onion), MessageDirection.OUT, msg_id, cursor
             )
-            if (
-                receipt is None
-                or receipt.delivery is not Delivery.DROP
-                or receipt.content_type is not ContentType.VOICE
-                or receipt.status is not MessageStatus.DRAFT
-            ):
+            if receipt is None or receipt.content_type is not ContentType.VOICE:
+                return False
+            selected = delivery if delivery is not None else receipt.delivery
+            if receipt.status is not MessageStatus.DRAFT:
+                return receipt.delivery is selected and receipt.status in {
+                    MessageStatus.PENDING,
+                    MessageStatus.DELIVERED,
+                }
+            if receipt.delivery is Delivery.DROP and selected is not Delivery.DROP:
                 return False
             rows = cursor.execute(
                 'SELECT payload FROM outbox_spool WHERE receipt_id = ?',
@@ -326,21 +345,48 @@ class MessageOutboxMixin(MessageReceiptStore):
             ).fetchall()
             if not rows or not self._voice_payload_finalized(str(rows[0][0])):
                 return False
-            payload = str(rows[0][0])
+            if selected is Delivery.LIVE:
+                totals = cursor.execute(
+                    'SELECT COUNT(*), COALESCE(SUM(retained_bytes), 0) FROM message_receipts '
+                    'WHERE peer_onion = ? AND direction = ? AND delivery = ? AND status = ?',
+                    (
+                        receipt.peer_onion,
+                        MessageDirection.OUT.value,
+                        Delivery.LIVE.value,
+                        MessageStatus.PENDING.value,
+                    ),
+                ).fetchone()
+                if (
+                    not isinstance(totals, tuple)
+                    or (max_count >= 0 and int(totals[0]) >= max_count)
+                    or (
+                        max_bytes >= 0
+                        and int(totals[1]) + receipt.retained_bytes > max_bytes
+                    )
+                ):
+                    return False
+            visible = int(selected is Delivery.DROP)
             cursor.execute(
-                'UPDATE message_receipts SET status = ?, visible_in_history = 1, '
+                'UPDATE message_receipts SET status = ?, delivery = ?, visible_in_history = ?, '
                 'updated_at = ? WHERE id = ?',
-                (MessageStatus.PENDING.value, self._now(), receipt.receipt_id),
+                (
+                    MessageStatus.PENDING.value,
+                    selected.value,
+                    visible,
+                    self._now(),
+                    receipt.receipt_id,
+                ),
             )
-            cursor.execute(
-                'INSERT INTO message_archive (receipt_id, payload) VALUES (?, ?) '
-                'ON CONFLICT(receipt_id) DO UPDATE SET payload = excluded.payload',
-                (receipt.receipt_id, payload),
-            )
+            if visible:
+                cursor.execute(
+                    'INSERT INTO message_archive (receipt_id, payload) VALUES (?, ?) '
+                    'ON CONFLICT(receipt_id) DO UPDATE SET payload = excluded.payload',
+                    (receipt.receipt_id, str(rows[0][0])),
+                )
             return True
 
     def cancel_voice_draft(self, contact_onion: str, msg_id: str) -> Optional[str]:
-        """Deletes one unsent DROP Voice draft and returns owned metadata.
+        """Deletes one unsent Voice draft and returns owned metadata.
 
         Args:
             contact_onion (str): Peer onion identity.
@@ -355,7 +401,6 @@ class MessageOutboxMixin(MessageReceiptStore):
             )
             if (
                 receipt is None
-                or receipt.delivery is not Delivery.DROP
                 or receipt.content_type is not ContentType.VOICE
                 or receipt.status is not MessageStatus.DRAFT
             ):

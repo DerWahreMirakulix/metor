@@ -27,6 +27,7 @@ from metor.core.api import (
     SendMessageCommand,
     TextContent,
     GetConnectionsCommand,
+    GetCallsCommand,
     SwitchCommand,
 )
 from metor.shared import escape_terminal_text
@@ -389,6 +390,7 @@ class Chat:
 
         self._ipc.start_listener()
         self._ipc.send_command(RegisterLiveConsumerCommand())
+        self._ipc.send_command(GetCallsCommand())
         self._handler._voice.request_inventory()
 
         self._renderer.print_empty_line()

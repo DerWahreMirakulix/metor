@@ -353,14 +353,16 @@ def exercise_peer_input(app: MetorApp) -> None:
     if peer is None:
         return
     entry, ptt = peer.composer.entry, peer.composer.ptt
-    if ptt.parent is None:
+    if peer.composer._mode == 'review':
         return
     original_status = app.controller.state.status
     with (
         patch.object(app.controller.voice, 'available', return_value=True),
+        patch.object(app.controller.voice, 'headset_confirmed', True),
         patch.object(app.controller.voice, 'down', return_value=False) as down,
     ):
         app.shell.render()
+        peer.composer.bar.do_layout()
         ptt.disabled = False
         ptt.focus = True
         Window.dispatch('on_key_down', 13, 40, '\r', [])
@@ -558,6 +560,7 @@ def main() -> None:
             'history',
             'voice',
             'review',
+            'review_live',
             'large',
             'responsive',
             'keyboard',
@@ -567,10 +570,6 @@ def main() -> None:
             'contact_sheet',
             'confirmation',
             'incoming',
-            'incoming_anonymous',
-            'continued',
-            'continued_recording',
-            'continued_pin',
             'locked_notice',
             'qr',
             'notifications',
@@ -731,6 +730,7 @@ def main() -> None:
         'live',
         'voice',
         'review',
+        'review_live',
         'large',
         'keyboard',
         'responsive',
@@ -783,14 +783,16 @@ def main() -> None:
                         text=f'Fixture message {number}',
                     )
                 )
-        if args.view == 'review':
+        if args.view in {'review', 'review_live'}:
+            controller.state.snapshot.live_contexts[0].context_generation = 7
             binding = CaptureBinding(
                 'synthetic-instance',
                 'simulator',
                 controller.state.generation,
                 'rhea',
-                Delivery.DROP,
+                delivery,
                 'review',
+                7 if delivery is Delivery.LIVE else None,
             )
             controller.voice.reviews['rhea'] = VoiceReview(binding, 32000, 1000)
     elif args.view in {'profiles', 'profile_editor', 'profile_address'}:
@@ -835,21 +837,15 @@ def main() -> None:
 
     call_focus: list[TextField] = []
     if args.view in {
-        'continued',
-        'continued_recording',
-        'continued_pin',
         'locked_notice',
     }:
-        from metor.ui.gui.runtime.security import ContinuedScope
-        from metor.ui.gui.runtime.voice.press import PressPhase, PressSource
-
         controller.state.covered = True
         controller.state.route = Route('V05')
         controller.state.snapshot = None
         controller.state.preferences = None
         controller.security.restriction = ClientRestrictedEvent(
             ClientUnlockMethod.PIN
-            if args.view in {'continued_pin', 'locked_notice'}
+            if args.view == 'locked_notice'
             else ClientUnlockMethod.NONE,
             '11' * 32,
             '22' * 16,
@@ -860,63 +856,41 @@ def main() -> None:
             if args.view == 'locked_notice'
             else NotificationPrivacy.OFF,
         )
-        scope = ContinuedScope('synthetic-instance', 'simulator', 'rhea', 1)
-        if args.view != 'locked_notice':
-            controller.security.continuation.requested = scope
-            controller.security.continuation.scope = scope
-        else:
 
-            def receive_notice(_elapsed: float) -> None:
-                """Receives anonymous metadata while a real masked PIN field retains focus.
+        def receive_notice(_elapsed: float) -> None:
+            """Receives anonymous metadata while a real masked PIN field retains focus.
 
-                Args:
-                    _elapsed: Native scheduler delay.
-                Returns:
-                    None
-                """
-                from metor.core.api import InboxNotificationEvent
+            Args:
+                _elapsed: Native scheduler delay.
+            Returns:
+                None
+            """
+            from metor.core.api import InboxNotificationEvent
 
-                assert app.shell is not None
-                field = next(
-                    (
-                        widget
-                        for widget in app.shell.walk()
-                        if isinstance(widget, SecretInput)
-                    ),
-                    None,
+            assert app.shell is not None
+            field = next(
+                (
+                    widget
+                    for widget in app.shell.walk()
+                    if isinstance(widget, SecretInput)
+                ),
+                None,
+            )
+            if field is None:
+                assert time.monotonic() - started < 30, (
+                    'Locked PIN field did not become ready'
                 )
-                if field is None:
-                    assert time.monotonic() - started < 30, (
-                        'Locked PIN field did not become ready'
-                    )
-                    Clock.schedule_once(receive_notice, 0.1)
-                    return
-                field.focus = True
-                call_focus.append(field)
-                controller.notifications.observe(
-                    InboxNotificationEvent('unknown', delivery=Delivery.DROP)
-                )
-                app.refresh()
+                Clock.schedule_once(receive_notice, 0.1)
+                return
+            field.focus = True
+            call_focus.append(field)
+            controller.notifications.observe(
+                InboxNotificationEvent('unknown', delivery=Delivery.DROP)
+            )
+            app.refresh()
 
-            Clock.schedule_once(receive_notice, 0.5)
-        if args.view == 'continued_recording':
-
-            def begin_fixture(_elapsed: float) -> None:
-                """Installs an admitted visual state after the initial native route departure.
-
-                Args:
-                    _elapsed: Native scheduling delay.
-                Returns:
-                    None
-                """
-                controller.voice.press.phase = PressPhase.RECORDING
-                controller.voice.press.held.add(PressSource.PHYSICAL)
-                controller.voice.press.source = PressSource.PHYSICAL
-                controller.voice.accepted_bytes = 32000 * 65
-                app.refresh()
-
-            Clock.schedule_once(begin_fixture, 0.5)
-    if args.view in {'incoming', 'incoming_anonymous'}:
+        Clock.schedule_once(receive_notice, 0.5)
+    if args.view in {'incoming'}:
         controller.state.route = Route('V08', 'rhea', Delivery.DROP)
         controller.state.covered = False
 
@@ -930,38 +904,25 @@ def main() -> None:
                 fields[0].text = 'Draft stays here'
                 fields[0].focus = True
                 call_focus.append(fields[0])
-            if args.view == 'incoming_anonymous':
-                controller.state.covered = True
-                controller.state.route = Route('V05')
-                controller.state.snapshot = None
-                controller.security._policy = replace(
-                    controller.security._policy,
-                    notifications_locked=NotificationPrivacy.ANONYMIZE,
+            assert controller.state.snapshot is not None
+            controller.state.snapshot.pending = [
+                PendingConnectionEntry(
+                    name,
+                    peer,
+                    ConnectionOrigin.INCOMING,
+                    PendingConnectionReasonCode.USER_ACCEPT,
+                    action_handle=handle,
                 )
-                controller.security.restriction = ClientRestrictedEvent(
-                    ClientUnlockMethod.NONE
-                )
-                call_focus.clear()
-            else:
-                assert controller.state.snapshot is not None
-                controller.state.snapshot.pending = [
-                    PendingConnectionEntry(
-                        name,
-                        peer,
-                        ConnectionOrigin.INCOMING,
-                        PendingConnectionReasonCode.USER_ACCEPT,
-                        action_handle=handle,
-                    )
-                    for name, peer, handle in [
-                        ('Orion', 'orion', 'first'),
-                        ('Lyra', 'lyra', 'second'),
-                    ]
+                for name, peer, handle in [
+                    ('Orion', 'orion', 'first'),
+                    ('Lyra', 'lyra', 'second'),
                 ]
+            ]
             with patch.object(controller.voice, 'depart') as depart:
-                controller.calls.observe(
+                controller.live_invitations.observe(
                     IncomingConnectionEvent('Orion', 'orion', 'first')
                 )
-                controller.calls.observe(
+                controller.live_invitations.observe(
                     IncomingConnectionEvent('Lyra', 'lyra', 'second')
                 )
                 assert depart.call_count == 0
@@ -973,7 +934,6 @@ def main() -> None:
     local_keyboard_checked = 0
     settled_frames = 0
     confirmation_checked = False
-    continued_pin_checked = False
     native_probes_done = False
 
     def open_keyboard(_elapsed: float) -> None:
@@ -1026,10 +986,6 @@ def main() -> None:
             return
         if args.view in {
             'incoming',
-            'incoming_anonymous',
-            'continued',
-            'continued_recording',
-            'continued_pin',
             'locked_notice',
             'context_menu',
             'device_power',
@@ -1199,75 +1155,25 @@ def main() -> None:
             sheet = ActionSheet.current
             assert sheet is not None
             sheet.cancel.focus = True
-            controller.calls.observe(
+            controller.live_invitations.observe(
                 IncomingConnectionEvent('Orion', 'orion', 'modal-call')
             )
             ActionSheet.reconcile()
             assert ActionSheet.current is sheet and sheet.cancel.focus
-            assert sheet.call_indicator.parent is sheet.header
-            sheet.call_indicator.dispatch('on_release')
+            assert sheet.invitation_indicator.parent is sheet.header
+            sheet.invitation_indicator.dispatch('on_release')
             assert ActionSheet.current is None and not confirmed_actions
             assert (
-                controller.calls.visible and controller.calls.selected == 'modal-call'
+                controller.live_invitations.visible
+                and controller.live_invitations.selected == 'modal-call'
             )
             assert not sheet.body.children
-            controller.calls.clear()
+            controller.live_invitations.clear()
             show_confirmation()
             confirmation_checked = True
             Clock.schedule_once(capture, 0.2)
             return
-        if args.view in {'continued', 'continued_recording', 'continued_pin'}:
-            overlay = app.continued_overlay
-            assert overlay is not None
-            panel, ptt, label = overlay.panel, overlay.ptt, overlay.label
-            assert panel is not None and ptt is not None and label is not None
-            assert panel.y >= dp(24)
-            assert ptt.height >= dp(48)
-            assert panel.right <= Window.width - dp(24)
-            if args.view == 'continued_pin' and not continued_pin_checked:
-                scroll = next(
-                    widget
-                    for widget in app.shell.walk()
-                    if isinstance(widget, ScrollView)
-                )
-                scroll.scroll_y = 0
-
-                def check_bottom(_elapsed: float) -> None:
-                    """Verifies the scrolled unlock actions remain above the media strip.
-
-                    Args:
-                        _elapsed: Native layout delay.
-                    Returns:
-                        None
-                    """
-                    nonlocal continued_pin_checked
-                    assert app.shell is not None
-                    actions = [
-                        widget
-                        for widget in app.shell.walk()
-                        if isinstance(widget, Action)
-                        and widget.accessible_name in {'Unlock', 'Forgot PIN?'}
-                    ]
-                    assert len(actions) == 2
-                    for action in actions:
-                        assert action.to_window(*action.pos)[1] >= panel.top
-                        assert action.height >= dp(48)
-                    continued_pin_checked = True
-                    scroll.scroll_y = 1
-                    Clock.schedule_once(capture, 0.2)
-
-                Clock.schedule_once(check_bottom, 0.2)
-                return
-            assert not any(
-                identity in str(getattr(widget, 'text', '')).lower()
-                for widget in app.viewport.parent.walk()
-                for identity in ('rhea', 'simulator', 'synthetic-instance')
-            )
-            if args.view == 'continued_recording':
-                assert label.text == 'Recording · 1:05'
-                assert ptt.label.text == 'Release to finish'
-            capture_viewport(app.viewport.parent, args.output)
-        elif args.view == 'locked_notice':
+        if args.view == 'locked_notice':
             from metor.ui.gui.views.security import LockedActivity
 
             cue = next(
@@ -1281,9 +1187,11 @@ def main() -> None:
             assert cue.label.text == 'New Drop · Unlock to view'
             assert call_focus and all(field.focus for field in call_focus)
             capture_viewport(app.viewport.parent, args.output)
-        elif args.view in {'incoming', 'incoming_anonymous'}:
-            assert app.call_overlay is not None and app.call_overlay.children
-            assert controller.calls.selected == 'first'
+        elif args.view in {'incoming'}:
+            assert (
+                app.invitation_overlay is not None and app.invitation_overlay.children
+            )
+            assert controller.live_invitations.selected == 'first'
             for field in call_focus:
                 assert field.focus and field.text == 'Draft stays here'
             capture_viewport(app.viewport.parent, args.output)
@@ -1319,7 +1227,7 @@ def main() -> None:
                     'window': list(widget.to_window(*widget.pos)),
                 }
                 for widget in app.shell.walk()
-                if args.view in {'continued_pin', 'locked_notice'}
+                if args.view == 'locked_notice'
                 and getattr(widget, 'text', '')
                 in {'Metor', 'Locked', 'PIN', 'Forgot PIN?'}
                 and (canvas := widget.canvas) is not None
@@ -1337,7 +1245,7 @@ def main() -> None:
                     ],
                 }
                 for widget in app.shell.walk()
-                if args.view == 'continued_pin'
+                if args.view == 'lock'
                 and type(widget).__name__ == 'ScrollView'
                 and (canvas := widget.canvas) is not None
                 and (before_canvas := canvas.before) is not None

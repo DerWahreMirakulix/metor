@@ -841,13 +841,16 @@
     }
   },
   "ipc": {
-    "current": 3,
-    "minimum_supported": 3,
+    "current": 4,
+    "minimum_supported": 4,
     "schema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "commands": {
         "accept": {
           "$ref": "#/definitions/AcceptCommand"
+        },
+        "accept_call": {
+          "$ref": "#/definitions/AcceptCallCommand"
         },
         "add_contact": {
           "$ref": "#/definitions/AddContactCommand"
@@ -863,6 +866,9 @@
         },
         "begin_voice": {
           "$ref": "#/definitions/BeginVoiceCommand"
+        },
+        "cancel_call": {
+          "$ref": "#/definitions/CancelCallCommand"
         },
         "cancel_voice": {
           "$ref": "#/definitions/CancelVoiceCommand"
@@ -915,6 +921,9 @@
         "get_address": {
           "$ref": "#/definitions/GetAddressCommand"
         },
+        "get_calls": {
+          "$ref": "#/definitions/GetCallsCommand"
+        },
         "get_chat_startup_state": {
           "$ref": "#/definitions/GetChatStartupStateCommand"
         },
@@ -966,6 +975,9 @@
         "get_voice_chunk": {
           "$ref": "#/definitions/GetVoiceChunkCommand"
         },
+        "hangup_call": {
+          "$ref": "#/definitions/HangupCallCommand"
+        },
         "init": {
           "$ref": "#/definitions/InitCommand"
         },
@@ -981,8 +993,14 @@
         "migrate_profile_security": {
           "$ref": "#/definitions/MigrateProfileSecurityCommand"
         },
+        "mute_call": {
+          "$ref": "#/definitions/MuteCallCommand"
+        },
         "prepare_profile_exit": {
           "$ref": "#/definitions/PrepareProfileExitCommand"
+        },
+        "read_call_audio": {
+          "$ref": "#/definitions/ReadCallAudioCommand"
         },
         "reauthorize_client": {
           "$ref": "#/definitions/ReauthorizeClientCommand"
@@ -995,6 +1013,9 @@
         },
         "reject": {
           "$ref": "#/definitions/RejectCommand"
+        },
+        "reject_call": {
+          "$ref": "#/definitions/RejectCallCommand"
         },
         "release_voice": {
           "$ref": "#/definitions/ReleaseVoiceCommand"
@@ -1023,6 +1044,9 @@
         "self_destruct": {
           "$ref": "#/definitions/SelfDestructCommand"
         },
+        "send_call_audio": {
+          "$ref": "#/definitions/SendCallAudioCommand"
+        },
         "send_message": {
           "$ref": "#/definitions/SendMessageCommand"
         },
@@ -1038,6 +1062,9 @@
         "set_setting": {
           "$ref": "#/definitions/SetSettingCommand"
         },
+        "start_call": {
+          "$ref": "#/definitions/StartCallCommand"
+        },
         "switch": {
           "$ref": "#/definitions/SwitchCommand"
         },
@@ -1049,6 +1076,33 @@
         }
       },
       "definitions": {
+        "AcceptCallCommand": {
+          "additionalProperties": false,
+          "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "command_type": {
+              "const": "accept_call",
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "command_type"
+          ],
+          "title": "AcceptCallCommand",
+          "type": "object"
+        },
         "AcceptCommand": {
           "additionalProperties": false,
           "properties": {
@@ -2035,6 +2089,433 @@
           "title": "BeginVoiceCommand",
           "type": "object"
         },
+        "CallAudioEvent": {
+          "additionalProperties": false,
+          "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "event_type": {
+              "const": "call_audio",
+              "type": "string"
+            },
+            "frames": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "data": {
+                    "type": "string"
+                  },
+                  "sequence": {
+                    "type": "integer"
+                  }
+                },
+                "title": "CallAudioFrame",
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "revision": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "event_type"
+          ],
+          "title": "CallAudioEvent",
+          "type": "object"
+        },
+        "CallAudioSentEvent": {
+          "additionalProperties": false,
+          "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "event_type": {
+              "const": "call_audio_sent",
+              "type": "string"
+            },
+            "next_sequence": {
+              "type": "integer"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "revision": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "event_type"
+          ],
+          "title": "CallAudioSentEvent",
+          "type": "object"
+        },
+        "CallRejectedEvent": {
+          "additionalProperties": false,
+          "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "event_type": {
+              "const": "call_rejected",
+              "type": "string"
+            },
+            "reason": {
+              "enum": [
+                "rejected",
+                "cancelled",
+                "hung_up",
+                "timeout",
+                "transport_lost",
+                "busy",
+                "unsupported",
+                "client_lost",
+                "profile_locked",
+                "invalid_state",
+                "not_owner",
+                "malformed"
+              ],
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "revision": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "event_type"
+          ],
+          "title": "CallRejectedEvent",
+          "type": "object"
+        },
+        "CallStateEvent": {
+          "additionalProperties": false,
+          "properties": {
+            "call": {
+              "additionalProperties": false,
+              "properties": {
+                "alias": {
+                  "type": "string"
+                },
+                "call_id": {
+                  "type": "string"
+                },
+                "muted": {
+                  "type": "boolean"
+                },
+                "owned": {
+                  "type": "boolean"
+                },
+                "peer": {
+                  "type": "string"
+                },
+                "reason": {
+                  "anyOf": [
+                    {
+                      "enum": [
+                        "rejected",
+                        "cancelled",
+                        "hung_up",
+                        "timeout",
+                        "transport_lost",
+                        "busy",
+                        "unsupported",
+                        "client_lost",
+                        "profile_locked",
+                        "invalid_state",
+                        "not_owner",
+                        "malformed"
+                      ],
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "started_at": {
+                  "anyOf": [
+                    {
+                      "type": "number"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "state": {
+                  "enum": [
+                    "connecting",
+                    "outgoing",
+                    "incoming",
+                    "active",
+                    "ended"
+                  ],
+                  "type": "string"
+                }
+              },
+              "title": "CallInfo",
+              "type": "object"
+            },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "event_type": {
+              "const": "call_state",
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "revision": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "event_type"
+          ],
+          "title": "CallStateEvent",
+          "type": "object"
+        },
+        "CallsStateEvent": {
+          "additionalProperties": false,
+          "properties": {
+            "calls": {
+              "items": {
+                "additionalProperties": false,
+                "properties": {
+                  "alias": {
+                    "type": "string"
+                  },
+                  "call_id": {
+                    "type": "string"
+                  },
+                  "muted": {
+                    "type": "boolean"
+                  },
+                  "owned": {
+                    "type": "boolean"
+                  },
+                  "peer": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "anyOf": [
+                      {
+                        "enum": [
+                          "rejected",
+                          "cancelled",
+                          "hung_up",
+                          "timeout",
+                          "transport_lost",
+                          "busy",
+                          "unsupported",
+                          "client_lost",
+                          "profile_locked",
+                          "invalid_state",
+                          "not_owner",
+                          "malformed"
+                        ],
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "started_at": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "state": {
+                    "enum": [
+                      "connecting",
+                      "outgoing",
+                      "incoming",
+                      "active",
+                      "ended"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "title": "CallInfo",
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "epoch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "event_type": {
+              "const": "calls_state",
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "revision": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "event_type"
+          ],
+          "title": "CallsStateEvent",
+          "type": "object"
+        },
+        "CancelCallCommand": {
+          "additionalProperties": false,
+          "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "command_type": {
+              "const": "cancel_call",
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "command_type"
+          ],
+          "title": "CancelCallCommand",
+          "type": "object"
+        },
         "CancelVoiceCommand": {
           "additionalProperties": false,
           "properties": {
@@ -2620,27 +3101,10 @@
         "ClientRestrictedEvent": {
           "additionalProperties": false,
           "properties": {
+            "accept_calls_locked": {
+              "type": "boolean"
+            },
             "challenge": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "continued_live_context_generation": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "continued_live_target": {
               "anyOf": [
                 {
                   "type": "string"
@@ -2766,6 +3230,30 @@
             "command_type": {
               "const": "commit_voice",
               "type": "string"
+            },
+            "context_generation": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "delivery": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "live",
+                    "drop"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             },
             "msg_id": {
               "type": "string"
@@ -5464,6 +5952,30 @@
           "title": "GetAddressCommand",
           "type": "object"
         },
+        "GetCallsCommand": {
+          "additionalProperties": false,
+          "properties": {
+            "command_type": {
+              "const": "get_calls",
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "command_type"
+          ],
+          "title": "GetCallsCommand",
+          "type": "object"
+        },
         "GetChatStartupStateCommand": {
           "additionalProperties": false,
           "properties": {
@@ -6100,22 +6612,11 @@
             "preferences": {
               "additionalProperties": false,
               "properties": {
-                "accept_live_locked": {
-                  "enum": [
-                    "all",
-                    "saved_contacts",
-                    "none"
-                  ],
-                  "type": "string"
-                },
-                "auto_play": {
+                "accept_calls_locked": {
                   "type": "boolean"
                 },
                 "idle_seconds": {
                   "type": "integer"
-                },
-                "keep_live_locked": {
-                  "type": "boolean"
                 },
                 "keyboard_layout": {
                   "type": "string"
@@ -6239,6 +6740,33 @@
             "event_type"
           ],
           "title": "GuiPreferencesRejectedEvent",
+          "type": "object"
+        },
+        "HangupCallCommand": {
+          "additionalProperties": false,
+          "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "command_type": {
+              "const": "hangup_call",
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "command_type"
+          ],
+          "title": "HangupCallCommand",
           "type": "object"
         },
         "HistoryClearFailedEvent": {
@@ -9331,6 +9859,36 @@
           "title": "MigrateProfileSecurityCommand",
           "type": "object"
         },
+        "MuteCallCommand": {
+          "additionalProperties": false,
+          "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "command_type": {
+              "const": "mute_call",
+              "type": "string"
+            },
+            "muted": {
+              "type": "boolean"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "command_type"
+          ],
+          "title": "MuteCallCommand",
+          "type": "object"
+        },
         "NoConnectionToDisconnectEvent": {
           "additionalProperties": false,
           "properties": {
@@ -10641,6 +11199,36 @@
           "title": "QuickUnlockFailedEvent",
           "type": "object"
         },
+        "ReadCallAudioCommand": {
+          "additionalProperties": false,
+          "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "command_type": {
+              "const": "read_call_audio",
+              "type": "string"
+            },
+            "max_frames": {
+              "type": "integer"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "command_type"
+          ],
+          "title": "ReadCallAudioCommand",
+          "type": "object"
+        },
         "ReadReceiptEvent": {
           "additionalProperties": false,
           "properties": {
@@ -10777,7 +11365,7 @@
               "const": "register_voice_owner",
               "type": "string"
             },
-            "disposable_drop": {
+            "protected_staging": {
               "type": "boolean"
             },
             "request_id": {
@@ -10795,6 +11383,33 @@
             "command_type"
           ],
           "title": "RegisterVoiceOwnerCommand",
+          "type": "object"
+        },
+        "RejectCallCommand": {
+          "additionalProperties": false,
+          "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "command_type": {
+              "const": "reject_call",
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          },
+          "required": [
+            "command_type"
+          ],
+          "title": "RejectCallCommand",
           "type": "object"
         },
         "RejectCommand": {
@@ -11115,42 +11730,14 @@
         "RestrictClientCommand": {
           "additionalProperties": false,
           "properties": {
-            "accept_while_locked": {
-              "enum": [
-                "all",
-                "saved_contacts",
-                "none"
-              ],
-              "type": "string"
+            "accept_calls_locked": {
+              "type": "boolean"
             },
             "command_type": {
               "const": "restrict_client",
               "type": "string"
             },
-            "continued_live_context_generation": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "continued_live_target": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
             "device_lifecycle": {
-              "type": "boolean"
-            },
-            "live_while_locked": {
               "type": "boolean"
             },
             "notification_privacy": {
@@ -11189,39 +11776,8 @@
         "RestrictedClientStateEvent": {
           "additionalProperties": false,
           "properties": {
-            "accept_while_locked": {
-              "enum": [
-                "all",
-                "saved_contacts",
-                "none"
-              ],
-              "type": "string"
-            },
-            "accepted_handles": {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            "continued_live_context_generation": {
-              "anyOf": [
-                {
-                  "type": "integer"
-                },
-                {
-                  "type": "null"
-                }
-              ]
-            },
-            "continued_live_target": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ]
+            "accept_calls_locked": {
+              "type": "boolean"
             },
             "epoch": {
               "anyOf": [
@@ -11245,74 +11801,6 @@
               ],
               "type": "string"
             },
-            "pending": {
-              "items": {
-                "additionalProperties": false,
-                "properties": {
-                  "action_handle": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "alias": {
-                    "type": "string"
-                  },
-                  "expires_at": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "onion": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
-                  "origin": {
-                    "enum": [
-                      "manual",
-                      "auto_reconnect",
-                      "retunnel",
-                      "incoming",
-                      "grace_reconnect",
-                      "mutual_connect",
-                      "auto_accept_contact"
-                    ],
-                    "type": "string"
-                  },
-                  "reason": {
-                    "enum": [
-                      "user_accept",
-                      "consumer_absent"
-                    ],
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "alias",
-                  "onion",
-                  "origin",
-                  "reason"
-                ],
-                "title": "PendingConnectionEntry",
-                "type": "object"
-              },
-              "type": "array"
-            },
             "request_id": {
               "anyOf": [
                 {
@@ -11335,9 +11823,6 @@
                   "type": "null"
                 }
               ]
-            },
-            "session_state": {
-              "type": "string"
             }
           },
           "required": [
@@ -11392,6 +11877,16 @@
                       "voice"
                     ],
                     "type": "string"
+                  },
+                  "context_generation": {
+                    "anyOf": [
+                      {
+                        "type": "integer"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
                   },
                   "delivery": {
                     "enum": [
@@ -11882,16 +12377,6 @@
                   "alias": {
                     "type": "string"
                   },
-                  "call_handle": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "type": "null"
-                      }
-                    ]
-                  },
                   "context_generation": {
                     "anyOf": [
                       {
@@ -11937,6 +12422,16 @@
                           "invalid_peer_frame",
                           "idle_timeout"
                         ],
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "invitation_handle": {
+                    "anyOf": [
+                      {
                         "type": "string"
                       },
                       {
@@ -12592,6 +13087,39 @@
           "title": "SelfDestructSafeEvent",
           "type": "object"
         },
+        "SendCallAudioCommand": {
+          "additionalProperties": false,
+          "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "command_type": {
+              "const": "send_call_audio",
+              "type": "string"
+            },
+            "data": {
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "sequence": {
+              "type": "integer"
+            }
+          },
+          "required": [
+            "command_type"
+          ],
+          "title": "SendCallAudioCommand",
+          "type": "object"
+        },
         "SendMessageCommand": {
           "additionalProperties": false,
           "properties": {
@@ -12837,22 +13365,11 @@
             "preferences": {
               "additionalProperties": false,
               "properties": {
-                "accept_live_locked": {
-                  "enum": [
-                    "all",
-                    "saved_contacts",
-                    "none"
-                  ],
-                  "type": "string"
-                },
-                "auto_play": {
+                "accept_calls_locked": {
                   "type": "boolean"
                 },
                 "idle_seconds": {
                   "type": "integer"
-                },
-                "keep_live_locked": {
-                  "type": "boolean"
                 },
                 "keyboard_layout": {
                   "type": "string"
@@ -13277,6 +13794,36 @@
             "scope"
           ],
           "title": "SettingsListDataEvent",
+          "type": "object"
+        },
+        "StartCallCommand": {
+          "additionalProperties": false,
+          "properties": {
+            "call_id": {
+              "type": "string"
+            },
+            "command_type": {
+              "const": "start_call",
+              "type": "string"
+            },
+            "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "target": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "command_type"
+          ],
+          "title": "StartCallCommand",
           "type": "object"
         },
         "SwitchCommand": {
@@ -14389,6 +14936,13 @@
             "alias": {
               "type": "string"
             },
+            "delivery": {
+              "enum": [
+                "live",
+                "drop"
+              ],
+              "type": "string"
+            },
             "epoch": {
               "anyOf": [
                 {
@@ -15357,6 +15911,21 @@
         "auto_reconnect_scheduled": {
           "$ref": "#/definitions/AutoReconnectScheduledEvent"
         },
+        "call_audio": {
+          "$ref": "#/definitions/CallAudioEvent"
+        },
+        "call_audio_sent": {
+          "$ref": "#/definitions/CallAudioSentEvent"
+        },
+        "call_rejected": {
+          "$ref": "#/definitions/CallRejectedEvent"
+        },
+        "call_state": {
+          "$ref": "#/definitions/CallStateEvent"
+        },
+        "calls_state": {
+          "$ref": "#/definitions/CallsStateEvent"
+        },
         "cannot_connect_self": {
           "$ref": "#/definitions/CannotConnectSelfEvent"
         },
@@ -15855,12 +16424,18 @@
         "/voice_begin",
         "/voice_chunk",
         "/voice_commit_ack",
-        "/voice_end"
+        "/voice_end",
+        "CALL_ACCEPT",
+        "CALL_AUDIO",
+        "CALL_CHAT_END",
+        "CALL_END",
+        "CALL_OFFER",
+        "CALL_PING"
       ],
       "framing": "newline-delimited UTF-8 command frames",
       "negotiation": "highest generation in the inclusive range overlap"
     },
-    "current": 3,
-    "minimum_supported": 3
+    "current": 4,
+    "minimum_supported": 4
   }
 }

@@ -95,6 +95,7 @@ class RetainedMessageRecord:
     codec: Optional[str] = None
     duration_ms: Optional[int] = None
     producer_interrupted: bool = False
+    context_generation: Optional[int] = None
 
 
 @dataclass(frozen=True)

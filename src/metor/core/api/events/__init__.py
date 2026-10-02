@@ -1,5 +1,13 @@
 """Facade exports for strict daemon-to-UI DTO packages."""
 
+from metor.core.api.events.calls import (
+    CallStateEvent,
+    CallsStateEvent,
+    CallAudioSentEvent,
+    CallAudioEvent,
+    CallRejectedEvent,
+)
+
 from metor.core.api.events.producers import (
     VoiceOwnerRegisteredEvent,
     VoiceOwnerReleasedEvent,
@@ -198,6 +206,11 @@ from metor.core.api.events.transport import (
 
 
 __all__ = [
+    'CallStateEvent',
+    'CallsStateEvent',
+    'CallAudioSentEvent',
+    'CallAudioEvent',
+    'CallRejectedEvent',
     'FrontendLeaseEvent',
     'VoiceOwnerRegisteredEvent',
     'VoiceOwnerReleasedEvent',

@@ -27,3 +27,4 @@ class VoiceTurn:
     pressure_emitted: bool = False
     context_generation: int | None = None
     fallback_committed: bool = False
+    published: bool = False

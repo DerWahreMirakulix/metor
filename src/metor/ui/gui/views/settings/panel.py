@@ -15,7 +15,7 @@ from metor.ui.gui.widgets import Action, Label, SettingRow
 # Local Package Imports
 from ..audio import audio_routes_body
 from ..actions import clear_drops
-from .preferences import live_preferences
+from .preferences import call_preferences
 from .descriptors import core_settings_group
 from .device import device_settings_group
 from .timeout import TimeoutEditor
@@ -77,7 +77,7 @@ def settings_body(controller: GuiController, refresh: Callable[[], None]) -> Box
             state.status = 'That setting value is not supported'
         refresh()
 
-    live_preferences(controller, body, preferences, save)
+    call_preferences(controller, body, preferences, save)
     core_settings_group(controller, body, 'Live')
     body.add_widget(Label('Privacy', role='peer'))
     core_settings_group(controller, body, 'Privacy')

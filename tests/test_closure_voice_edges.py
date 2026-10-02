@@ -19,6 +19,7 @@ from metor.core.api import (
     VoiceResourceLimitEvent,
     VoiceResourcePressureEvent,
 )
+from metor.client import MetorRequestRejectedError
 from metor.data import MessageDirection, MessageStatus, SettingKey
 from metor.data.blob import BlobLifecycle
 
@@ -78,7 +79,17 @@ class ClosureVoiceEdgeTests(unittest.TestCase):
                     self.assertIsNotNone(
                         client.begin_voice(f.receiver_alias, delivery, scenario, 'opus')
                     )
-                    if scenario == 'exact':
+                    if scenario == 'shared':
+                        result = client.append_voice(
+                            scenario, 0, base64.b64encode(b'abcde').decode()
+                        )
+                        self.assertIsInstance(result, VoiceChunkAcceptedEvent)
+                        self.assertFalse(finished.is_set())
+                        self.assertIsNotNone(client.finalize_voice(scenario, 20))
+                        with self.assertRaises(MetorRequestRejectedError):
+                            client.commit_voice(f.receiver_alias, scenario)
+                        expected_size = 5
+                    elif scenario == 'exact':
                         result = client.append_voice(
                             scenario, 0, base64.b64encode(b'abcd').decode()
                         )
@@ -100,13 +111,22 @@ class ClosureVoiceEdgeTests(unittest.TestCase):
                     json.loads(record.payload)['size_bytes'], expected_size
                 )
                 self.assertTrue(json.loads(record.payload)['finalized'])
-                if delivery is Delivery.DROP:
-                    self.assertFalse(
-                        any(
-                            row[4] == scenario
-                            for row in f.sender_messages.get_pending_outbox()
-                        )
+                self.assertEqual(record.status, MessageStatus.DRAFT.value)
+                self.assertFalse(
+                    any(
+                        row[4] == scenario
+                        for row in f.sender_messages.get_pending_outbox()
                     )
+                )
+                self.assertFalse(
+                    any(
+                        row.msg_id == scenario
+                        for row in f.sender_messages.get_pending_live_outbox()
+                    )
+                )
+                peer.setblocking(False)
+                with self.assertRaises(BlockingIOError):
+                    peer.recv(1)
                 if scenario == 'exact':
                     # Delivery to the callback may lag the correlated result.
                     self.assertTrue(

@@ -10,7 +10,6 @@ from metor.core.api.codes.history import (
 )
 from metor.core.api.codes.access import (
     ClientUnlockMethod,
-    LockedAcceptPolicy,
     NotificationPrivacy,
     QuickUnlockAction,
 )
@@ -33,7 +32,6 @@ from metor.core.api.codes.transport import (
 __all__ = [
     'CommandType',
     'ClientUnlockMethod',
-    'LockedAcceptPolicy',
     'NotificationPrivacy',
     'QuickUnlockAction',
     'EventType',

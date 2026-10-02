@@ -12,14 +12,16 @@ import unittest
 from unittest.mock import Mock, patch
 
 import test_gui_producers as support
-from metor.client import FrontendProfileState
+from metor.client import FrontendProfileState, MetorRequestRejectedError
 from metor.core.api import (
     Delivery,
-    GuiPreferencesEvent,
     IpcEvent,
     MessageDirectionCode,
-    SetGuiPreferencesCommand,
     VoiceFinalizedEvent,
+    VoiceCommittedEvent,
+    VoiceContent,
+    SendMessageCommand,
+    MessageOperationReason,
 )
 from metor.client import FrontendLaunchContext, MetorClient, build_session_auth_proof
 from metor.core.daemon.managed.network.router.admission import FrameAdmission
@@ -162,6 +164,44 @@ class CaptureIntegrationTests(unittest.TestCase):
         self.assertEqual(record.status, 'draft')
         self.assertEqual(self.h.messages.get_pending_outbox(), [])
 
+    def test_generic_send_cannot_publish_an_active_voice_draft(self) -> None:
+        """An explicit blob-reference message cannot bypass staged review in either mode."""
+        for delivery in (Delivery.DROP, Delivery.LIVE):
+            with self.subTest(delivery=delivery):
+                identity = 'generic-send-' + delivery.value
+                metadata = self.h.capture(identity, delivery)
+                voice = self.h.daemon._network._router._voice
+                assert voice is not None
+                with patch.object(voice, '_send_begin') as peer_emission:
+                    with self.assertRaises(MetorRequestRejectedError) as rejected:
+                        self.h.client.request(
+                            SendMessageCommand(
+                                self.h.onion,
+                                delivery,
+                                VoiceContent(
+                                    str(metadata['blob_id']), PcmVoice.CODEC, 640
+                                ),
+                                identity,
+                            ),
+                            VoiceCommittedEvent,
+                        )
+                    self.assertEqual(
+                        rejected.exception.event.reason,
+                        MessageOperationReason.UNSUPPORTED_CONTENT,
+                    )
+                    peer_emission.assert_not_called()
+                record = self.h.messages.get_voice_payload(
+                    self.h.onion, identity, MessageDirection.OUT
+                )
+                self.assertEqual(record.status, 'draft')
+                self.assertFalse(json.loads(record.payload)['finalized'])
+                self.assertEqual(self.h.messages.get_pending_outbox(), [])
+                self.assertIsNotNone(
+                    self.h.client.cancel_voice(
+                        self.h.onion, identity, owner_token=self.h.owner
+                    )
+                )
+
     def test_blocked_optional_notification_does_not_delay_media_progress(self) -> None:
         """Sink I/O cannot retain the caller while actual SDK capture advances."""
         entered, release = threading.Event(), threading.Event()
@@ -203,6 +243,11 @@ class CaptureIntegrationTests(unittest.TestCase):
         worker, _audio, _updates = self.run_capture([payload])
         self.assertTrue(worker.completion_confirmed)
         self.assertEqual(self.cache.read(worker.cache_target, 0, 640), (payload, 640))
+        self.assertIsNotNone(
+            self.h.client.cancel_voice(
+                self.h.onion, self.binding.msg_id, owner_token=self.h.owner
+            )
+        )
         self.binding = replace(self.binding, msg_id='lost-live-source')
         original = self.h.client.append_voice
 
@@ -269,7 +314,7 @@ class CaptureIntegrationTests(unittest.TestCase):
         self.assertEqual(self.h.messages.get_pending_outbox(), [])
 
     def test_full_gui_capture_and_sent_playback_overlap_over_real_sdk(self) -> None:
-        """Incoming LIVE autoplay and local capture overlap through SDK/Core IO."""
+        """Manual LIVE playback and local staged capture overlap through SDK/Core IO."""
         payload = b'\x00\x01' * 320
         foreign_payload = b'\x02\x03' * 320
         local, peer = socket.socketpair()
@@ -314,16 +359,9 @@ class CaptureIntegrationTests(unittest.TestCase):
         self.assertIsNotNone(activation.owner)
         self.assertIsNotNone(activation.preferences)
         assert activation.owner is not None and activation.preferences is not None
-        preferences = gui_client.request(
-            SetGuiPreferencesCommand(
-                activation.preferences.preferences_revision,
-                replace(activation.preferences.preferences, auto_play=True),
-            ),
-            GuiPreferencesEvent,
-        )
         controller.state.snapshot = activation.snapshot
         controller.state.capabilities = frozenset(initialized.capabilities)
-        controller.state.preferences = preferences
+        controller.state.preferences = activation.preferences
         controller.voice_owner.token = activation.owner.owner_token
         controller.state.covered = False
         controller.state.route = Route('V09', self.h.onion, Delivery.LIVE)
@@ -339,8 +377,6 @@ class CaptureIntegrationTests(unittest.TestCase):
 
         output = ConcurrentOutput(lambda: controller.voice.running)
         controller.playback.audio = output
-        controller.playback.auto.reconcile()
-        self.assertTrue(controller.playback.auto.enabled(self.h.onion))
 
         router = self.h.daemon._network._router
         voice = router._voice
@@ -403,9 +439,18 @@ class CaptureIntegrationTests(unittest.TestCase):
         )
 
         deadline = time.monotonic() + 5
-        while not output.entered.is_set() and time.monotonic() < deadline:
+        while not controller.transcript.items and time.monotonic() < deadline:
             controller.poll()
             time.sleep(0.01)
+        self.assertFalse(output.entered.is_set())
+        self.assertFalse(controller.playback.running)
+        target = controller.playback.target(
+            self.h.onion, Delivery.LIVE, MessageDirectionCode.IN, 'inbound-live'
+        )
+        self.assertIsNotNone(target)
+        assert target is not None
+        self.assertTrue(controller.playback.play(target))
+        self.assertTrue(output.entered.wait(5))
         self.assertTrue(output.entered.is_set())
         self.assertTrue(output.capture_was_running)
         capture_worker = controller.voice.worker
@@ -481,6 +526,9 @@ class CaptureIntegrationTests(unittest.TestCase):
         )
         self.assertEqual(recorded.delivery, Delivery.LIVE.value)
         self.assertTrue(json.loads(recorded.payload)['finalized'])
+        self.assertEqual(recorded.status, 'draft')
+        self.assertIn(self.h.onion, controller.voice.reviews)
+        self.assertNotIn(capture_binding.msg_id, controller.voice.live_turns)
         self.assertEqual(
             controller.state.drafts[(self.h.onion, Delivery.LIVE)],
             'Typing remains responsive',
@@ -522,7 +570,6 @@ class CaptureIntegrationTests(unittest.TestCase):
             controller.poll()
             time.sleep(0.01)
         self.assertFalse(controller.playback.running)
-        self.assertFalse(controller.playback.auto.queue)
         self.assertEqual(output.frames, [payload])
         self.assertIsNotNone(
             self.h.messages.get_inbound_voice(self.h.onion, 'after-lock')
@@ -651,7 +698,7 @@ class CaptureIntegrationTests(unittest.TestCase):
                     worker.join(5)
                     self.assertFalse(worker.is_alive())
                 controller.poll()
-                if not controller.state.busy:
+                if not controller.voice.reviews:
                     break
         self.assertEqual(len(calls), 1)
         self.assertEqual(controller.voice.reviews, {})

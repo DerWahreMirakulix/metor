@@ -1,4 +1,4 @@
-"""Explicit disposable Voice owner registration and lifecycle release."""
+"""Protected Voice staging owner registration and lifecycle release."""
 
 from dataclasses import dataclass, field
 
@@ -11,9 +11,9 @@ from ..registry import register_command
 @register_command(CommandType.REGISTER_VOICE_OWNER)
 @dataclass
 class RegisterVoiceOwnerCommand(IpcCommand):
-    """Registers disposable DROP staging and interrupted-LIVE producer cleanup."""
+    """Registers protected unsent staging for DROP and LIVE recordings."""
 
-    disposable_drop: bool = True
+    protected_staging: bool = True
     command_type: CommandType = field(
         default=CommandType.REGISTER_VOICE_OWNER, init=False
     )

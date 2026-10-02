@@ -28,7 +28,7 @@ class GuiLimits:
     CAPTURE_DRAIN_SECONDS: float = 5.0
     LIFECYCLE_CAPTURE_SECONDS: float = 65.0
     PLAYBACK_POLL_SECONDS: float = 0.1
-    PLAYBACK_QUEUE: int = 64
+    CALL_SNAPSHOT_SECONDS: float = 1.0
     AUDIO_ENDPOINTS: int = 128
     HELD_KEYS: int = 256
     HARDWARE_INPUT_RECORDS: int = 64
@@ -41,7 +41,6 @@ class GuiLimits:
     LIVE_METADATA_BYTES: int = 2 * 1024 * 1024
     PINS: int = 128
     PREFERENCE_BYTES: int = 64 * 1024
-    RESTRICTED_REFRESH_SECONDS: float = 1.0
     IDLE_SECONDS: float = 120.0
     POWER_SECONDS: float = 2.0
     PURGE_SECONDS: float = 5.0

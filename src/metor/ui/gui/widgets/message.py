@@ -43,11 +43,13 @@ class MessageBubble(BoxLayout):
         super().__init__(size_hint_y=None, **kwargs)
         surface = 'raised' if incoming else delivery + 'Surface'
         self._bubble = (
-            ContextAction('Message actions', context, context, surface=surface)
+            ContextAction('Message actions', lambda: None, context, surface=surface)
             if context is not None
             else Panel(surface=surface)
         )
         self._bubble.clear_widgets()
+        if isinstance(self._bubble, ContextAction):
+            self._bubble.is_focusable = False
         self._bubble._rectangle.radius = [dp(16)]
         self._bubble.orientation = 'vertical'
         self._bubble.padding = (dp(16), dp(12), dp(16), dp(10))
@@ -55,8 +57,28 @@ class MessageBubble(BoxLayout):
         self._bubble.size_hint = (None, None)
         self._body = Label(text)
         self._metadata = Label(metadata, role='meta', tone='textSecondary')
+        self._metadata.pos_hint = {'center_y': 0.5}
         self._bubble.add_widget(self._body)
-        self._bubble.add_widget(self._metadata)
+        footer = BoxLayout(size_hint_y=None, spacing=dp(8))
+        footer.add_widget(self._metadata)
+        if context is not None:
+            footer.add_widget(
+                IconAction(
+                    'ellipsis',
+                    'Message actions',
+                    context,
+                    surface=surface,
+                    tone='textSecondary',
+                    pos_hint={'center_y': 0.5},
+                )
+            )
+        footer.height = dp(48) if context is not None else self._metadata.height
+        self._metadata.bind(
+            height=lambda _widget, height: setattr(
+                footer, 'height', max(dp(48) if context is not None else 0, height)
+            )
+        )
+        self._bubble.add_widget(footer)
         self._bubble.bind(minimum_height=self._bubble.setter('height'))
         self._bubble.bind(height=self._height)
         if not incoming:
@@ -64,12 +86,7 @@ class MessageBubble(BoxLayout):
         self.add_widget(self._bubble)
         if incoming:
             self.add_widget(Widget())
-        if context is not None:
-            self.add_widget(
-                IconAction(
-                    'ellipsis', 'Message actions', context, pos_hint={'center_y': 0.5}
-                )
-            )
+        self._context_width = dp(56) if context is not None else 0
         self._natural_width: float = dp(Geometry.BUBBLE_MIN)
         self._measure_content(text, metadata)
         self.bind(width=self._width)
@@ -107,9 +124,9 @@ class MessageBubble(BoxLayout):
             text=metadata, font_name=font_path(500, metadata), font_size=sp(11)
         )
         meta.refresh()
-        self._natural_width = max(measured.texture.size[0], meta.texture.size[0]) + dp(
-            32
-        )
+        self._natural_width = max(
+            measured.texture.size[0], meta.texture.size[0] + self._context_width
+        ) + dp(32)
 
     def _width(self, *_args: object) -> None:
         """Reflows text at current width without shrinking glyphs.

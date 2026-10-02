@@ -219,7 +219,7 @@ class TextController:
                     or getattr(event, 'delivery', None) is Delivery.DROP
                     else 'Pending'
                 )
-            self.controller._refresh_needed = True
+            self.controller.refresh_state()
         elif (
             event is not None
             and not reconciled

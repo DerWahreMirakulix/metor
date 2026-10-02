@@ -121,7 +121,7 @@ class StateTrackerPendingMixin:
                 self._pending_connections[onion] = conn
                 if replaced_pending is not conn:
                     self._pending_connection_tokens[onion] = secrets.token_hex(
-                        Constants.PENDING_CALL_TOKEN_BYTES
+                        Constants.PENDING_INVITATION_TOKEN_BYTES
                     )
                 self._initial_buffers[onion] = initial_buffer
                 self._pending_connection_reasons[onion] = reason

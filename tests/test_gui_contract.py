@@ -496,7 +496,7 @@ class BackgroundAdmissionTests(unittest.TestCase):
     """One foreground action can wait behind a read-only refresh without becoming duplicate work."""
 
     def test_explicit_action_waits_behind_background_refresh_once(self) -> None:
-        """The native Unlock action remains admissible while background IPC is in flight.
+        """An explicit mutation remains admissible while a read-only operation is in flight.
 
         Args:
             None
@@ -527,9 +527,9 @@ class BackgroundAdmissionTests(unittest.TestCase):
             ran.append('action')
             return None
 
-        self.assertTrue(controller.submit('security:state', refresh, background=True))
-        self.assertTrue(controller.submit('security:unlock', action))
-        self.assertFalse(controller.submit('security:unlock', action))
+        self.assertTrue(controller.submit('background:read', refresh, background=True))
+        self.assertTrue(controller.submit('foreground:write', action))
+        self.assertFalse(controller.submit('foreground:write', action))
         self.assertTrue(controller.state.busy)
         self.assertFalse(ran)
         release.set()

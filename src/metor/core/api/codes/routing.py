@@ -6,6 +6,15 @@ from enum import Enum
 class CommandType(str, Enum):
     """Enumeration of commands sent from the UI or CLI to the daemon."""
 
+    START_CALL = 'start_call'
+    ACCEPT_CALL = 'accept_call'
+    REJECT_CALL = 'reject_call'
+    CANCEL_CALL = 'cancel_call'
+    HANGUP_CALL = 'hangup_call'
+    MUTE_CALL = 'mute_call'
+    GET_CALLS = 'get_calls'
+    SEND_CALL_AUDIO = 'send_call_audio'
+    READ_CALL_AUDIO = 'read_call_audio'
     REGISTER_VOICE_OWNER = 'register_voice_owner'
     RELEASE_VOICE_OWNER = 'release_voice_owner'
     GET_MESSAGE_OUTCOME = 'get_message_outcome'
@@ -78,6 +87,11 @@ class CommandType(str, Enum):
 class EventType(str, Enum):
     """Enumeration of strict daemon-to-UI events."""
 
+    CALL_STATE = 'call_state'
+    CALLS_STATE = 'calls_state'
+    CALL_AUDIO_SENT = 'call_audio_sent'
+    CALL_AUDIO = 'call_audio'
+    CALL_REJECTED = 'call_rejected'
     INIT = 'init'
     CHAT_STARTUP_STATE = 'chat_startup_state'
     TOR_KEY_DECRYPT_FAILED = 'tor_key_decrypt_failed'

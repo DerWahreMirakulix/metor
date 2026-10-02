@@ -101,6 +101,15 @@ class MessageReceiptStore:
             updated_at=str(row[10]),
         )
 
+    def has_outbound_identity(self, msg_id: str) -> bool:
+        """Checks globally retained outbound identity before fresh capture admission."""
+        return bool(
+            self._sql.fetchall(
+                'SELECT 1 FROM message_receipts WHERE msg_id = ? AND direction = ? LIMIT 1',
+                (msg_id, MessageDirection.OUT.value),
+            )
+        )
+
     def _get_receipt(
         self,
         contact_onion: str,

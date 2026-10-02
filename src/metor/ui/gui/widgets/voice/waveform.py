@@ -33,11 +33,13 @@ class WaveformSeek(ContextAction):
         self._position = 0
         self._envelope: tuple[int, tuple[int | None, ...]] = (0, ())
         super().__init__('Seek audio', self._activate_seek, context, surface='surface')
+        self.is_focusable = False
         self.padding = 0
         self.spacing = dp(4)
         self.orientation = 'vertical'
         self.remove_widget(self.label)
         self.hint = Label('Play to load waveform', role='caption', tone='textSecondary')
+        self.hint.size_hint_y = 1
         self.metadata = Label('', role='caption', tone='textSecondary')
         self.add_widget(self.hint)
         self.add_widget(self.metadata)

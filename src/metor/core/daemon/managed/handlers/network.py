@@ -10,6 +10,7 @@ import threading
 from typing import Callable, Dict, Optional, Tuple, TYPE_CHECKING
 
 from metor.core.api import (
+    NotificationPrivacy,
     BeginVoiceCommand,
     CommitVoiceCommand,
     CancelVoiceCommand,
@@ -72,6 +73,7 @@ from metor.versioning import (
 from metor.core.daemon.managed.outbox import OutboxWorker
 from .snapshot import RuntimeSnapshotProjectionMixin
 from .text import TextCommandHandler
+from .calls import CallCommandHandler, CALL_COMMANDS
 
 if TYPE_CHECKING:
     from metor.data.profile import Config
@@ -118,6 +120,9 @@ class NetworkCommandHandler(RuntimeSnapshotProjectionMixin):
         profile_instance_cb: Optional[Callable[[], str]] = None,
         voice_owner_available: bool = False,
         authenticated_client_count_cb: Optional[Callable[[], int]] = None,
+        call_privacy_cb: Optional[
+            Callable[[socket.socket], NotificationPrivacy]
+        ] = None,
     ) -> None:
         """
         Initializes the NetworkCommandHandler.
@@ -148,6 +153,10 @@ class NetworkCommandHandler(RuntimeSnapshotProjectionMixin):
         self._hm: HistoryManager = hm
         self._mm: MessageManager = mm
         self._network: NetworkManager = network
+        self._calls = CallCommandHandler(
+            network.calls,
+            call_privacy_cb or (lambda client: NotificationPrivacy.SHOW_ALL),
+        )
         self._outbox: OutboxWorker = outbox
         self._broadcast: Callable[[IpcEvent], None] = broadcast_cb
         self._send_to: Callable[[socket.socket, IpcEvent], None] = send_to_cb
@@ -248,6 +257,7 @@ class NetworkCommandHandler(RuntimeSnapshotProjectionMixin):
         Returns:
             None
         """
+        self._network.calls.disconnect_client(conn)
         self._set_client_focus(conn, None)
 
     def clear_all_focus(self) -> None:
@@ -336,6 +346,10 @@ class NetworkCommandHandler(RuntimeSnapshotProjectionMixin):
         """
         resolved: Optional[Tuple[str, str]]
 
+        if isinstance(cmd, CALL_COMMANDS):
+            self._send_event(conn, self._calls.handle(cmd, conn))
+            return
+
         if isinstance(cmd, InitCommand):
             negotiated_version: Optional[int] = negotiate_protocol_generation(
                 IPC_PROTOCOL_VERSION,
@@ -367,8 +381,7 @@ class NetworkCommandHandler(RuntimeSnapshotProjectionMixin):
                             'bounded_text_handoff',
                             'bounded_archive_pages',
                             'contact_identity_guard',
-                            'pending_call_handles',
-                            'restricted_live_projection',
+                            'pending_invitation_handles',
                             'qualified_live_control',
                             'qualified_live_retunnel',
                             'safe_setting_descriptors',
@@ -385,6 +398,10 @@ class NetworkCommandHandler(RuntimeSnapshotProjectionMixin):
                             'voice_resume',
                             'voice_terminal_commit',
                             'voice_draft_commit',
+                            'staged_voice_review',
+                            'calls_pcm_duplex',
+                            'call_exact_owner',
+                            'call_transport_lease',
                             'restricted_client',
                             'restricted_voice',
                             'device_lifecycle',
@@ -400,7 +417,7 @@ class NetworkCommandHandler(RuntimeSnapshotProjectionMixin):
                             else []
                         )
                         + (
-                            ['disposable_voice_owner', 'interrupted_voice_recovery']
+                            ['protected_voice_owner', 'interrupted_voice_recovery']
                             if self._voice_owners
                             else []
                         ),
@@ -460,8 +477,16 @@ class NetworkCommandHandler(RuntimeSnapshotProjectionMixin):
 
         elif isinstance(cmd, CommitVoiceCommand):
             resolved = self._cm.resolve_target(cmd.target)
+            outcome = (
+                self._mm.message_outcome(resolved[1], cmd.msg_id, MessageDirection.OUT)
+                if resolved is not None
+                else None
+            )
+            selected = cmd.delivery or (
+                outcome[0] if outcome is not None else Delivery.DROP
+            )
             if resolved is not None and self._network.commit_voice_draft(
-                cmd.target, cmd.msg_id
+                cmd.target, cmd.msg_id, cmd.delivery, cmd.context_generation
             ):
                 self._send_event(
                     conn,
@@ -471,6 +496,7 @@ class NetworkCommandHandler(RuntimeSnapshotProjectionMixin):
                             'alias': resolved[0],
                             'onion': resolved[1],
                             'msg_id': cmd.msg_id,
+                            'delivery': selected.value,
                         },
                     ),
                 )

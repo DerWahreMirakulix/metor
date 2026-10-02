@@ -1,5 +1,25 @@
 """Facade exports for the strict IPC API layer."""
 
+from metor.core.api.calls import CallAudioFrame, CallInfo, CallReason, CallState
+from metor.core.api.commands.calls import (
+    StartCallCommand,
+    AcceptCallCommand,
+    RejectCallCommand,
+    CancelCallCommand,
+    HangupCallCommand,
+    MuteCallCommand,
+    GetCallsCommand,
+    SendCallAudioCommand,
+    ReadCallAudioCommand,
+)
+from metor.core.api.events.calls import (
+    CallStateEvent,
+    CallsStateEvent,
+    CallAudioSentEvent,
+    CallAudioEvent,
+    CallRejectedEvent,
+)
+
 from metor.core.api.events import (
     VoiceOwnerRegisteredEvent,
     VoiceOwnerReleasedEvent,
@@ -35,7 +55,6 @@ from metor.core.api.base import (
 from metor.core.api.codes import (
     CommandType,
     ClientUnlockMethod,
-    LockedAcceptPolicy,
     NotificationPrivacy,
     QuickUnlockAction,
     ConnectionActor,
@@ -299,6 +318,24 @@ from metor.core.api.registry import CMD_MAP, EVENT_MAP
 
 
 __all__ = [
+    'CallAudioFrame',
+    'CallInfo',
+    'CallReason',
+    'CallState',
+    'StartCallCommand',
+    'AcceptCallCommand',
+    'RejectCallCommand',
+    'CancelCallCommand',
+    'HangupCallCommand',
+    'MuteCallCommand',
+    'GetCallsCommand',
+    'SendCallAudioCommand',
+    'ReadCallAudioCommand',
+    'CallStateEvent',
+    'CallsStateEvent',
+    'CallAudioSentEvent',
+    'CallAudioEvent',
+    'CallRejectedEvent',
     'VoiceOwnerRegisteredEvent',
     'VoiceOwnerReleasedEvent',
     'VoiceOwnerRejectedEvent',
@@ -534,7 +571,6 @@ __all__ = [
     'RetunnelFailedEvent',
     'TransportStateEvent',
     'ClientUnlockMethod',
-    'LockedAcceptPolicy',
     'NotificationPrivacy',
     'QuickUnlockAction',
     'AppendVoiceChunkCommand',

@@ -119,11 +119,6 @@ class VoiceRetainedMixin:
             if row[2] == ContentType.VOICE.value
         ]
         payloads.extend(
-            payload
-            for payload in self._messages.get_voice_draft_payloads()
-            if self._metadata_finalized(payload)
-        )
-        payloads.extend(
             record.payload
             for record in self._messages.get_unread_inbound_voices()
             if record.delivery == Delivery.DROP.value
@@ -176,6 +171,7 @@ class VoiceRetainedMixin:
                 BlobLifecycle.TEMPORARY,
             )
             if turn is not None:
+                turn.published = True
                 self._outbound[record.msg_id] = turn
                 self._state.add_unacked_message(
                     record.peer_onion,
@@ -183,6 +179,22 @@ class VoiceRetainedMixin:
                     record.payload,
                     record.timestamp,
                 )
+        for record in self._messages.get_voice_drafts():
+            retained = self._messages.get_voice_payload(
+                record.peer_onion, record.msg_id, MessageDirection.OUT
+            )
+            if retained is None:
+                continue
+            turn = self._turn_from_metadata(
+                record.peer_onion,
+                record.msg_id,
+                record.payload,
+                record.timestamp,
+                Delivery(retained.delivery),
+                BlobLifecycle.TEMPORARY,
+            )
+            if turn is not None:
+                self._outbound[record.msg_id] = turn
         for inbound_record in self._messages.get_unread_inbound_voices():
             delivery = Delivery(inbound_record.delivery)
             if delivery is Delivery.DROP and self._metadata_finalized(
@@ -201,7 +213,7 @@ class VoiceRetainedMixin:
                 self._inbound[(inbound_record.peer_onion, inbound_record.msg_id)] = turn
 
     def finalize_interrupted(self, onion: str, msg_id: str) -> bool:
-        """Freezes a vanished LIVE producer at its durable accepted prefix.
+        """Freezes a vanished producer at its local durable accepted prefix.
 
         Args:
             onion: Canonical owner peer.
@@ -281,7 +293,12 @@ class VoiceRetainedMixin:
             chunk_sizes: list[int] = []
             actual_size = 0
             for chunk_id in chunk_ids:
-                chunk_size = len(self._blobs.read(chunk_id, lifecycle))
+                chunk_lifecycle = (
+                    lifecycle
+                    if self._blobs.exists(chunk_id, lifecycle)
+                    else BlobLifecycle.PERSISTENT
+                )
+                chunk_size = len(self._blobs.read(chunk_id, chunk_lifecycle))
                 if not 0 < chunk_size <= Constants.VOICE_CHUNK_MAX_BYTES:
                     return None
                 chunk_sizes.append(chunk_size)
@@ -315,6 +332,11 @@ class VoiceRetainedMixin:
                 or not 0 <= acknowledged_offset <= actual_size
             ):
                 return None
+            context_generation = metadata.get('context_generation')
+            if context_generation is not None and (
+                type(context_generation) is not int or context_generation <= 0
+            ):
+                return None
             return VoiceTurn(
                 alias=self._contacts.ensure_alias_for_onion(onion) or onion,
                 onion=onion,
@@ -331,6 +353,7 @@ class VoiceRetainedMixin:
                 finalized=bool(metadata.get('finalized', False)),
                 fallback_committed=metadata.get('fallback_committed') is True,
                 acknowledged_offset=acknowledged_offset,
+                context_generation=context_generation,
             )
         except (KeyError, TypeError, ValueError, OSError):
             return None
@@ -393,6 +416,7 @@ class VoiceRetainedMixin:
                 'finalized': turn.finalized,
                 'fallback_committed': turn.fallback_committed,
                 'acknowledged_offset': turn.acknowledged_offset,
+                'context_generation': turn.context_generation,
             },
             separators=(',', ':'),
         )
@@ -421,6 +445,8 @@ class VoiceRetainedMixin:
         """
         for blob_id in self._blob_ids(turn):
             self._blobs.delete(blob_id, lifecycle)
+            if lifecycle is BlobLifecycle.TEMPORARY:
+                self._blobs.delete(blob_id, BlobLifecycle.PERSISTENT)
 
     def _promote_turn_blobs(self, turn: VoiceTurn) -> None:
         """Idempotently promotes every segmented Voice object.
@@ -463,28 +489,6 @@ class VoiceRetainedMixin:
         """
         return self._config.get_int(SettingKey.MAX_LIVE_VOICE_BUFFER_BYTES)
 
-    def inbound_delivery(self, onion: str, msg_id: str) -> Optional[Delivery]:
-        """Returns retained delivery semantics for an exact inbound identity.
-
-        Args:
-            onion (str): Stable peer identity.
-            msg_id (str): Stable Voice identity.
-
-        Returns:
-            Optional[Delivery]: Retained delivery semantics, if present.
-        """
-        with self._lock:
-            turn = self._inbound.get((onion, msg_id))
-            if turn is not None:
-                return turn.delivery
-        record = self._messages.get_inbound_voice(onion, msg_id)
-        if record is None:
-            return None
-        try:
-            return Delivery(record.delivery)
-        except ValueError:
-            return None
-
     def _finalized_outbound_event(self, msg_id: str) -> Optional[VoiceFinalizedEvent]:
         """Projects one unambiguous finalized outbound item from canonical storage.
 
@@ -493,6 +497,27 @@ class VoiceRetainedMixin:
         Returns:
             Optional[VoiceFinalizedEvent]: Canonical result, or None if unavailable.
         """
+        drafts = [
+            item for item in self._messages.get_voice_drafts() if item.msg_id == msg_id
+        ]
+        if len(drafts) == 1:
+            draft = drafts[0]
+            draft_record = self._messages.get_voice_payload(
+                draft.peer_onion, msg_id, MessageDirection.OUT
+            )
+            if draft_record is None or not self._metadata_finalized(
+                draft_record.payload
+            ):
+                return None
+            metadata = json.loads(draft_record.payload)
+            return VoiceFinalizedEvent(
+                msg_id=msg_id,
+                onion=draft.peer_onion,
+                direction=MessageDirectionCode.OUT,
+                delivery=Delivery(draft_record.delivery),
+                size_bytes=metadata['size_bytes'],
+                duration_ms=metadata.get('duration_ms'),
+            )
         page = self._messages.list_retained_messages(
             direction=MessageDirection.OUT,
             limit=2,
@@ -553,7 +578,12 @@ class VoiceRetainedMixin:
             if offset >= chunk_end:
                 position = chunk_end
                 continue
-            chunk = self._blobs.read(chunk_id, lifecycle)
+            selected_lifecycle = (
+                lifecycle
+                if self._blobs.exists(chunk_id, lifecycle)
+                else BlobLifecycle.PERSISTENT
+            )
+            chunk = self._blobs.read(chunk_id, selected_lifecycle)
             if len(chunk) != chunk_size:
                 raise ValueError('Voice segment size changed.')
             start = max(0, offset - position)

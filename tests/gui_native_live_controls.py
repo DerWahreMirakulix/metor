@@ -1,4 +1,4 @@
-"""Native call-control identity probes with synthetic input and no transport IO."""
+"""Native LIVE chat-control identity probes with synthetic input and no transport IO."""
 
 from dataclasses import replace
 from unittest.mock import Mock, patch
@@ -11,7 +11,7 @@ from metor.ui.gui.views.peer import PeerView
 
 
 def exercise_live_controls(app: MetorApp) -> None:
-    """Checks held End targets, calling Cancel, and preserved native composers.
+    """Checks held End targets, chat invitation Cancel, and preserved native composers.
 
     Args:
         app: Running isolated native fixture at either supported composition width.
@@ -71,7 +71,15 @@ def exercise_live_controls(app: MetorApp) -> None:
             peer.update()
             assert peer.end.label.text == 'Cancel'
             assert peer.end.parent is not None
-            assert peer.connect.parent is None and peer.composer.parent is None
+            assert peer.connect.parent is None
+            review = controller.voice.reviews.get(peer.route.peer or '')
+            if review is not None and review.binding.delivery is Delivery.LIVE:
+                assert peer.composer.parent is peer
+                assert peer.composer.commit.disabled
+                assert peer.composer.entry is text_entry
+                assert not controller.voice.review_actions.live_ready(review)
+            else:
+                assert peer.composer.parent is None
             end.reset_mock()
             peer.end.focus = True
             Window.dispatch('on_key_down', 13, 40, '\r', [])

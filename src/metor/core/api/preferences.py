@@ -6,7 +6,7 @@ from enum import Enum
 from metor.shared import Constants, decode_tor_v3_onion_public_key
 
 # Local Package Imports
-from .codes import ClientUnlockMethod, LockedAcceptPolicy, NotificationPrivacy
+from .codes import ClientUnlockMethod, NotificationPrivacy
 
 
 class GuiPreferenceFailure(str, Enum):
@@ -26,9 +26,7 @@ class GuiPreferences:
     """Minimal policy and peer-ID ordering; contains no aliases or message content."""
 
     pins: list[str] = field(default_factory=list)
-    auto_play: bool = False
-    keep_live_locked: bool = False
-    accept_live_locked: LockedAcceptPolicy = LockedAcceptPolicy.NONE
+    accept_calls_locked: bool = False
     notifications_locked: NotificationPrivacy = NotificationPrivacy.ANONYMIZE
     unlock_method: ClientUnlockMethod = ClientUnlockMethod.PROFILE_PASSWORD
     idle_seconds: int = Constants.GUI_DEFAULT_IDLE_SECONDS
@@ -45,8 +43,7 @@ class GuiPreferences:
             None
         """
         for value in (
-            self.auto_play,
-            self.keep_live_locked,
+            self.accept_calls_locked,
             self.show_profile_locked,
             self.setup_complete,
         ):
@@ -59,7 +56,6 @@ class GuiPreferences:
             raise ValueError('Invalid GUI idle timeout')
         if self.keyboard_layout not in ('qwerty', 'qwertz'):
             raise ValueError('Unsupported GUI keyboard layout')
-        self.accept_live_locked = LockedAcceptPolicy(self.accept_live_locked)
         self.notifications_locked = NotificationPrivacy(self.notifications_locked)
         self.unlock_method = ClientUnlockMethod(self.unlock_method)
         if not isinstance(self.pins, list) or len(self.pins) > Constants.GUI_MAX_PINS:

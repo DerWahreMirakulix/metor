@@ -275,19 +275,8 @@ class MessageRouter:
         if self._voice is not None and not self._purge_fence.is_set():
             self._voice.release_consumed(onion, msg_ids)
 
-    def voice_target(self, msg_id: str) -> Optional[str]:
-        """Returns the peer identity permanently bound to one outbound turn.
-
-        Args:
-            msg_id (str): The msg id input.
-
-        Returns:
-            Optional[str]: The resulting value.
-        """
-        return self._voice.outbound_target(msg_id) if self._voice is not None else None
-
     def voice_context(self, onion: str, msg_id: str, direction: str) -> int | None:
-        """Returns the recording's admission context, never the peer's latest call.
+        """Returns the recording's original LIVE chat admission context.
 
         Args:
             onion (str): The onion input.
@@ -299,35 +288,6 @@ class MessageRouter:
         """
         return (
             self._voice.context_token(onion, msg_id, direction)
-            if self._voice is not None
-            else None
-        )
-
-    def voice_delivery(self, msg_id: str) -> Optional[Delivery]:
-        """Returns delivery semantics permanently bound to one outbound turn.
-
-        Args:
-            msg_id (str): The msg id input.
-
-        Returns:
-            Optional[Delivery]: The resulting value.
-        """
-        return (
-            self._voice.outbound_delivery(msg_id) if self._voice is not None else None
-        )
-
-    def inbound_voice_delivery(self, onion: str, msg_id: str) -> Optional[Delivery]:
-        """Returns semantics for an exact retained inbound Voice identity.
-
-        Args:
-            onion (str): Stable peer identity.
-            msg_id (str): Stable Voice identity.
-
-        Returns:
-            Optional[Delivery]: Retained delivery semantics, if present.
-        """
-        return (
-            self._voice.inbound_delivery(onion, msg_id)
             if self._voice is not None
             else None
         )
@@ -394,8 +354,14 @@ class MessageRouter:
         with self._operation_lock:
             return self._voice.release_inbound(onion, msg_id)
 
-    def commit_voice_draft(self, target: str, msg_id: str) -> bool:
-        """Publishes one finalized DROP Voice draft.
+    def commit_voice_draft(
+        self,
+        target: str,
+        msg_id: str,
+        delivery: Delivery | None = None,
+        context_generation: int | None = None,
+    ) -> bool:
+        """Publishes one finalized local Voice draft after explicit Send.
 
         Args:
             target (str): The target input.
@@ -405,13 +371,13 @@ class MessageRouter:
             bool: Whether the documented condition holds.
         """
         return (
-            self._voice.commit_draft(target, msg_id)
+            self._voice.commit_draft(target, msg_id, delivery, context_generation)
             if self._voice is not None and not self._purge_fence.is_set()
             else False
         )
 
     def cancel_voice_draft(self, target: str, msg_id: str) -> bool:
-        """Cancels one unsent DROP Voice draft.
+        """Cancels one unsent local Voice draft in either delivery mode.
 
         Args:
             target (str): The target input.

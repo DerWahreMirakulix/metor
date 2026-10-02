@@ -86,10 +86,6 @@ class VoiceContractTests(unittest.TestCase):
             VoiceRetainedMixin.finalize_interrupted,
         )
         self.assertIs(
-            VoiceTransferManager.inbound_delivery,
-            VoiceRetainedMixin.inbound_delivery,
-        )
-        self.assertIs(
             VoiceTransferManager.dismiss_inbound,
             VoiceRetainedMixin.dismiss_inbound,
         )
@@ -100,8 +96,8 @@ class VoiceContractTests(unittest.TestCase):
         self.assertIs(VoiceTransferManager.append, VoiceCaptureMixin.append)
         self.assertIs(VoiceTransferManager.finalize, VoiceCaptureMixin.finalize)
 
-    def test_finalized_live_voice_falls_back_with_same_message_id(self) -> None:
-        """Promotes one complete disconnected Voice turn without changing identity."""
+    def test_live_draft_requires_explicit_drop_send_with_same_message_id(self) -> None:
+        """Finalization remains local; explicit Drop Send preserves the recording identity."""
         payload = b'voice payload'
         self._voice.begin(self._alias, Delivery.LIVE, 'voice-fallback', 'opus')
         self._voice.append(
@@ -110,6 +106,19 @@ class VoiceContractTests(unittest.TestCase):
         self._voice.finalize('voice-fallback', 500)
 
         self.assertEqual(self._mm.get_pending_live_outbox(self._onion), [])
+        self.assertEqual(self._mm.get_pending_outbox(), [])
+        draft = self._mm.get_voice_payload(
+            self._onion, 'voice-fallback', MessageDirection.OUT
+        )
+        self.assertEqual(draft.delivery, Delivery.LIVE.value)
+        self.assertEqual(draft.status, 'draft')
+        self.assertFalse(self._voice.commit_draft(self._alias, 'voice-fallback'))
+        self.assertTrue(
+            self._voice.commit_draft(self._alias, 'voice-fallback', Delivery.DROP)
+        )
+        self.assertTrue(
+            self._voice.commit_draft(self._alias, 'voice-fallback', Delivery.DROP)
+        )
         rows = self._mm.get_pending_outbox()
         self.assertEqual([row[4] for row in rows], ['voice-fallback'])
         self.assertEqual(rows[0][2], ContentType.VOICE.value)
@@ -123,6 +132,65 @@ class VoiceContractTests(unittest.TestCase):
             ),
             payload,
         )
+
+    def test_both_mode_drafts_emit_no_peer_bytes_until_explicit_send(self) -> None:
+        """A connected peer sees no begin/chunk/end during capture and review."""
+        writer = _VoiceSocket()
+        conn = cast(socket.socket, writer)
+        self._state.add_active_connection(self._onion, conn)
+        for delivery in Delivery:
+            with self.subTest(delivery=delivery):
+                identity = 'staged-' + delivery.value
+                self._voice.begin(self._alias, delivery, identity, 'opus')
+                self._voice.append(
+                    identity, 0, base64.b64encode(b'private recording').decode()
+                )
+                self._voice.replay(self._onion)
+                self._voice.finalize(identity, 20)
+                self._voice.replay(self._onion)
+                self.assertEqual(writer.sent, [])
+                draft = self._mm.get_voice_payload(
+                    self._onion, identity, MessageDirection.OUT
+                )
+                self.assertEqual(draft.status, 'draft')
+                self.assertEqual(self._mm.get_pending_live_outbox(), [])
+                self.assertEqual(self._mm.get_pending_outbox(), [])
+                content, mode, data, _, complete, reason = self._voice.read_chunk(
+                    self._onion,
+                    identity,
+                    MessageDirection.OUT,
+                    0,
+                    Constants.VOICE_CHUNK_MAX_BYTES,
+                )
+                self.assertIsNone(reason)
+                self.assertEqual(mode, delivery)
+                self.assertEqual(data, b'private recording')
+                self.assertTrue(complete)
+                self.assertTrue(self._voice.cancel_draft(self._alias, identity))
+        self._voice.begin(self._alias, Delivery.LIVE, 'explicit-live', 'opus')
+        self._voice.append('explicit-live', 0, base64.b64encode(b'send me').decode())
+        self._voice.finalize('explicit-live', 20)
+        self.assertEqual(writer.sent, [])
+        self.assertTrue(self._voice.commit_draft(self._alias, 'explicit-live'))
+        self.assertEqual(len(writer.sent), 1)
+        self.assertTrue(writer.sent[0].startswith(b'/voice_begin '))
+
+    def test_live_draft_cannot_publish_into_a_later_chat_generation(self) -> None:
+        """An ended chat never implicitly commits or retargets its review draft."""
+        first = cast(socket.socket, _VoiceSocket())
+        self._state.add_active_connection(self._onion, first)
+        self._voice.begin(self._alias, Delivery.LIVE, 'old-context', 'opus')
+        self._voice.append('old-context', 0, base64.b64encode(b'old draft').decode())
+        self._voice.finalize('old-context', 20)
+        self._state.pop_any_connection(self._onion)
+        replacement = _VoiceSocket()
+        self._state.add_active_connection(self._onion, cast(socket.socket, replacement))
+        self.assertFalse(self._voice.commit_draft(self._alias, 'old-context'))
+        self.assertEqual(replacement.sent, [])
+        self.assertTrue(
+            self._voice.commit_draft(self._alias, 'old-context', Delivery.DROP)
+        )
+        self.assertEqual(replacement.sent, [])
 
     def test_live_voice_allows_simultaneous_inbound_and_outbound_turns(self) -> None:
         """Does not impose a half-duplex lock on authenticated LIVE Voice state."""
@@ -163,9 +231,70 @@ class VoiceContractTests(unittest.TestCase):
             )
         )
 
-        self.assertEqual(self._voice.outbound_target('voice-out'), self._onion)
+        retained = self._mm.get_voice_payload(
+            self._onion, 'voice-out', MessageDirection.OUT
+        )
+        self.assertIsNotNone(retained)
+        self.assertEqual(retained.peer_onion, self._onion)
         self.assertTrue(
             any(isinstance(event, MessageReceivedEvent) for event in self._events)
+        )
+
+    def test_delayed_duplicate_chunks_after_finalization_preserve_live_tunnel(
+        self,
+    ) -> None:
+        """Byte-identical replay after END is accepted; changed or extending data is rejected."""
+        from metor.core.daemon.managed.network.router.admission import FrameAdmission
+
+        conn = cast(socket.socket, _VoiceSocket())
+        identity = 'voice-late-ack'
+        payload = b'\x00\x01' * 320
+        chunk: dict[str, object] = {
+            'id': identity,
+            'offset': 0,
+            'data': base64.b64encode(payload).decode('ascii'),
+        }
+        self.assertIs(
+            self._voice.receive_begin(
+                conn,
+                self._onion,
+                {
+                    'id': identity,
+                    'codec': 'pcm_s16le_16000_mono',
+                },
+            ),
+            FrameAdmission.ACCEPTED,
+        )
+        self.assertIs(
+            self._voice.receive_chunk(conn, self._onion, chunk), FrameAdmission.ACCEPTED
+        )
+        self.assertIs(
+            self._voice.receive_end(
+                conn,
+                self._onion,
+                {
+                    'id': identity,
+                    'size': len(payload),
+                    'duration_ms': 20,
+                },
+            ),
+            FrameAdmission.ACCEPTED,
+        )
+        events = len(self._events)
+        self.assertIs(
+            self._voice.receive_chunk(conn, self._onion, chunk), FrameAdmission.ACCEPTED
+        )
+        self.assertEqual(len(self._events), events)
+        changed = dict(chunk, data=base64.b64encode(b'\x02\x03' * 320).decode('ascii'))
+        self.assertIs(
+            self._voice.receive_chunk(conn, self._onion, changed),
+            FrameAdmission.MALFORMED,
+        )
+        self.assertIs(
+            self._voice.receive_chunk(
+                conn, self._onion, dict(chunk, offset=len(payload))
+            ),
+            FrameAdmission.MALFORMED,
         )
 
     def test_inbound_drop_voice_keeps_drop_receipt_and_persistent_blob(self) -> None:

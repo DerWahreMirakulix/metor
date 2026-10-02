@@ -19,18 +19,23 @@ from metor.utils import Constants
 # Local Package Imports
 from ..state import StateTracker
 from ...notify import NotificationPayload
-from .capture import VoiceCaptureMixin
+from .publication import VoicePublicationMixin
 from .inbound import VoiceInboundMixin
 from .models import VoiceTurn
 from .outbound import VoiceOutboundMixin
 from .retained import VoiceRetainedMixin
+from .readback import VoiceReadbackMixin
 
 if TYPE_CHECKING:
     from metor.data.profile import Config
 
 
 class VoiceTransferManager(
-    VoiceInboundMixin, VoiceRetainedMixin, VoiceCaptureMixin, VoiceOutboundMixin
+    VoiceInboundMixin,
+    VoiceRetainedMixin,
+    VoicePublicationMixin,
+    VoiceOutboundMixin,
+    VoiceReadbackMixin,
 ):
     """Owns bounded Voice capture, receive, resume, and fallback state."""
 

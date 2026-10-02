@@ -62,7 +62,7 @@ class RuntimeSnapshotProjectionMixin:
 
         return datetime.fromtimestamp(expires_at, tz=timezone.utc).isoformat()
 
-    def pending_call_entries(self) -> List[PendingConnectionEntry]:
+    def pending_invitation_entries(self) -> List[PendingConnectionEntry]:
         """
         Builds typed retained pending-request entries for chat startup rendering.
 
@@ -136,7 +136,7 @@ class RuntimeSnapshotProjectionMixin:
         return ChatStartupStateEvent(
             active=self._network.get_active_aliases(),
             contacts=self._cm.get_all_contacts(),
-            pending=self.pending_call_entries(),
+            pending=self.pending_invitation_entries(),
             unread=self._build_unread_startup_entries(),
         )
 
@@ -259,7 +259,7 @@ class RuntimeSnapshotProjectionMixin:
             contacts=contacts,
             conversations=conversations,
             live_contexts=live_contexts,
-            pending=self.pending_call_entries(),
+            pending=self.pending_invitation_entries(),
             settings_version=hashlib.sha256(
                 repr(self._config.get_setting_snapshots()).encode('utf-8')
             ).hexdigest(),

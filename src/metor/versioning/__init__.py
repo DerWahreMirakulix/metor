@@ -7,12 +7,12 @@ from dataclasses import dataclass
 APP_VERSION: str = '0.2.0'
 
 # Client-to-daemon typed NDJSON wire generation.
-IPC_PROTOCOL_VERSION: int = 3
-IPC_PROTOCOL_MIN_SUPPORTED: int = 3
+IPC_PROTOCOL_VERSION: int = 4
+IPC_PROTOCOL_MIN_SUPPORTED: int = 4
 
 # Daemon-to-daemon Tor handshake and message-wire generation.
-PEER_PROTOCOL_VERSION: int = 3
-PEER_PROTOCOL_MIN_SUPPORTED: int = 3
+PEER_PROTOCOL_VERSION: int = 4
+PEER_PROTOCOL_MIN_SUPPORTED: int = 4
 
 # Durable SQLite/SQLCipher schema generation stored in PRAGMA user_version.
 DB_SCHEMA_VERSION: int = 4

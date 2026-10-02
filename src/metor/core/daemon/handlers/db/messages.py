@@ -212,8 +212,8 @@ class DatabaseCommandMessagesMixin(DatabaseCommandHandlerSupportMixin):
                 codec=message.codec,
                 duration_ms=message.duration_ms,
                 producer_interrupted=message.producer_interrupted,
-                can_retry_finalization=message.producer_interrupted
-                and not message.finalized,
+                can_retry_finalization=message.producer_interrupted,
+                context_generation=message.context_generation,
             )
             for message in page.messages
         ]

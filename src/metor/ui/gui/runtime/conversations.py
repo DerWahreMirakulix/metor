@@ -77,9 +77,9 @@ def conversation_rows(
             if entry.session_state == 'connected'
             else 'Reconnecting…'
             if entry.recovery_eligible
-            else 'Calling…'
+            else 'Connecting chat…'
             if entry.session_state == 'connecting'
-            else 'Incoming Live'
+            else 'Live chat invitation'
             if entry.session_state == 'pending'
             else 'Disconnected'
         )

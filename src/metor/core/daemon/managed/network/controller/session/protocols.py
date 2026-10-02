@@ -23,6 +23,7 @@ class _SessionControllerBaseProtocol(Protocol):
     _hm: HistoryManager
     _mm: MessageManager
     _crypto: Crypto
+    _retain_call_transport: Optional[Callable[[socket.socket], Optional[str]]]
     _state: StateTracker
     _broadcast: Callable[[IpcEvent], None]
     _stop_flag: threading.Event

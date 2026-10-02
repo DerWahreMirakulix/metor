@@ -9,6 +9,40 @@ from kivy.uix.spinner import Spinner, SpinnerOption
 from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.theme import color, font_path
 from metor.ui.gui.widgets import Action, Label
+from metor.ui.gui.widgets.sheet import ActionSheet
+
+
+def show_audio_routes(controller: GuiController, refresh: Callable[[], None]) -> None:
+    """Opens explicit audio setup from a media action without activating a stream.
+
+    Args:
+        controller: Authorized route and device owner.
+        refresh: Current native presentation refresh.
+    Returns:
+        None
+    """
+
+    def changed() -> None:
+        """Closes setup once the user's selected headset has been installed."""
+        if controller.voice.headset_confirmed:
+            sheet.dismiss(animation=False)
+        refresh()
+
+    sheet = ActionSheet(
+        controller,
+        lambda body: body.add_widget(audio_routes_body(controller, changed)),
+        title='Audio devices',
+        revision=lambda: (
+            controller.state.busy,
+            controller.voice.routes.scanned,
+            controller.voice.routes.endpoints,
+            controller.voice.headset_confirmed,
+        ),
+    )
+    sheet.show()
+    if not controller.voice.routes.scanned:
+        controller.voice.routes.scan()
+    refresh()
 
 
 class EndpointOption(SpinnerOption):

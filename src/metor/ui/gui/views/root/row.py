@@ -88,10 +88,16 @@ class RootRow(BoxLayout):
         self.action.add_widget(self.group)
         self.add_widget(self.action)
         more = IconAction(
-            'ellipsis', 'Conversation actions', context, pos_hint={'center_y': 0.5}
+            'ellipsis',
+            'Conversation actions',
+            context,
+            surface='surface',
+            tone='textSecondary',
+            pos_hint={'center_y': 0.5},
         )
         more.focus_key = ('peer_more', entry.delivery.value, entry.peer)
-        self.add_widget(more)
+        self.more = more
+        self.group.add_widget(more)
         self.detail.bind(height=self._measure)
         self.update(entry)
 
@@ -177,3 +183,5 @@ class RootRow(BoxLayout):
             ', open conversation' if selected else ''
         )
         self.action._feedback()
+        self.more.surface = self.action.surface
+        self.more._feedback()

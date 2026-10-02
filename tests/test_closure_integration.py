@@ -40,7 +40,6 @@ from metor.core.api import (
     ClientUnlockMethod,
     NotificationPrivacy,
     VoiceIncomingStartedEvent,
-    LockedAcceptPolicy,
     IncomingConnectionEvent,
     RejectCommand,
     RuntimeStateChangedEvent,
@@ -318,8 +317,10 @@ class ClosureDaemonTests(unittest.TestCase):
             result.config.get_namespace_str('ui.terminal.prompt_sign'), '>'
         )
 
-    def test_actual_finalize_fallback_progress_then_terminal_result(self) -> None:
-        """F03/F05: real producer emits fallback before finalization under one ID."""
+    def test_actual_finalize_retains_live_draft_until_explicit_drop_commit(
+        self,
+    ) -> None:
+        """F03/F05: disconnected LIVE finalization never publishes or silently falls back."""
         daemon = self.daemon()
         events = []
         client = self.client(daemon, events)
@@ -336,7 +337,15 @@ class ClosureDaemonTests(unittest.TestCase):
         final = client.finalize_voice('fallback', 30)
         self.assertIsInstance(final, VoiceFinalizedEvent)
         assert final is not None
-        self.assertEqual(final.delivery, Delivery.DROP)
+        self.assertEqual(final.delivery, Delivery.LIVE)
+        retained = self.fixture.sender_messages.get_voice_payload(
+            self.fixture.receiver_onion, 'fallback', MessageDirection.OUT
+        )
+        assert retained is not None
+        self.assertEqual(retained.status, 'draft')
+        self.assertIsNotNone(
+            client.commit_voice(peer, 'fallback', delivery=Delivery.DROP)
+        )
         delivered = threading.Event()
         original = client._on_event
 
@@ -354,11 +363,11 @@ class ClosureDaemonTests(unittest.TestCase):
         client._on_event = on_event
         client._ipc.dispatch_async_event(AckEvent(msg_id='barrier'))
         self.assertTrue(delivered.wait(2))
-        self.assertEqual(sum(isinstance(e, FallbackSuccessEvent) for e in events), 1)
+        self.assertFalse(any(isinstance(e, FallbackSuccessEvent) for e in events))
         self.assertFalse(any(isinstance(e, VoiceFinalizedEvent) for e in events))
 
-    def test_restricted_broadcast_uses_turn_provenance_not_current_peer(self) -> None:
-        """F02: actual restriction dispatch and broadcast deny a new same-peer call."""
+    def test_restricted_broadcast_and_append_deny_message_media(self) -> None:
+        """F02: restriction freezes capture and prevents locked message media."""
         daemon = self.daemon()
         events = []
         client = self.client(daemon, events)
@@ -374,16 +383,13 @@ class ClosureDaemonTests(unittest.TestCase):
         restriction = client.request(
             RestrictClientCommand(
                 unlock_method=ClientUnlockMethod.NONE,
-                continued_live_target=onion,
-                live_while_locked=True,
                 notification_privacy=NotificationPrivacy.SHOW_ALL,
             ),
             ClientRestrictedEvent,
         )
         self.assertIsNotNone(restriction)
-        self.assertIsNotNone(
-            client.append_voice('old-turn', 0, base64.b64encode(b'authorized').decode())
-        )
+        with self.assertRaises(MetorRequestRejectedError):
+            client.append_voice('old-turn', 0, base64.b64encode(b'denied').decode())
         old_context = state.get_live_context_generation(onion)
         state.pop_any_connection(onion)
         replacement, replacement_peer = socket.socketpair()
@@ -412,8 +418,8 @@ class ClosureDaemonTests(unittest.TestCase):
             client.append_voice('old-turn', 10, base64.b64encode(b'denied').decode())
         self.assertFalse(any(isinstance(e, VoiceIncomingStartedEvent) for e in events))
 
-    def test_exact_anonymous_pending_replacement_and_duplicate_handle(self) -> None:
-        """F02: actual dispatch token cannot authorize a replacement pending socket."""
+    def test_restricted_live_invitation_cannot_authorize_replacement(self) -> None:
+        """F02: locked LIVE invitation metadata grants no Accept or Reject action."""
         daemon = self.daemon()
         events = []
         client = self.client(daemon, events)
@@ -421,7 +427,6 @@ class ClosureDaemonTests(unittest.TestCase):
             RestrictClientCommand(
                 unlock_method=ClientUnlockMethod.NONE,
                 notification_privacy=NotificationPrivacy.ANONYMIZE,
-                accept_while_locked=LockedAcceptPolicy.ALL,
             ),
             ClientRestrictedEvent,
         )
@@ -441,9 +446,8 @@ class ClosureDaemonTests(unittest.TestCase):
         assert isinstance(first, IncomingConnectionEvent)
         assert isinstance(duplicate, IncomingConnectionEvent)
         self.assertEqual(first.action_handle, duplicate.action_handle)
-        self.assertIsNotNone(first.action_handle)
-        action_handle = first.action_handle
-        assert action_handle is not None
+        self.assertIsNone(first.action_handle)
+        action_handle = 'not-a-grant'
         state.pop_pending_connection(onion)
         state.add_pending_connection(onion, two, b'', expiry_deadline=time.time() + 20)
         client.send_command(RejectCommand(action_handle))
@@ -634,6 +638,7 @@ class ClosureDaemonTests(unittest.TestCase):
                 voice.append(msg_id, 0, base64.b64encode(b'one').decode())
                 voice.append(msg_id, 3, base64.b64encode(b'two').decode())
                 voice.finalize(msg_id, 60)
+                self.assertTrue(voice.commit_draft(f.receiver_alias, msg_id))
                 turn = voice._outbound[msg_id]
                 ids = (turn.blob_id, *turn.chunk_ids)
 
@@ -762,6 +767,7 @@ class ClosureDaemonTests(unittest.TestCase):
                     voice_id, 0, base64.b64encode(b'pending voice').decode()
                 )
                 client.finalize_voice(voice_id, 50)
+                self.assertIsNotNone(client.commit_voice(f.receiver_alias, voice_id))
                 targets = []
 
                 def factory(profile: str) -> MetorClient:

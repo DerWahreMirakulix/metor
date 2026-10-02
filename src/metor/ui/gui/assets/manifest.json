@@ -409,6 +409,16 @@
       "path": "fonts/InterTight-coverage.json",
       "source": "Codepoint ranges extracted from the identical cmaps of packaged InterTight 400/500/600/700 using fontTools 4.59.2",
       "sha256": "d812ae8f0f62ffd98b9c8cf864414a696cc89331ec7bc4124db0da97f460ebb2"
+    },
+    {
+      "path": "icons/phone.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/phone.svg",
+      "sha256": "08dc20d60c087dd6f19a8960927dac5c6d67f870de853d718cca79a10a94d535"
+    },
+    {
+      "path": "icons/phone-native.svg",
+      "source": "icons/phone.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "2a6e39407165fcd445dcf292e3e74e6630652c4444d8a44b896e8a45631d1db1"
     }
   ]
 }

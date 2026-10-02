@@ -86,7 +86,7 @@ class ProfileTransition:
         self._source_invalid = False
         self._owner_release_attempted = False
         self.owner_loss_supported = (
-            'disposable_voice_owner' in state.capabilities and owner is not None
+            'protected_voice_owner' in state.capabilities and owner is not None
         )
         self._return_route = state.route
 
@@ -213,6 +213,7 @@ class ProfileTransition:
         controller.playback.stop()
         controller.inputs.focus_lost()
         controller.calls.clear()
+        controller.live_invitations.clear()
         state.covered = True
         state.route = Route('V21' if target is None else 'V20')
         self.phase = (

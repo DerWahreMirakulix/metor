@@ -691,11 +691,12 @@ class VoiceOperationRejectedEvent(IpcEvent):
 @register_event(EventType.VOICE_COMMITTED)
 @dataclass
 class VoiceCommittedEvent(IpcEvent):
-    """Confirms explicit publication of one DROP Voice draft."""
+    """Confirms explicit publication of one finalized Voice draft."""
 
     alias: str
     msg_id: str
     onion: Optional[str] = None
+    delivery: Delivery = Delivery.DROP
     event_type: EventType = field(default=EventType.VOICE_COMMITTED, init=False)
 
 

@@ -32,7 +32,6 @@ from metor.core.api import (
     RuntimeStateChangedEvent,
     RetainedMessagesEvent,
     VoiceDataEvent,
-    VoiceOperationRejectedEvent,
     VoiceReleasedEvent,
     request_context,
 )
@@ -286,10 +285,16 @@ class AcceptanceRepairContractTests(unittest.TestCase):
         self.assertTrue(complete)
         self.assertEqual(content.size_bytes if content else None, len(payload))
 
-    def test_fresh_drop_voice_completes_first_attempt_empty_and_nonempty(self) -> None:
+    def test_fresh_drop_voice_completes_first_attempt_after_explicit_send(self) -> None:
         """G01: every fresh BEGIN receives offset zero and reaches commit ACK."""
         self._send_drop_voice_over_socketpair('drop-nonempty', b'first attempt')
-        self._send_drop_voice_over_socketpair('drop-empty', b'')
+        empty = self._voice(sender=True)
+        empty.begin(self.receiver_alias, Delivery.DROP, 'drop-empty', 'opus')
+        empty.finalize('drop-empty', 0)
+        self.assertFalse(empty.commit_draft(self.receiver_alias, 'drop-empty'))
+        self.assertNotIn(
+            'drop-empty', [row[4] for row in self.sender_messages.get_pending_outbox()]
+        )
 
     def test_progress_ack_never_releases_before_terminal_commit(self) -> None:
         """G03/G04: chunk progress and terminal commit remain independent."""
@@ -301,18 +306,28 @@ class AcceptanceRepairContractTests(unittest.TestCase):
         voice.begin(self.receiver_alias, Delivery.LIVE, 'live-ack', 'opus')
         voice.append('live-ack', 0, base64.b64encode(b'abc').decode('ascii'))
         voice.finalize('live-ack', 10)
+        self.assertTrue(voice.commit_draft(self.receiver_alias, 'live-ack'))
 
         voice.acknowledge(self.receiver_onion, 'live-ack', 3)
         sent_count = len(conn_obj.sent)
         voice.acknowledge(self.receiver_onion, 'live-ack', 1)
         voice.acknowledge(self.receiver_onion, 'live-ack', 4)
         self.assertEqual(len(conn_obj.sent), sent_count)
-        self.assertEqual(voice.outbound_target('live-ack'), self.receiver_onion)
+        self.assertIsNotNone(
+            self.sender_messages.get_voice_payload(
+                self.receiver_onion,
+                'live-ack',
+                MessageDirection.OUT,
+            )
+        )
         self.assertEqual(
             len(self.sender_messages.get_pending_live_outbox(self.receiver_onion)), 1
         )
         voice.acknowledge_complete(self.receiver_onion, 'live-ack')
-        self.assertIsNone(voice.outbound_target('live-ack'))
+        self.assertEqual(
+            self.sender_messages.get_pending_live_outbox(self.receiver_onion), []
+        )
+        self.assertIsNone(state.get_live_generation(self.receiver_onion, 'live-ack'))
 
     def test_common_replay_keeps_text_and_voice_frames_typed(self) -> None:
         """G02: the common reconnect dispatcher never emits Voice metadata as MSG."""
@@ -333,7 +348,14 @@ class AcceptanceRepairContractTests(unittest.TestCase):
             blob_store=self.sender_blobs,
         )
         router.send_message(self.receiver_alias, 'text', 'typed-text')
+        conn_obj.sent.clear()
         router.begin_voice(self.receiver_alias, Delivery.LIVE, 'typed-voice', 'opus')
+        router.append_voice(
+            'typed-voice', 0, base64.b64encode(b'voice').decode('ascii')
+        )
+        router.finalize_voice('typed-voice', 20)
+        self.assertEqual(conn_obj.sent, [])
+        self.assertTrue(router.commit_voice_draft(self.receiver_alias, 'typed-voice'))
         conn_obj.sent.clear()
 
         replayed = router.replay_unacked_messages(self.receiver_onion)
@@ -475,8 +497,10 @@ class AcceptanceRepairContractTests(unittest.TestCase):
         self.assertEqual(read[2], b'abcdef')
         self.assertTrue(read[4])
 
-    def test_interrupted_encrypted_blob_promotion_reconciles_on_restart(self) -> None:
-        """G07: committed DROP metadata recovers interrupted object ownership."""
+    def test_interrupted_encrypted_drop_publication_retries_without_partial_send(
+        self,
+    ) -> None:
+        """G07: promotion failure keeps the draft unsent until explicit retry."""
         original_promote = self.sender_blobs.promote
         for failure_index in (0, 1):
             with self.subTest(failure_index=failure_index):
@@ -485,6 +509,7 @@ class AcceptanceRepairContractTests(unittest.TestCase):
                 voice = self._voice(sender=True, events=events)
                 voice.begin(self.receiver_alias, Delivery.LIVE, msg_id, 'opus')
                 voice.append(msg_id, 0, base64.b64encode(b'encrypted').decode('ascii'))
+                voice.finalize(msg_id, 50)
                 calls = 0
 
                 def fail_selected_promotion(blob_id: str) -> None:
@@ -501,15 +526,20 @@ class AcceptanceRepairContractTests(unittest.TestCase):
                     'promote',
                     side_effect=fail_selected_promotion,
                 ):
-                    voice.finalize(msg_id, 50)
-                self.assertIsInstance(events[-1], VoiceOperationRejectedEvent)
-
-                row = next(
-                    row
-                    for row in self.sender_messages.get_pending_outbox()
-                    if row[4] == msg_id
+                    with self.assertRaises(OSError):
+                        voice.commit_draft(self.receiver_alias, msg_id, Delivery.DROP)
+                self.assertFalse(
+                    any(
+                        row[4] == msg_id
+                        for row in self.sender_messages.get_pending_outbox()
+                    )
                 )
-                metadata = json.loads(row[3])
+
+                row = self.sender_messages.get_voice_payload(
+                    self.receiver_onion, msg_id, MessageDirection.OUT
+                )
+                assert row is not None
+                metadata = json.loads(row.payload)
                 blob_ids = [metadata['blob_id'], *metadata['chunk_ids']]
                 self.assertTrue(
                     any(
@@ -518,7 +548,10 @@ class AcceptanceRepairContractTests(unittest.TestCase):
                     )
                 )
 
-                voice.finalize(msg_id, 50)
+                recovered = self._voice(sender=True)
+                self.assertTrue(
+                    recovered.commit_draft(self.receiver_alias, msg_id, Delivery.DROP)
+                )
 
                 self.assertTrue(
                     all(
@@ -582,16 +615,21 @@ class AcceptanceRepairContractTests(unittest.TestCase):
             ['fallback-race'],
         )
 
-    def test_interrupted_drop_draft_promotion_reconciles_before_review(self) -> None:
-        """G07: finalized draft objects recover before bounded client reads."""
+    def test_drop_draft_finalization_remains_reviewable_without_publication(
+        self,
+    ) -> None:
+        """G07: review uses protected staging without premature blob promotion."""
         events: list[object] = []
         voice = self._voice(sender=True, events=events)
         voice.begin(self.receiver_alias, Delivery.DROP, 'draft-crash', 'opus')
         voice.append('draft-crash', 0, base64.b64encode(b'reviewable').decode('ascii'))
-        with patch.object(self.sender_blobs, 'promote', side_effect=OSError('crash')):
+        with patch.object(
+            self.sender_blobs, 'promote', side_effect=OSError('crash')
+        ) as promote:
             voice.finalize('draft-crash', 70)
-        self.assertIsInstance(events[-1], VoiceOperationRejectedEvent)
+        promote.assert_not_called()
         self.assertEqual(len(self.sender_messages.get_voice_draft_payloads()), 1)
+        self.assertEqual(self.sender_messages.get_pending_outbox(), [])
 
         voice.finalize('draft-crash', 70)
 
@@ -902,8 +940,8 @@ class AcceptanceRepairContractTests(unittest.TestCase):
             [PendingLiveAdmission.ACCEPTED, PendingLiveAdmission.COUNT_LIMIT],
         )
 
-    def test_voice_byte_quota_rejects_growth_without_partial_storage(self) -> None:
-        """G12: pending byte admission rolls back the just-written segment."""
+    def test_voice_byte_quota_rejects_publication_without_losing_review(self) -> None:
+        """G12: delivery quota refusal preserves protected unsent draft bytes."""
         original_get_int = self.sender_pm.config.get_int
 
         def get_int(key: SettingKey) -> int:
@@ -913,17 +951,25 @@ class AcceptanceRepairContractTests(unittest.TestCase):
             return original_get_int(key)
 
         with patch.object(self.sender_pm.config, 'get_int', side_effect=get_int):
-            voice = self._voice(sender=True)
+            state = StateTracker()
+            state.add_active_connection(
+                self.receiver_onion, cast(socket.socket, _VoiceSocket())
+            )
+            voice = self._voice(sender=True, state=state)
             voice.begin(self.receiver_alias, Delivery.LIVE, 'byte-limit', 'opus')
             voice.append('byte-limit', 0, base64.b64encode(b'abc').decode('ascii'))
+            voice.finalize('byte-limit', 20)
+            self.assertFalse(voice.commit_draft(self.receiver_alias, 'byte-limit'))
         record = self.sender_messages.get_voice_payload(
             self.receiver_onion, 'byte-limit', MessageDirection.OUT
         )
         self.assertIsNotNone(record)
         assert record is not None
         metadata = json.loads(record.payload)
-        self.assertEqual(metadata['size_bytes'], 0)
-        self.assertEqual(metadata['chunk_ids'], [])
+        self.assertEqual(metadata['size_bytes'], 3)
+        self.assertEqual(len(metadata['chunk_ids']), 1)
+        self.assertEqual(record.status, MessageStatus.DRAFT.value)
+        self.assertEqual(self.sender_messages.get_pending_live_outbox(), [])
 
     def test_segment_storage_is_linear_and_socket_frames_do_not_interleave(
         self,
@@ -1007,7 +1053,7 @@ class AcceptanceRepairContractTests(unittest.TestCase):
         self.assertTrue(release.is_set())
 
     def test_purge_fence_wins_after_voice_finalize_passes_initial_guard(self) -> None:
-        """G25: a queued finalize cannot fallback after purge raises its fence."""
+        """G25: purge fences draft finalization before any Send authority exists."""
         operation_lock = threading.RLock()
         fence = _ObservedFence()
         voice = VoiceTransferManager(
@@ -1033,11 +1079,14 @@ class AcceptanceRepairContractTests(unittest.TestCase):
         worker.join(timeout=1.0)
 
         self.assertFalse(worker.is_alive())
-        self.assertEqual(
-            [row.msg_id for row in self.sender_messages.get_pending_live_outbox()],
-            ['purge-race'],
-        )
+        self.assertEqual(self.sender_messages.get_pending_live_outbox(), [])
         self.assertEqual(self.sender_messages.get_pending_outbox(), [])
+        record = self.sender_messages.get_voice_payload(
+            self.receiver_onion, 'purge-race', MessageDirection.OUT
+        )
+        assert record is not None
+        self.assertEqual(record.status, MessageStatus.DRAFT.value)
+        self.assertFalse(json.loads(record.payload)['finalized'])
 
     def test_purge_stop_wins_after_outbox_ack_passes_initial_guard(self) -> None:
         """G25: queued DROP acknowledgement cannot commit beyond purge stop."""
@@ -1079,9 +1128,6 @@ class AcceptanceRepairContractTests(unittest.TestCase):
         second_alias = self.sender_contacts.ensure_alias_for_onion(second_onion)
         assert second_alias is not None
         state = StateTracker()
-        voice = self._voice(sender=True, state=state)
-        voice.begin(self.receiver_alias, Delivery.LIVE, 'slow-a', 'opus')
-        voice.begin(second_alias, Delivery.LIVE, 'fast-b', 'opus')
         entered = threading.Event()
         release = threading.Event()
         slow = cast(socket.socket, _BlockingSocket(entered, release))
@@ -1089,23 +1135,29 @@ class AcceptanceRepairContractTests(unittest.TestCase):
         fast = cast(socket.socket, fast_obj)
         state.add_active_connection(self.receiver_onion, slow)
         state.add_active_connection(second_onion, fast)
+        voice = self._voice(sender=True, state=state)
+        for alias, msg_id in (
+            (self.receiver_alias, 'slow-a'),
+            (second_alias, 'fast-b'),
+        ):
+            voice.begin(alias, Delivery.LIVE, msg_id, 'opus')
+            voice.append(msg_id, 0, base64.b64encode(b'a').decode('ascii'))
+            voice.finalize(msg_id, 20)
 
         slow_worker = threading.Thread(
-            target=voice.append,
-            args=('slow-a', 0, base64.b64encode(b'a').decode('ascii')),
+            target=voice.commit_draft, args=(self.receiver_alias, 'slow-a')
         )
         slow_worker.start()
         self.assertTrue(entered.wait(timeout=1.0))
         fast_worker = threading.Thread(
-            target=voice.append,
-            args=('fast-b', 0, base64.b64encode(b'b').decode('ascii')),
+            target=voice.commit_draft, args=(second_alias, 'fast-b')
         )
         fast_worker.start()
         fast_worker.join(timeout=1.0)
 
         self.assertFalse(fast_worker.is_alive())
         self.assertTrue(
-            any(frame.startswith(b'/voice_chunk ') for frame in fast_obj.sent)
+            any(frame.startswith(b'/voice_begin ') for frame in fast_obj.sent)
         )
         release.set()
         slow_worker.join(timeout=1.0)
@@ -1202,6 +1254,9 @@ class AcceptanceRepairContractTests(unittest.TestCase):
         """G23: normal exit strengthens pending LIVE work without remote waits."""
         state = StateTracker()
         state.mark_scheduled_auto_reconnect(self.receiver_onion)
+        state.add_active_connection(
+            self.receiver_onion, cast(socket.socket, _VoiceSocket())
+        )
         router = MessageRouter(
             cm=self.sender_contacts,
             hm=HistoryManager(self.sender_pm),
@@ -1220,6 +1275,7 @@ class AcceptanceRepairContractTests(unittest.TestCase):
             'exit-voice', 0, base64.b64encode(b'pending voice').decode('ascii')
         )
         router.finalize_voice('exit-voice', 80)
+        self.assertTrue(router.commit_voice_draft(self.receiver_alias, 'exit-voice'))
         self.assertCountEqual(
             [row.msg_id for row in self.sender_messages.get_pending_live_outbox()],
             ['exit-text', 'exit-voice'],
@@ -1307,6 +1363,9 @@ class AcceptanceRepairContractTests(unittest.TestCase):
         """G02: a stale generic ACK cannot release pending Voice payload."""
         state = StateTracker()
         state.mark_scheduled_auto_reconnect(self.receiver_onion)
+        state.add_active_connection(
+            self.receiver_onion, cast(socket.socket, _VoiceSocket())
+        )
         router = MessageRouter(
             cm=self.sender_contacts,
             hm=HistoryManager(self.sender_pm),
@@ -1323,6 +1382,8 @@ class AcceptanceRepairContractTests(unittest.TestCase):
         router.append_voice(
             'voice-only', 0, base64.b64encode(b'retained').decode('ascii')
         )
+        router.finalize_voice('voice-only', 20)
+        self.assertTrue(router.commit_voice_draft(self.receiver_alias, 'voice-only'))
 
         router.process_incoming_ack(self.receiver_onion, 'voice-only')
 

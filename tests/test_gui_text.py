@@ -12,6 +12,7 @@ from metor.core.api import (
     MessageStatusCode,
     ReadReceiptEvent,
     TextAcceptedEvent,
+    DropQueuedEvent,
     TextRejectedEvent,
     MessageOperationReason,
 )
@@ -78,6 +79,20 @@ class TextAdmissionTests(unittest.TestCase):
         self.gui.command.assert_not_called()
         self.assertEqual(self.gui.text.operations, {})
         self.assertIn(('peer', Delivery.LIVE), self.gui.state.drafts)
+
+    def test_confirmed_drop_refreshes_open_archive_without_a_live_context(self) -> None:
+        """Local acceptance refreshes the history while preserving newer draft edits."""
+        self.gui.state.set_draft('peer', Delivery.DROP, 'a new drop')
+        self.gui.send_text('peer', Delivery.DROP)
+        action = next(iter(self.gui.text.operations))
+        self.gui.state.set_draft('peer', Delivery.DROP, 'the next draft')
+        self.gui.text.install(Update(0, action, DropQueuedEvent('Peer', 'peer')))
+        self.assertTrue(self.gui._messages_needed)
+        self.assertTrue(self.gui._refresh_needed)
+        self.assertEqual(
+            self.gui.state.drafts[('peer', Delivery.DROP)], 'the next draft'
+        )
+        self.assertFalse(self.gui.text.operations)
 
     def test_reserved_capacity_survives_arrivals_until_positive_acceptance(
         self,

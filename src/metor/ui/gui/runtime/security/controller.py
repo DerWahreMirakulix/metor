@@ -31,8 +31,6 @@ from metor.core.api import (
 from metor.ui.gui.state import Route
 from metor.ui.gui.state.mailbox import Update
 
-from .continuation import ContinuedLive
-
 if TYPE_CHECKING:
     from ..controller import GuiController
 
@@ -49,7 +47,6 @@ class SecurityController:
             None
         """
         self.controller = controller
-        self.continuation = ContinuedLive(self)
         self.restriction: ClientRestrictedEvent | None = None
         self.pending = False
         self.restoring = False
@@ -70,6 +67,15 @@ class SecurityController:
             NotificationPrivacy: Privacy used only after Core confirms restriction.
         """
         return self._policy.notifications_locked
+
+    @property
+    def accept_calls_locked(self) -> bool:
+        """Returns the covered cycle's policy after Core restriction is confirmed.
+
+        This presentation permission cannot replace Core's exact-call owner and
+        current restriction checks at acceptance time.
+        """
+        return self.restriction is not None and self.restriction.accept_calls_locked
 
     @property
     def return_route(self) -> Route:
@@ -103,7 +109,7 @@ class SecurityController:
         controller, state = self.controller, self.controller.state
         if state.covered or controller.client is None:
             return False
-        controller.calls.clear()
+        controller.live_invitations.clear()
         controller.resend.cancel()
         controller.contacts.book.stop()
         controller.notifications.begin_lock()
@@ -112,7 +118,6 @@ class SecurityController:
         preferences = (
             state.preferences.preferences if state.preferences else GuiPreferences()
         )
-        self.continuation.prepare(state.snapshot, state.route, preferences)
         self._policy = replace(preferences, pins=[])
         self._profile_instance = (
             state.snapshot.profile_instance_id if state.snapshot else None
@@ -243,8 +248,6 @@ class SecurityController:
         Returns:
             bool: Whether this security controller consumed the update.
         """
-        if self.continuation.install(operation, event):
-            return True
         if not operation.startswith('security:'):
             return False
         state = self.controller.state
@@ -256,7 +259,6 @@ class SecurityController:
                 state.snapshot = event
         elif isinstance(event, ClientRestrictedEvent):
             self.restriction = event
-            self.continuation.confirmed(event)
             state.status = ''
         elif isinstance(event, QuickUnlockFailedEvent):
             method = (
@@ -278,7 +280,6 @@ class SecurityController:
             self.retry_at = time.monotonic() + event.retry_after
             state.status = f'Try again in {event.retry_after} seconds'
         elif isinstance(event, ClientReauthorizedEvent):
-            self.continuation.revoke()
             self.restriction = None
             self.restoring = True
             state.status = 'Opening Metor…'
@@ -324,15 +325,9 @@ class SecurityController:
         if self.pending:
             if controller.voice.running or controller.playback.running:
                 return
-            requested = self.continuation.requested
             command = RestrictClientCommand(
                 unlock_method=self._policy.unlock_method,
-                continued_live_target=requested.peer if requested else None,
-                continued_live_context_generation=requested.context_generation
-                if requested
-                else None,
-                live_while_locked=requested is not None,
-                accept_while_locked=self._policy.accept_live_locked,
+                accept_calls_locked=self._policy.accept_calls_locked,
                 notification_privacy=self._policy.notifications_locked,
                 device_lifecycle=controller.device.enabled,
             )
@@ -369,4 +364,3 @@ class SecurityController:
 
             if controller.submit('security:restore', restore):
                 self.restoring = False
-        self.continuation.poll()

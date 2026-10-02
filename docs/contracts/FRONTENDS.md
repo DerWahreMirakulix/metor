@@ -191,17 +191,24 @@ still needs reconnect or fallback.
 
 ### Voice capture and transfer
 
-A capturing frontend uses `BeginVoiceCommand`, zero or more
-`AppendVoiceChunkCommand` calls with exact byte offsets and bounded Base64
-chunks, then `FinalizeVoiceCommand` for the same `msg_id`. Core permanently binds
-the turn to its begin-time target. Connection loss does not finalize it; recovery
-resumes after the peer-confirmed offset. Text and Voice remain full-duplex.
+A capturing frontend uses `BeginVoiceCommand`, exact-offset bounded
+`AppendVoiceChunkCommand` calls, then `FinalizeVoiceCommand` for the same
+`msg_id`. Core stages both DROP and LIVE locally and binds target, delivery,
+producer and original LIVE context. Finalize creates an unpublished draft;
+explicit `CommitVoiceCommand` publishes, and `CancelVoiceCommand` discards.
+Hardware PTT release invokes finalize, never commit. Manual review playback is
+optional; complete listening is not a send prerequisite. No draft bytes leave
+the daemon before commit, including capture limits or interrupted producers.
 
-For DROP Voice, finalize creates a non-visible `DRAFT`. The frontend must issue
-`CommitVoiceCommand` to publish it or `CancelVoiceCommand` to shred it. Incoming
-or retained Voice is read only through bounded `GetVoiceChunkCommand` /
-`VoiceDataEvent` ranges. After a safe playback handoff, the client explicitly
-issues `ReleaseVoiceCommand`; reads never consume content implicitly.
+If LIVE ends during recording/review, the staged draft cannot automatically
+publish or enter message fallback. A qualified LIVE commit requires an eligible
+original chat context; reconnect and explicit commit as DROP are distinct user
+actions. Published LIVE Voice retains its defined recovery and fallback rules.
+Incoming messages and previews play only after a manual user action.
+
+Retained Voice is read through bounded `GetVoiceChunkCommand` /
+`VoiceDataEvent` ranges. A safe handoff is followed by explicit
+`ReleaseVoiceCommand`; reads never consume implicitly.
 
 A newly attached frontend discovers retained identities with
 `ListRetainedMessagesCommand`. Its opaque cursor is filter-bound and tied to a
@@ -217,7 +224,19 @@ also provide the public discovery path for selective fallback after restart.
 If a bounded metadata page fails or becomes stale, Terminal reports that its
 Voice inbox display is incomplete and offers another explicit `/inbox` action.
 
-Peer wire generation 3 separates `/ack` (LIVE text), `/drop_ack` (DROP text),
+Terminal is a text-oriented client with no local capture/playback or duplex
+audio adapter in its independent package. It displays telephone signaling
+through typed Call events and `/calls`, separately from live-chat invitations.
+`/connect`, `/accept`, `/reject` and `/end` control LIVE chat only; chat
+acceptance never grants call audio. `/call reject <call-id>` refuses a telephone
+request. `/call cancel`, `/call hangup`, `/call mute` and `/call unmute` address
+one exact call ID and remain subject to Core client ownership. Neither call
+notices nor status queries change focus or message delivery mode. `/call start`
+and `/call accept` explicitly report that a capable frontend is required before
+issuing any Core command. Terminal never creates a silent accepted call, reads
+call media, auto-plays messages, or consumes Voice on the user's behalf.
+
+Peer wire generation 4 retains separate `/ack` (LIVE text), `/drop_ack` (DROP text),
 `/voice_ack <id> <offset>` (resumable progress), and
 `/voice_commit_ack <id>` (terminal Voice durability). A sender retains every
 Voice segment until the terminal commit ACK. Duplicate matching chunks and END
@@ -228,9 +247,31 @@ byte budgets transactionally across text and Voice. It emits typed pressure and
 hard-limit events, finalizes the current turn at the hard boundary, stores each
 chunk as one bounded append-only encrypted object, never rewrites older chunks,
 and rejects new turns while capacity is full.
-Finalized pending LIVE Voice follows the same reconnect and selective/automatic
+Explicitly published pending LIVE Voice follows the same reconnect and selective/automatic
 fallback rules as text. Once a frontend consumes unseen LIVE Voice, Core may
 shred its owned spool; the frontend may retain only a bounded volatile copy.
+
+## Telephone calls
+
+`StartCallCommand`, `AcceptCallCommand`, reject/cancel/hangup/mute commands,
+`GetCallsCommand`, and bounded send/read audio commands form a separate public
+Core contract. The SDK exposes the same operations to every capable frontend.
+Call IDs and exact-client ownership remain Core authority; viewing an incoming
+request, accepting LIVE or navigating a chat cannot authorize conversation
+media. A call-only transport creates no independent chat permission. Reject or
+hangup on a transport reused from LIVE leaves the chat alive. Ending the chat revokes message authority while the accepted call retains the connection. Call-only sockets
+are released after termination.
+
+Both directions transfer ephemeral PCM in bounded recent-frame queues. There
+is no message spool, audio recording, retained inventory or CALL→DROP fallback.
+Transport loss and system suspend end calls; renewed consent starts a new call,
+so stale audio cannot become a reconnect backlog. Ringing/transport timeouts,
+concurrent-call rejection and client/profile teardown are explicit outcomes.
+Local adapters must establish compatible selected headset endpoints before
+starting or accepting media. Speaker echo cancellation is not claimed.
+
+IPC/peer generation 4 is required. Older generations fail typed negotiation;
+unsupported peers cannot interpret a call as a LIVE invitation or chat message.
 
 ## Restricted client/session lock
 
@@ -238,24 +279,19 @@ shred its owned spool; the frontend may retain only a bounded volatile copy.
 blob, identity, and key runtime state. It is not a device screen lock.
 
 `RestrictClientCommand` restricts only its requesting authenticated IPC session.
-Its immutable lock-cycle policy selects:
+Its immutable lock-cycle policy selects unlock method, notification privacy,
+`accept_calls_locked` (default false), and independent `device_lifecycle`
+authority. It grants no continued LIVE media, message playback/capture or
+locked LIVE invitation acceptance. Retired auto-play and general LIVE-lock
+preferences cannot transfer privileges to calls.
 
-- `unlock_method`: `PIN`, `PROFILE_PASSWORD`, or `NONE`;
-- an optional continued LIVE target and whether locked Voice is allowed;
-- incoming acceptance policy: `ALL`, `SAVED_CONTACTS`, or `NONE`;
-- notification privacy: `SHOW_ALL`, `ANONYMIZE`, or `OFF`.
-- `device_lifecycle`, granted only to a session authenticated before restriction.
-
-Restricted clients cannot read normal contacts/history/messages/settings or send
-to arbitrary targets. Reject is permitted; accept and locked Voice are checked
-against the fixed policy in Core. Other authenticated clients, including a
-Terminal session, remain unaffected. An anonymized restricted client receives
-no peer identity/saved-status disclosure, and `OFF` suppresses unsolicited
-presentation metadata. Multiple anonymous incoming calls use distinct opaque
-action handles so accept/reject and expiry remain actionable without disclosing
-identity. Locked notifications never carry message content. Locked Voice is
-limited to the fixed continued LIVE target independently of notification
-privacy; unrelated or DROP media is never exposed.
+Restricted clients cannot read contacts/history/messages/settings or create
+Voice recordings. Existing exact-owner accepted calls may continue their
+bounded audio and mute/hangup controls. New calls require an explicit exact-ID
+acceptance and the separate protected policy; a later call from the same peer
+cannot inherit permission. Calls use privacy-filtered metadata; Off suppresses
+unsolicited requests and identity, while own active terminal state remains
+observable for cleanup. Other authenticated clients remain independent.
 
 Quick unlock stores a salted Argon2id-derived verifier, never a PIN or profile
 encryption key. The verifier is itself a usable authentication credential and
@@ -317,10 +353,10 @@ an automatic reconnect intent when the profile is next opened.
 | Runtime projection                 | `register_live_consumer`, `RuntimeSnapshotEvent`, `RuntimeStateChangedEvent`                                      | Epoch/revision ordering applies only to projected state; media, request results and lifecycle reports are reconciled by their own identities    | GAT-42–45                                 |
 | Text admission and unknown outcome | `SendMessageCommand(local_acceptance=True)`, `TextAcceptedEvent`, `TextRejectedEvent`, `GetMessageOutcomeCommand` | Definite quota rejection is immediate; a lost result is checked by the original ID and never resent blindly                                     | GAT-01, GAT-30, GAT-46                    |
 | Retained Voice                     | `ListRetainedMessagesCommand`, `GetVoiceChunkCommand`, `ReleaseVoiceCommand`                                      | Inventory/read are bounded and non-consuming; only exact eligible finalized handoff releases content                                            | GAT-43, GAT-52–55                         |
-| Voice producer ownership           | owner-qualified register/release and Begin/Append/Finalize/Commit/Cancel                                          | Disposable DROP cleanup is owner-scoped; committed winners survive uncertainty; interrupted authorized LIVE retains accepted bytes              | GAT-10–12, GAT-49–55                      |
+| Voice producer ownership           | owner-qualified register/release and Begin/Append/Finalize/Commit/Cancel                                          | Both-mode draft cleanup is owner-scoped; committed winners survive uncertainty; interrupted recordings retain protected unsent bytes            | GAT-10–12, GAT-49–55                      |
 | Protected GUI metadata             | `GetGuiPreferencesCommand`, `SetGuiPreferencesCommand`                                                            | Profile-instance scoped, bounded and revision-checked; stale writes reject rather than merge over another client                                | GAT-61, GAT-67                            |
 | Qualified LIVE controls            | Connect/Accept/Reject, qualified Disconnect/Retunnel, Fallback, Dismiss                                           | Attempt/context qualifiers reject stale controls; fallback is atomic and preserves IDs; dismissal refuses unresolved work                       | GAT-03–06, GAT-13–16, GAT-57, GAT-60      |
-| Restriction and unlock             | Restrict/Reauthorize/ConfigureQuickUnlock and restricted-state projection                                         | Immediate cover; exact lock-cycle policy and call handles; failed restriction never becomes client-side success                                 | GAT-20–23, GAT-56–60                      |
+| Restriction and unlock             | Restrict/Reauthorize/ConfigureQuickUnlock and restricted-state projection                                         | Immediate cover; exact lock-cycle policy and separately owned Call grants; failed restriction never becomes client-side success                 | GAT-20–23, GAT-56–60                      |
 | Contacts and activity              | typed contact validation/mutations and paged history metadata                                                     | Stable identity guards prevent stale rename/remove; pages are bounded and body-free; uncertain mutation uses readback                           | GAT-02, GAT-03, GAT-17–19, GAT-67, GAT-68 |
 | Profile lifecycle                  | `ProfileRuntimeCoordinator`, optional public host profile management                                              | Phase-aware result distinguishes source-active from source-prepared failure; target credentials and callbacks never cross profiles              | GAT-24–26, GAT-62–64                      |
 | Device lifecycle and purge         | frontend-neutral platform ports plus correlated SelfDestruct reports                                              | Physical input grants no authority; unconfirmed preparation or destruction never reaches shutdown                                               | GAT-27, GAT-40, GAT-65, GAT-66            |

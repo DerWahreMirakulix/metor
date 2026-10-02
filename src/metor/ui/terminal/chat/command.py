@@ -22,6 +22,7 @@ from metor.core.api import (
 from metor.ui.terminal import Help
 from metor.ui.terminal.models import StatusTone
 
+from metor.ui.terminal.chat.calls import dispatch_call_command
 from metor.ui.terminal.chat.ipc import IpcClient
 from metor.ui.terminal.chat.models import ChatMessageType
 from metor.ui.terminal.chat.renderer import ChatRenderer
@@ -130,6 +131,8 @@ class CommandDispatcher:
         parts: List[str] = input_str.split()
         if not parts:
             return False
+        if dispatch_call_command(parts, self._ipc, self._renderer):
+            return True
 
         cmd: str = parts[0]
         arg: Optional[str] = parts[1].lower() if len(parts) > 1 else None
@@ -139,7 +142,7 @@ class CommandDispatcher:
             if target:
                 self._ipc.send_command(DisconnectCommand(target=target))
             else:
-                self._print_system('No focused session to end.')
+                self._print_system('No focused live chat to end.')
         elif cmd == '/connect':
             if arg:
                 self._remember_pending_connect_focus(arg)

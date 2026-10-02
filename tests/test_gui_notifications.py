@@ -52,13 +52,15 @@ class NotificationStoreTests(unittest.TestCase):
         self.assertFalse(
             store.put(Notice(NoticeKind.UNSTABLE, 'overflow', 'info', actionable=False))
         )
-        call = Notice(NoticeKind.CALL, 'caller', 'request')
+        call = Notice(NoticeKind.INVITATION, 'caller', 'request')
         self.assertTrue(store.put(call))
         self.assertEqual(len(store.items), GuiLimits.NOTIFICATIONS)
         self.assertLessEqual(store.bytes, GuiLimits.NOTIFICATION_BYTES)
-        store.reconcile([Notice(NoticeKind.CALL, 'new-caller', 'new-request')])
-        self.assertEqual(list(store.items), [(NoticeKind.CALL, 'new-caller')])
-        self.assertFalse(store.put(Notice(NoticeKind.CALL, 'x' * 4096, 'oversized')))
+        store.reconcile([Notice(NoticeKind.INVITATION, 'new-caller', 'new-request')])
+        self.assertEqual(list(store.items), [(NoticeKind.INVITATION, 'new-caller')])
+        self.assertFalse(
+            store.put(Notice(NoticeKind.INVITATION, 'x' * 4096, 'oversized'))
+        )
         store.clear_center()
         self.assertLessEqual(store.bytes, GuiLimits.NOTIFICATION_BYTES)
 

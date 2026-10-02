@@ -78,7 +78,7 @@ class VoiceProducerService:
             return False
         repository = self._cleanup.repository
         if isinstance(cmd, RegisterVoiceOwnerCommand):
-            if not cmd.disposable_drop or not repository.protected:
+            if not cmd.protected_staging or not repository.protected:
                 self._send(conn, VoiceOwnerRejectedEvent())
             else:
                 owner = self._owners.get(conn)
@@ -96,7 +96,9 @@ class VoiceProducerService:
             else:
                 self.disconnect(conn)
                 pending = any(
-                    item.owner_token == cmd.owner_token for item in repository.items()
+                    item.owner_token == cmd.owner_token
+                    and self._cleanup.cleanup_pending(item)
+                    for item in repository.items()
                 )
                 self._send(conn, VoiceOwnerReleasedEvent(pending))
             return False
@@ -125,54 +127,43 @@ class VoiceProducerService:
             return True
         item = repository.get(cmd.msg_id)
         owner = cmd.owner_token
-        authorized = (
-            owner is not None and bool(owner) and self._owners.get(conn) == owner
-        )
-        if isinstance(cmd, BeginVoiceCommand) and owner is not None:
+        effective = self._owners.get(conn)
+        if owner is not None and (not owner or owner != effective):
+            self._reject(conn, cmd.msg_id)
+            return False
+        if isinstance(cmd, BeginVoiceCommand):
+            if not repository.protected and owner is None:
+                return True
             onion = self._resolve(cmd.target)
-            if authorized and onion is not None and item is None:
-                if repository.claim(owner, onion, cmd.msg_id, cmd.delivery):
+            if effective is None:
+                effective = self._new_owner(conn)
+            if effective is not None and onion is not None and item is None:
+                if repository.claim(effective, onion, cmd.msg_id, cmd.delivery):
                     return True
             self._reject(conn, cmd.msg_id)
             return False
         if item is None:
-            if owner is None:
+            if owner is None or effective is not None:
                 return True
             self._reject(conn, cmd.msg_id)
             return False
-        if (
-            isinstance(cmd, FinalizeVoiceCommand)
-            and item.delivery is Delivery.LIVE
-            and item.interrupted
-            and (
-                (authorized and item.owner_token == owner)
-                or (owner is None and item.owner_token not in self._owners.values())
-            )
-        ):
-            try:
-                with request_context(None):
-                    reclaimed = self._cleanup.reclaim(item)
-                if not reclaimed:
-                    self._reject(
-                        conn,
-                        cmd.msg_id,
-                        MessageOperationReason.PERSISTENCE_FAILED,
-                    )
-                else:
-                    self._send(conn, self._cleanup.finalization_result(item))
-            except Exception:
-                self._reject(
-                    conn, cmd.msg_id, MessageOperationReason.PERSISTENCE_FAILED
-                )
-            return False
-        if not authorized or item.owner_token != owner:
-            self._reject(conn, cmd.msg_id)
-            return False
+        if item.owner_token != effective:
+            if (
+                isinstance(cmd, FinalizeVoiceCommand)
+                and item.interrupted
+                and item.owner_token not in self._owners.values()
+            ):
+                if effective is None:
+                    effective = self._new_owner(conn)
+                if effective is not None:
+                    repository.rebind(item, effective)
+                    item = repository.get(cmd.msg_id)
+            if item is None or item.owner_token != effective:
+                self._reject(conn, cmd.msg_id)
+                return False
         if item.interrupted and isinstance(cmd, AppendVoiceChunkCommand):
             self._reject(conn, cmd.msg_id)
             return False
-        if isinstance(cmd, FinalizeVoiceCommand) and item.delivery is Delivery.LIVE:
-            self._cleanup.repository.mark_interrupted(item)
         if item.cleanup_payload is not None and not isinstance(cmd, CancelVoiceCommand):
             self._reject(conn, cmd.msg_id, MessageOperationReason.PERSISTENCE_FAILED)
             return False
@@ -183,11 +174,11 @@ class VoiceProducerService:
                 self._reject(conn, cmd.msg_id)
                 return False
         if isinstance(cmd, CancelVoiceCommand):
-            if item.delivery is not Delivery.DROP or self._cleanup.transferred(item):
+            if self._cleanup.transferred(item):
                 self._reject(conn, cmd.msg_id)
                 return False
             try:
-                success = self._cleanup.reclaim(item)
+                success = self._cleanup.discard(item)
             except Exception:
                 success = False
             if success:
@@ -204,8 +195,16 @@ class VoiceProducerService:
             return False
         return True
 
+    def _new_owner(self, conn: socket.socket) -> str | None:
+        """Issues an implicit connection-bound lease for public SDK capture calls."""
+        if len(self._owners) >= Constants.VOICE_OWNER_MAX_PROFILE_ITEMS:
+            return None
+        owner = secrets.token_hex(Constants.VOICE_OWNER_TOKEN_BYTES)
+        self._owners[conn] = owner
+        return owner
+
     def after(self, cmd: IpcCommand) -> None:
-        """Transfers claims only after canonical commit/finalization is visible.
+        """Transfers claims only after canonical publication is visible.
 
         Args:
             cmd: Completed domain operation; its response may have been lost.
@@ -221,7 +220,7 @@ class VoiceProducerService:
             if isinstance(cmd, BeginVoiceCommand) and not self._cleanup.has_receipt(
                 item
             ):
-                self._cleanup.reclaim(item)
+                self._cleanup.discard(item)
             elif self._cleanup.transferred(item):
                 self._cleanup.release_transferred(item)
                 self._contexts.pop(item.msg_id, None)
@@ -229,6 +228,16 @@ class VoiceProducerService:
                 generation = self._context(item.onion, item.msg_id)
                 if generation is not None:
                     self._contexts[item.msg_id] = item.owner_token, generation
+
+    def finalize_on_restriction(self, conn: socket.socket) -> None:
+        """Freezes the client's local accepted prefixes while retaining its lease."""
+        owner = self._owners.get(conn)
+        if owner is None or self._purging():
+            return
+        for item in self._cleanup.repository.items():
+            if item.owner_token == owner and not self._cleanup.transferred(item):
+                with request_context(None):
+                    self._cleanup.reclaim(item)
 
     def disconnect(self, conn: socket.socket) -> None:
         """Revokes a confirmed lost connection before attempting durable cleanup.

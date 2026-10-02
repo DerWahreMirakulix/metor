@@ -157,19 +157,18 @@ this namespace under the profile database's protection and deletion boundary.
 ## GUI Voice producer lifecycle
 
 - `RegisterVoiceOwnerCommand` / `VoiceOwnerRegisteredEvent`: establish a Core-issued,
-  connection-bound token for disposable DROP staging and LIVE producer loss.
+  connection-bound token for protected staging for both DROP and LIVE.
 - `ReleaseVoiceOwnerCommand` / `VoiceOwnerReleasedEvent`: revoke that connection's
   owner; `cleanup_pending` means durable cleanup/recovery remains tracked.
 - `VoiceOwnerRejectedEvent`: unsupported policy or stale/wrong connection token.
 - `owner_token`: optional qualification on Voice mutations, preview and retained
   inventory. It is volatile frontend authority, never a blob path or resume secret.
-- `producer_interrupted`: retained LIVE data whose vanished producer could not yet
-  be finalized. `can_retry_finalization` permits an authenticated explicit
+- `producer_interrupted`: protected draft data whose producer was interrupted or disconnected. `can_retry_finalization` permits an authenticated explicit
   `FinalizeVoiceCommand` without claiming the invalidated producer token.
-- `disposable_voice_owner`, `interrupted_voice_recovery`: managed-runtime capability
+- `protected_voice_owner`, `interrupted_voice_recovery`: managed-runtime capability
   names advertised only with protected SQL staging and an active blob store.
 - `LiveContextEntry.context_generation`: logical conversation identity qualified by
-  the runtime epoch. Recovery preserves it; a later independent call receives a
+  the runtime epoch. Recovery preserves it; a later independently accepted chat receives a
   new value. A known retained identity alone grants no active permission.
 - `BeginVoiceCommand.context_generation`: optional expected logical context;
   stale, ended or pending-inbound context-qualified capture is rejected.
@@ -219,44 +218,39 @@ this namespace under the profile database's protection and deletion boundary.
   exchange. In particular, cleanup of a different discovered peer is not a
   successful result for a rejected contact-removal command.
 
-### Exact incoming-call handles
+### LIVE invitation identities
 
-- `pending_call_handles`: additive IPC-2 capability. Defaulted
-  `AcceptCommand.action_handle`, `RejectCommand.action_handle` and
-  `PendingConnectionEntry.action_handle` bind an action to one pending request
-  owned by that IPC recipient. `IncomingConnectionEvent.action_handle` uses the
-  same recipient-specific authority in both full and restricted sessions.
-  Handle absence preserves legacy target-only requests. An explicit invalid,
-  expired, cross-client or replacement-request handle returns
-  `NO_PENDING_CONNECTION`; it never falls back to a target-only action.
-- Handles survive the same client's successful normal reauthorization while the
-  exact request, runtime and deadline remain valid. Denied restricted Accept
-  does not consume the handle needed by Decline. A new restriction cycle,
-  disconnected client or hard runtime teardown revokes its prior handles.
-- `LiveContextEntry.call_handle`: defaulted optional navigation identity for a
-  call observed by this IPC client and positively accepted into that exact socket,
-  including acceptance by another local client. It is projected only while the
-  accepted logical context still matches its generation. A later call from the
-  same Onion cannot inherit it. This metadata grants no media permission.
-- The network state coordinator owns runtime-only pending source tokens.
-  Session access replaces them with bounded recipient handles before publishing
-  snapshots or incoming events. A late source projection cannot acquire a
-  replacement request's authority; internal source tokens are not exposed as
-  usable client handles. No peer-wire or storage generation changes are involved.
+- `pending_invitation_handles`: recipient-specific authority on
+  `AcceptCommand.action_handle`, `RejectCommand.action_handle`, pending snapshots
+  and incoming LIVE events. These are chat invitations, never telephone calls.
+  A stale, cross-client or replaced handle fails without target-only fallback.
+- `LiveContextEntry.invitation_handle`: navigation reference to the exact
+  independently accepted LIVE context observed by this client. It grants no
+  call or microphone access. App restriction hides invitations and cannot
+  accept LIVE, even when automatic unlocked LIVE acceptance is configured.
 
-### Restricted state and notification sources
+### Calls and restricted client state
 
-- `restricted_live_projection`: additive IPC-2 capability for the read-only
-  `GetRestrictedClientStateCommand` / `RestrictedClientStateEvent` exchange.
-  The event projects only the requesting connection's current restriction,
-  exact continued target/context generation, session phase and privacy-permitted
-  pending calls / accepted navigation handles. Notifications Off returns neither
-  pending nor accepted call metadata. Full sessions receive `restricted=False`.
-- `continued_live_context_generation`: defaulted optional positive integer on
-  `RestrictClientCommand` qualifies the deliberate foreground target. Core returns
-  the granted target/generation on `ClientRestrictedEvent` and revalidates both
-  on restricted-state queries. Recognized recovery preserves the logical context;
-  terminal end or a fresh manual call does not inherit old media permission.
+- `CallInfo.call_id`: exact runtime-only telephone identity, with a fresh Core-issued incoming recipient handle distinct from peer signaling identity; independent of peer,
+  LIVE context generation, Voice message ID and `Delivery`. `CallState` describes
+  connecting, outgoing, incoming, active and ended calls. `CallReason` describes
+  bounded admission and termination outcomes.
+- `StartCallCommand`, `AcceptCallCommand`, `RejectCallCommand`,
+  `CancelCallCommand`, `HangupCallCommand`, and `MuteCallCommand`: separate
+  telephone controls, never chat messages or implicit LIVE permissions.
+- `SendCallAudioCommand` / `ReadCallAudioCommand`: exact-owner, bounded,
+  ephemeral real-time PCM frame exchange; no retained inventory, recording,
+  replay, consume or DROP fallback.
+- `accept_calls_locked`: protected Boolean preference, default false, allowing
+  explicit call acceptance while this client remains restricted. An accepted
+  call grants only its exact owner media and mute/hangup controls until it ends.
+- `GetRestrictedClientStateCommand` / `RestrictedClientStateEvent`: projects only
+  the client's app restriction and privacy policy, never a continued LIVE media
+  grant. Calls have their own privacy-filtered projection.
+- IPC and peer generation 4 reject older generations before commands or frames
+  can acquire the new semantics. Old LIVE media-lock and auto-play preferences
+  are retired without transferring their privileges to calls.
+
 - `InboxNotificationEvent.delivery`: defaulted DROP/LIVE kind for content-free
   unseen activity. `source_id` is a defaulted optional canonical inbound message
   identity, used to distinguish a new arrival with the same unread count.
@@ -269,7 +263,7 @@ this namespace under the profile database's protection and deletion boundary.
 
 - `qualified_live_control`: capability for optional exact qualifiers on
   `DisconnectCommand`. `context_generation` identifies the displayed active or
-  recovering context for End; `attempt_id` identifies one current outbound call
+  recovering context for End; `attempt_id` identifies one current outbound LIVE connection attempt
   for Cancel. They are mutually exclusive. Unqualified legacy callers retain
   their existing semantics.
 - `LiveContextEntry.outbound_attempt_id`: defaulted optional opaque 32-character

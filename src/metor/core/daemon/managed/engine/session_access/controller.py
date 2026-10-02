@@ -6,19 +6,19 @@ from typing import Callable, Optional, Set
 
 from metor.core.api import (
     ConfigureQuickUnlockCommand,
-    Delivery,
     QuickUnlockAction,
     ReauthorizeClientCommand,
     RestrictClientCommand,
     IpcCommand,
     IpcEvent,
-    PendingConnectionEntry,
+    CallStateEvent,
+    NotificationPrivacy,
 )
 from metor.core.daemon.managed.quick_unlock import (
     QuickUnlockStorageError,
     QuickUnlockStore,
 )
-from .grants import PendingCallGrant
+from .grants import PendingInvitationGrant
 
 # Local Package Imports
 from ...local_auth import (
@@ -27,7 +27,7 @@ from ...local_auth import (
 )
 from .events import SessionEventMixin
 from .policy import RestrictedSessionPolicy
-from . import authorization, restriction, projection, calls
+from . import authorization, restriction, projection, invitations
 
 
 class SessionAccessController(SessionEventMixin):
@@ -41,29 +41,25 @@ class SessionAccessController(SessionEventMixin):
         failure_limit_callback: Callable[[], int],
         live_consumer_available_callback: Callable[[], None],
         quick_unlock_store: Optional[QuickUnlockStore] = None,
-        is_saved_contact_callback: Optional[Callable[[str], bool]] = None,
-        resolve_target_callback: Optional[Callable[[str], Optional[str]]] = None,
-        voice_target_callback: Optional[Callable[[str], Optional[str]]] = None,
-        voice_delivery_callback: Optional[Callable[[str], Optional[Delivery]]] = None,
-        inbound_voice_delivery_callback: Optional[
-            Callable[[str, str], Optional[Delivery]]
-        ] = None,
         live_context_callback: Optional[Callable[[str], object | None]] = None,
-        voice_context_callback: Optional[
-            Callable[[str, str, str], object | None]
-        ] = None,
         self_destruct_requires_unlock_callback: Optional[Callable[[], bool]] = None,
         live_generation_callback: Optional[Callable[[str], Optional[int]]] = None,
-        live_state_callback: Optional[Callable[[str], str]] = None,
-        pending_projection_callback: Optional[
-            Callable[[], list[PendingConnectionEntry]]
-        ] = None,
         pending_token_callback: Optional[Callable[[str], Optional[str]]] = None,
-        pending_call_callback: Optional[
+        pending_invitation_callback: Optional[
             Callable[[str], tuple[socket.socket, float] | None]
         ] = None,
         active_connection_callback: Optional[
             Callable[[str], Optional[socket.socket]]
+        ] = None,
+        call_lock_acceptance_callback: Optional[Callable[[], bool]] = None,
+        call_authorization_callback: Optional[
+            Callable[[socket.socket, IpcCommand], bool]
+        ] = None,
+        call_event_projection_callback: Optional[
+            Callable[
+                [socket.socket, CallStateEvent, NotificationPrivacy],
+                Optional[CallStateEvent],
+            ]
         ] = None,
     ) -> None:
         """Initializes session access with policy and event callbacks.
@@ -75,11 +71,7 @@ class SessionAccessController(SessionEventMixin):
             failure_limit_callback (Callable[[], int]): Failure-limit getter.
             live_consumer_available_callback (Callable[[], None]): First-consumer hook.
             quick_unlock_store (Optional[QuickUnlockStore]): PIN verifier persistence.
-            is_saved_contact_callback (Optional[Callable[[str], bool]]): Saved-peer check.
-            resolve_target_callback (Optional[Callable]): Stable onion resolver.
-            voice_target_callback (Optional[Callable]): Active Voice owner resolver.
-            voice_delivery_callback (Optional[Callable]): Active Voice delivery
-                semantics resolver.
+            call_authorization_callback: Exact accepted Call owner/state checker.
             self_destruct_requires_unlock_callback (Optional[Callable[[], bool]]):
                 Current conservative restricted-session purge policy.
 
@@ -104,33 +96,30 @@ class SessionAccessController(SessionEventMixin):
         self._session_consumers: Set[socket.socket] = set()
         self._local_auth: LocalAuthTracker = LocalAuthTracker()
         self._quick_unlock = quick_unlock_store
-        self._is_saved_contact = is_saved_contact_callback or (lambda _target: False)
-        self._resolve_target = resolve_target_callback or (lambda target: target)
-        self._voice_target = voice_target_callback or (lambda _msg_id: None)
-        self._voice_delivery = voice_delivery_callback or (lambda _msg_id: None)
-        self._inbound_voice_delivery = inbound_voice_delivery_callback or (
-            lambda _onion, _msg_id: None
-        )
         self._live_context = live_context_callback or (lambda _onion: None)
         self._live_generation = live_generation_callback or (lambda _onion: None)
-        self._live_state = live_state_callback or (lambda _onion: 'disconnected')
-        self._pending_projection = pending_projection_callback or (lambda: [])
-        self._voice_context = voice_context_callback or (
-            lambda _onion, _msg_id, _direction: None
+        self._call_lock_acceptance = call_lock_acceptance_callback or (lambda: False)
+        self._authorize_call = call_authorization_callback or (
+            lambda _conn, _cmd: False
         )
         self._self_destruct_requires_unlock = (
             self_destruct_requires_unlock_callback or (lambda: True)
+        )
+        self._project_call_event = call_event_projection_callback or (
+            lambda _conn, _event, _privacy: None
         )
         self._restricted: dict[socket.socket, RestrictedSessionPolicy] = {}
         self._restricted_challenges: dict[socket.socket, str] = {}
         self._pin_failures: dict[socket.socket, int] = {}
         self._pin_disabled: set[socket.socket] = set()
-        self._call_handles: dict[socket.socket, dict[str, PendingCallGrant]] = {}
-        self._pending_call = pending_call_callback or (lambda _onion: None)
+        self._invitation_handles: dict[
+            socket.socket, dict[str, PendingInvitationGrant]
+        ] = {}
+        self._pending_invitation = pending_invitation_callback or (lambda _onion: None)
         self._pending_token = pending_token_callback
         self._active_connection = active_connection_callback or (lambda _onion: None)
-        self._authorized_calls: dict[socket.socket, socket.socket] = {}
-        self._accepted_calls: dict[
+        self._authorized_invitations: dict[socket.socket, socket.socket] = {}
+        self._accepted_invitations: dict[
             socket.socket, dict[str, tuple[str, object, int]]
         ] = {}
         self._restriction_generations: dict[socket.socket, int] = {}
@@ -146,9 +135,9 @@ class SessionAccessController(SessionEventMixin):
         """
         with self._lock:
             self._auth_runtime_generation += 1
-            self._call_handles.clear()
-            self._accepted_calls.clear()
-            self._authorized_calls.clear()
+            self._invitation_handles.clear()
+            self._accepted_invitations.clear()
+            self._authorized_invitations.clear()
             self._sensitive_auth_pending.clear()
             self._sensitive_auth_grants.clear()
         self._local_auth.install_context(context)
@@ -222,9 +211,9 @@ class SessionAccessController(SessionEventMixin):
             self._restricted_challenges.pop(conn, None)
             self._pin_failures.pop(conn, None)
             self._pin_disabled.discard(conn)
-            self._call_handles.pop(conn, None)
-            self._accepted_calls.pop(conn, None)
-            self._authorized_calls.pop(conn, None)
+            self._invitation_handles.pop(conn, None)
+            self._accepted_invitations.pop(conn, None)
+            self._authorized_invitations.pop(conn, None)
             self._restriction_generations.pop(conn, None)
         self._local_auth.clear_connection(conn)
 
@@ -247,9 +236,9 @@ class SessionAccessController(SessionEventMixin):
             self._restricted_challenges.clear()
             self._pin_failures.clear()
             self._pin_disabled.clear()
-            self._call_handles.clear()
-            self._accepted_calls.clear()
-            self._authorized_calls.clear()
+            self._invitation_handles.clear()
+            self._accepted_invitations.clear()
+            self._authorized_invitations.clear()
             self._restriction_generations.clear()
         self._local_auth.install_context(None)
 
@@ -463,7 +452,9 @@ class SessionAccessController(SessionEventMixin):
         """
         return projection.filter_restricted_event(self, conn, event)
 
-    def _consume_call_handle(self, conn: socket.socket, handle: Optional[str]) -> None:
+    def _consume_invitation_handle(
+        self, conn: socket.socket, handle: Optional[str]
+    ) -> None:
         """Consumes a handle only after its action was authorized.
 
         Args:
@@ -473,19 +464,21 @@ class SessionAccessController(SessionEventMixin):
         Returns:
             None
         """
-        return projection._consume_call_handle(self, conn, handle)
+        return projection._consume_invitation_handle(self, conn, handle)
 
-    def _valid_call_grant(self, conn: socket.socket, grant: PendingCallGrant) -> bool:
+    def _valid_invitation_grant(
+        self, conn: socket.socket, grant: PendingInvitationGrant
+    ) -> bool:
         """Checks the exact request, session cycle, runtime and expiry.
 
         Args:
             conn (socket.socket): Authenticated client connection presenting the grant.
-            grant (PendingCallGrant): Exact pending-call capability under review.
+            grant (PendingInvitationGrant): Exact pending-invitation capability under review.
 
         Returns:
             bool: Whether the grant still authorizes this connection and runtime cycle.
         """
-        return projection._valid_call_grant(self, conn, grant)
+        return projection._valid_invitation_grant(self, conn, grant)
 
     def take_pending_action(self, conn: socket.socket) -> socket.socket | None:
         """Transfers exact pending identity to the controller's atomic removal.
@@ -501,7 +494,7 @@ class SessionAccessController(SessionEventMixin):
     def project_pending_snapshot(
         self, conn: socket.socket, event: IpcEvent
     ) -> IpcEvent:
-        """Qualifies call snapshot actions for this authenticated recipient.
+        """Qualifies invitation snapshot actions for this authenticated recipient.
 
         Args:
             conn: Receiving IPC connection.
@@ -509,9 +502,9 @@ class SessionAccessController(SessionEventMixin):
         Returns:
             IpcEvent: Original outcome or recipient-qualified snapshot.
         """
-        return calls.project_snapshot(self, conn, event)
+        return invitations.project_snapshot(self, conn, event)
 
-    def record_accepted_call(
+    def record_accepted_invitation(
         self, conn: socket.socket, handle: str, onion: str, generation: int
     ) -> None:
         """Retains navigation identity only for a positively accepted logical context.
@@ -524,14 +517,14 @@ class SessionAccessController(SessionEventMixin):
         Returns:
             None
         """
-        calls.record_accepted(self, conn, handle, onion, generation)
+        invitations.record_accepted(self, conn, handle, onion, generation)
 
-    def observe_call_transition(self, event: IpcEvent) -> None:
-        """Preserves recipient request identity when another client accepts that exact call.
+    def observe_invitation_transition(self, event: IpcEvent) -> None:
+        """Preserves recipient request identity when another client accepts that exact invitation.
 
         Args:
             event: Core transport transition before recipient privacy filtering.
         Returns:
             None
         """
-        calls.observe_transition(self, event)
+        invitations.observe_transition(self, event)

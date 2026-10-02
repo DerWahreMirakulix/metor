@@ -29,6 +29,7 @@ from metor.data import (
     ContactManager,
     SettingKey,
 )
+from metor.shared import Constants
 
 # Local Package Imports
 from metor.core.daemon.managed.network.state import StateTracker
@@ -150,6 +151,10 @@ class StreamReceiver:
             None,
         ],
         config: 'Config',
+        call_frame_callback: Optional[Callable[[str, socket.socket, str], bool]] = None,
+        call_lost_callback: Optional[Callable[[socket.socket], None]] = None,
+        call_keeps_transport_callback: Optional[Callable[[socket.socket], bool]] = None,
+        call_owns_transport_callback: Optional[Callable[[socket.socket], bool]] = None,
     ) -> None:
         """
         Initializes the StreamReceiver.
@@ -173,6 +178,10 @@ class StreamReceiver:
         self._router: MessageRouter = router
         self._broadcast: Callable[[IpcEvent], None] = broadcast_callback
         self._config: 'Config' = config
+        self._call_frame = call_frame_callback
+        self._call_lost = call_lost_callback
+        self._call_keeps_transport = call_keeps_transport_callback
+        self._call_owns_transport = call_owns_transport_callback
 
         self._disconnect_cb: Callable[
             [
@@ -283,7 +292,10 @@ class StreamReceiver:
                 except socket.timeout:
                     if awaiting_acceptance:
                         break
-                    if not self._state.is_known_socket(onion, conn):
+                    if not self._state.is_known_socket(onion, conn) and not (
+                        self._call_keeps_transport is not None
+                        and self._call_keeps_transport(conn)
+                    ):
                         break
                     if self._socket_appears_closed(conn):
                         break
@@ -293,6 +305,23 @@ class StreamReceiver:
                     break
 
                 self._state.touch_session_activity(onion)
+
+                if msg.startswith(Constants.CALL_FRAME_PREFIX):
+                    if (
+                        awaiting_acceptance
+                        or self._call_frame is None
+                        or not self._call_frame(onion, conn, msg)
+                    ):
+                        break
+                    continue
+
+                if (
+                    not awaiting_acceptance
+                    and self._call_keeps_transport is not None
+                    and self._call_keeps_transport(conn)
+                    and self._state.get_connection(onion) is not conn
+                ):
+                    continue
 
                 if msg == TorCommand.ACCEPTED.value:
                     effective_origin: ConnectionOrigin = (
@@ -507,6 +536,10 @@ class StreamReceiver:
             pass
         finally:
             try:
+                if self._call_owns_transport is not None and self._call_owns_transport(
+                    conn
+                ):
+                    return
                 if self._state.consume_locally_terminated_socket(conn):
                     return
 
@@ -548,4 +581,6 @@ class StreamReceiver:
                     )
 
             finally:
+                if self._call_lost is not None:
+                    self._call_lost(conn)
                 self._state.retire_connection(conn, preserve_final=True)

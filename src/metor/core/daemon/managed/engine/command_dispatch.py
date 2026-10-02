@@ -67,6 +67,7 @@ from metor.core.daemon.handlers import (
 
 # Local Package Imports
 from ..handlers import NetworkCommandHandler, ProfileMetadataCommandHandler
+from ..handlers.calls import CALL_COMMANDS
 from ..producers import VoiceProducerService
 
 
@@ -158,6 +159,18 @@ class DaemonCommandDispatcher:
         if self._producers is not None:
             self._producers.retry()
 
+    def call_lock_acceptance_enabled(self) -> bool:
+        """Reads protected lockscreen Call policy only from the installed runtime."""
+        return bool(
+            self._metadata_handler is not None
+            and self._metadata_handler.call_lock_acceptance_enabled()
+        )
+
+    def finalize_voice_owner_for_restriction(self, conn: socket.socket) -> None:
+        """Freezes this client's message capture before screen restriction."""
+        if self._producers is not None:
+            self._producers.finalize_on_restriction(conn)
+
     def disconnect_voice_producer(self, conn: socket.socket) -> None:
         """Invalidates the exact disconnected connection's producer lease.
 
@@ -223,6 +236,13 @@ class DaemonCommandDispatcher:
         Returns:
             None
         """
+        if isinstance(cmd, CALL_COMMANDS):
+            if self._network_handler is None:
+                self._send(conn, create_event(EventType.DAEMON_OFFLINE))
+            else:
+                self._network_handler.handle(cmd, conn)
+            return
+
         if isinstance(cmd, (GetGuiPreferencesCommand, SetGuiPreferencesCommand)):
             if self._metadata_handler is None:
                 self._send(conn, create_event(EventType.DAEMON_OFFLINE))
@@ -311,7 +331,7 @@ class DaemonCommandDispatcher:
                 return
             self._send(conn, self._system_handler.handle(cmd))
 
-    def pending_call_entries(self) -> list[PendingConnectionEntry]:
+    def pending_invitation_entries(self) -> list[PendingConnectionEntry]:
         """Reads current content-free pending requests through the runtime projection owner.
 
         Args:
@@ -321,4 +341,4 @@ class DaemonCommandDispatcher:
         """
         if self._network_handler is None:
             return []
-        return self._network_handler.pending_call_entries()
+        return self._network_handler.pending_invitation_entries()

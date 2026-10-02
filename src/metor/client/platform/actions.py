@@ -18,7 +18,6 @@ class IndicatorState(str, Enum):
     """Content-free output semantics after the caller's privacy filtering."""
 
     OFF = 'off'
-    LOCKED_LIVE_ACTIVE = 'locked_live_active'
     TRANSMITTING = 'transmitting'
     RECEIVING = 'receiving'
     DUPLEX = 'duplex'

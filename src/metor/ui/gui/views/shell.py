@@ -432,23 +432,21 @@ class Shell(BoxLayout):
         wrapper.add_widget(panel)
         return wrapper
 
-    def inset_locked_media(self, bottom: float) -> None:
-        """Keeps the unlock form scrollable above the visible continued-media controls.
+    def inset_locked_call(self, bottom: float) -> None:
+        """Keeps unlock controls scrollable above the reduced accepted-call view.
 
         Args:
-            bottom: Overlay extent in native logical pixels, including separation.
-        Returns:
-            None
+            bottom: Call controls' extent in native logical pixels.
         """
         if (
             self._security_panel is not None
             and self.controller.state.route.view == 'V05'
         ):
             self._security_panel.padding = (
-                dp(24),
-                dp(24),
-                dp(24),
-                max(dp(24), bottom - self.keyboard_inset),
+                dp(Geometry.EDGE),
+                dp(Geometry.EDGE),
+                dp(Geometry.EDGE),
+                max(dp(Geometry.EDGE), bottom - self.keyboard_inset),
             )
 
     def _go(self, route: Route) -> None:

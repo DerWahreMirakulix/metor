@@ -3,14 +3,13 @@
 from typing import TYPE_CHECKING
 
 from metor.client.platform import OutputPort
-from metor.core.api import Delivery, MessageDirectionCode, VoiceIncomingStartedEvent
+from metor.core.api import Delivery, MessageDirectionCode
 from metor.ui.gui.platform.audio import HeadsetAudio, PcmVoice
 from metor.ui.gui.state.mailbox import Update
 from metor.ui.gui.state.media import MediaCache, PlaybackProgress, PlaybackTarget
 
 # Local Package Imports
 from .worker import PlaybackWorker
-from .eligibility import AutoPlayback
 
 if TYPE_CHECKING:
     from ..controller import GuiController
@@ -34,7 +33,6 @@ class PlaybackController:
         self.cache = MediaCache()
         self._serial = 0
         self._pending: tuple[PlaybackTarget, int] | None = None
-        self.auto = AutoPlayback(self)
 
     @property
     def running(self) -> bool:
@@ -82,24 +80,7 @@ class PlaybackController:
         """
         state = self.controller.state
         if state.covered:
-            scope = self.controller.security.continuation.scope
-            if (
-                scope is None
-                or peer != scope.peer
-                or delivery is not Delivery.LIVE
-                or direction is not MessageDirectionCode.IN
-                or review
-            ):
-                return None
-            return PlaybackTarget(
-                state.generation,
-                scope.profile_instance,
-                scope.epoch,
-                peer,
-                delivery,
-                direction,
-                msg_id,
-            )
+            return None
         snapshot = state.snapshot
         if snapshot is None or not snapshot.profile_instance_id or not snapshot.epoch:
             return None
@@ -115,7 +96,7 @@ class PlaybackController:
         )
 
     def _scope_allows(self, target: PlaybackTarget) -> bool:
-        """Revalidates the permitted foreground or continued target before opening output.
+        """Revalidates the unlocked foreground target before opening output.
 
         Args:
             target: Exact queued output identity.
@@ -124,36 +105,26 @@ class PlaybackController:
         """
         state = self.controller.state
         if state.covered:
-            scope = self.controller.security.continuation.scope
-            return bool(
-                scope is not None
-                and self.controller.security.restriction is not None
-                and target.profile_instance == scope.profile_instance
-                and target.epoch == scope.epoch
-                and target.peer == scope.peer
-                and target.delivery is Delivery.LIVE
-                and target.direction is MessageDirectionCode.IN
-            )
+            return False
         return (
             state.route.peer == target.peer and state.route.delivery is target.delivery
         )
 
-    def play(
-        self, target: PlaybackTarget, *, offset: int = 0, automatic: bool = False
-    ) -> bool:
+    def play(self, target: PlaybackTarget, *, offset: int = 0) -> bool:
         """Starts explicit playback or safely preempts the previous output owner.
 
         Args:
             target: Exact source captured by a deliberate Play control.
             offset: Safe PCM seek offset; nonzero cannot fabricate full coverage.
-            automatic: Whether a newly beginning eligible turn requested output.
         Returns:
             bool: Whether this route's manual playback was admitted.
         """
         state = self.controller.state
         if (
             self.controller.purge.active
-            or (state.covered and not automatic)
+            or self.controller.calls.active
+            or self.controller.calls.media_active
+            or state.covered
             or not self._scope_allows(target)
             or self.audio is None
             or self.controller.client is None
@@ -163,23 +134,10 @@ class PlaybackController:
         ):
             return False
         self._pending = (target, offset)
-        if not automatic:
-            self.auto.queue.clear()
-            self.auto.manual = True
         if self.running and self.worker is not None:
             self.worker.stop()
         self.poll()
         return True
-
-    def incoming(self, event: VoiceIncomingStartedEvent) -> None:
-        """Offers a newly beginning turn to the foreground eligibility policy.
-
-        Args:
-            event: Current activation's ordered inbound Voice start.
-        Returns:
-            None
-        """
-        self.auto.incoming(event)
 
     def forget(
         self,
@@ -236,7 +194,6 @@ class PlaybackController:
             None
         """
         self._pending = None
-        self.auto.queue.clear()
         if self.worker is not None:
             self.worker.stop()
 
@@ -297,6 +254,5 @@ class PlaybackController:
         """
         self.stop()
         self.cache.clear()
-        self.auto.overrides.clear()
         self.progress = None
         self.audio = None

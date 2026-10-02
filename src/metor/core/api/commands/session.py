@@ -10,7 +10,6 @@ from metor.core.api.base import IpcCommand
 from metor.core.api.codes import CommandType
 from metor.core.api.codes import (
     ClientUnlockMethod,
-    LockedAcceptPolicy,
     NotificationPrivacy,
     QuickUnlockAction,
 )
@@ -241,30 +240,21 @@ class RestrictClientCommand(IpcCommand):
     """Places only the requesting authenticated IPC session in restricted state."""
 
     unlock_method: ClientUnlockMethod = ClientUnlockMethod.PROFILE_PASSWORD
-    continued_live_target: Optional[str] = None
-    live_while_locked: bool = False
-    accept_while_locked: LockedAcceptPolicy = LockedAcceptPolicy.NONE
     notification_privacy: NotificationPrivacy = NotificationPrivacy.OFF
     device_lifecycle: bool = False
-    continued_live_context_generation: Optional[int] = None
+    accept_calls_locked: bool = False
     command_type: CommandType = field(
         default=CommandType.RESTRICT_CLIENT,
         init=False,
     )
 
     def __post_init__(self) -> None:
-        """Rejects ambiguous context qualifiers before authorization.
-
-        Args:
-            None
-        Returns:
-            None
-        """
-        if self.continued_live_context_generation is not None and (
-            type(self.continued_live_context_generation) is not int
-            or self.continued_live_context_generation <= 0
-        ):
-            raise ValueError('Invalid continued LIVE context generation')
+        """Rejects untyped privilege switches before session authorization."""
+        for value in (self.device_lifecycle, self.accept_calls_locked):
+            if type(value) is not bool:
+                raise ValueError('Restricted policy requires a Boolean')
+        self.unlock_method = ClientUnlockMethod(self.unlock_method)
+        self.notification_privacy = NotificationPrivacy(self.notification_privacy)
 
 
 @register_command(CommandType.GET_RESTRICTED_CLIENT_STATE)

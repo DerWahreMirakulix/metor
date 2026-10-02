@@ -29,7 +29,6 @@ from metor.core.api import (
     ConfigureQuickUnlockCommand,
     Delivery,
     GetContactsListCommand,
-    LockedAcceptPolicy,
     LocalAuthRateLimitedEvent,
     IncomingConnectionEvent,
     PendingConnectionExpiredEvent,
@@ -171,29 +170,12 @@ class SessionAuthContractTests(unittest.TestCase):
                 failure_limit_callback=lambda: 6,
                 live_consumer_available_callback=lambda: None,
                 quick_unlock_store=store,
-                resolve_target_callback=lambda target: {
-                    'alice': 'alice-onion',
-                    'bob': 'bob-onion',
-                }.get(target, target),
-                voice_target_callback=lambda msg_id: (
-                    'alice-onion' if msg_id == 'alice-voice' else 'bob-onion'
-                ),
-                voice_delivery_callback=lambda msg_id: (
-                    Delivery.LIVE if msg_id == 'alice-voice' else Delivery.DROP
-                ),
-                live_context_callback=lambda onion: onion,
-                voice_context_callback=lambda onion, msg_id, direction: (
-                    onion if msg_id == 'alice-voice' else None
-                ),
             )
             controller.install_context(create_session_auth_context('profile-password'))
             restricted = controller.restrict(
                 conn,
                 RestrictClientCommand(
                     unlock_method=ClientUnlockMethod.PIN,
-                    continued_live_target='alice',
-                    live_while_locked=True,
-                    accept_while_locked=LockedAcceptPolicy.NONE,
                     notification_privacy=NotificationPrivacy.ANONYMIZE,
                 ),
             )
@@ -206,7 +188,7 @@ class SessionAuthContractTests(unittest.TestCase):
                     True,
                 )
             )
-            self.assertTrue(
+            self.assertFalse(
                 controller.authorize(
                     BeginVoiceCommand('alice', Delivery.LIVE, 'voice-2', 'opus'),
                     conn,
@@ -220,7 +202,7 @@ class SessionAuthContractTests(unittest.TestCase):
                     True,
                 )
             )
-            self.assertTrue(
+            self.assertFalse(
                 controller.authorize(
                     AppendVoiceChunkCommand('alice-voice', 0, 'YQ=='), conn, True
                 )
@@ -333,8 +315,10 @@ class SessionAuthContractTests(unittest.TestCase):
 
             self.assertIsInstance(sent[-1], ClientReauthorizedEvent)
 
-    def test_locked_media_scope_is_independent_of_notification_privacy(self) -> None:
-        """G18: Alice Voice remains available while Bob Voice stays filtered."""
+    def test_locked_message_media_is_denied_for_every_notification_privacy(
+        self,
+    ) -> None:
+        """G18: no message media is exposed by any locked notification policy."""
         for privacy in NotificationPrivacy:
             with self.subTest(privacy=privacy):
                 conn = cast(socket.socket, object())
@@ -344,56 +328,48 @@ class SessionAuthContractTests(unittest.TestCase):
                     lockout_timeout_callback=lambda: 30.0,
                     failure_limit_callback=lambda: 3,
                     live_consumer_available_callback=lambda: None,
-                    resolve_target_callback=lambda target: f'{target}-onion',
-                    live_context_callback=lambda onion: onion,
-                    voice_context_callback=lambda onion, msg_id, direction: (
-                        onion if msg_id == 'alice-voice' else None
-                    ),
                 )
                 controller.restrict(
-                    conn,
-                    RestrictClientCommand(
-                        continued_live_target='alice',
-                        live_while_locked=True,
-                        notification_privacy=privacy,
-                    ),
+                    conn, RestrictClientCommand(notification_privacy=privacy)
                 )
-                alice_start = VoiceIncomingStartedEvent(
-                    alias='alice',
-                    onion='alice-onion',
-                    msg_id='alice-voice',
-                    delivery=Delivery.LIVE,
-                    codec='opus',
-                    next_offset=0,
+                for delivery in Delivery:
+                    start = VoiceIncomingStartedEvent(
+                        alias='alice',
+                        onion='alice-onion',
+                        msg_id='voice',
+                        delivery=delivery,
+                        codec='opus',
+                        next_offset=0,
+                    )
+                    chunk = VoiceChunkReceivedEvent(
+                        alias='alice',
+                        onion='alice-onion',
+                        msg_id='voice',
+                        offset=0,
+                        data='YQ==',
+                        delivery=delivery,
+                        codec='opus',
+                    )
+                    self.assertIsNone(controller.filter_restricted_event(conn, start))
+                    self.assertIsNone(controller.filter_restricted_event(conn, chunk))
+                    self.assertFalse(
+                        controller.authorize(
+                            BeginVoiceCommand('alice', delivery, 'voice', 'opus'),
+                            conn,
+                            True,
+                        )
+                    )
+                    self.assertFalse(
+                        controller.authorize(
+                            AppendVoiceChunkCommand('voice', 0, 'YQ=='), conn, True
+                        )
+                    )
+                self.assertFalse(
+                    controller.authorize(AcceptCommand('alice'), conn, True)
                 )
-                alice_chunk = VoiceChunkReceivedEvent(
-                    alias='alice',
-                    onion='alice-onion',
-                    msg_id='alice-voice',
-                    offset=0,
-                    data='YQ==',
-                    delivery=Delivery.LIVE,
-                    codec='opus',
-                )
-                bob_chunk = VoiceChunkReceivedEvent(
-                    alias='bob',
-                    onion='bob-onion',
-                    msg_id='bob-voice',
-                    offset=0,
-                    data='Yg==',
-                    delivery=Delivery.LIVE,
-                    codec='opus',
-                )
-                self.assertIs(
-                    controller.filter_restricted_event(conn, alice_start), alice_start
-                )
-                self.assertIs(
-                    controller.filter_restricted_event(conn, alice_chunk), alice_chunk
-                )
-                self.assertIsNone(controller.filter_restricted_event(conn, bob_chunk))
 
-    def test_anonymized_call_handles_are_unique_actionable_and_expirable(self) -> None:
-        """G19: two callers remain independently actionable without identity leakage."""
+    def test_live_invitation_handles_are_unique_actionable_and_expirable(self) -> None:
+        """G19: unlocked invitations are socket-qualified and expire independently."""
         conn = cast(socket.socket, object())
         pending = {
             'alice-onion': cast(socket.socket, object()),
@@ -405,15 +381,8 @@ class SessionAuthContractTests(unittest.TestCase):
             lockout_timeout_callback=lambda: 30.0,
             failure_limit_callback=lambda: 3,
             live_consumer_available_callback=lambda: None,
-            pending_call_callback=lambda onion: (
+            pending_invitation_callback=lambda onion: (
                 (pending[onion], float('inf')) if onion in pending else None
-            ),
-        )
-        controller.restrict(
-            conn,
-            RestrictClientCommand(
-                accept_while_locked=LockedAcceptPolicy.ALL,
-                notification_privacy=NotificationPrivacy.ANONYMIZE,
             ),
         )
         alice = cast(
@@ -428,13 +397,13 @@ class SessionAuthContractTests(unittest.TestCase):
                 conn, IncomingConnectionEvent(alias='bob', onion='bob-onion')
             ),
         )
-        self.assertEqual((alice.alias, alice.onion), ('unknown', None))
-        self.assertEqual((bob.alias, bob.onion), ('unknown', None))
+        self.assertEqual((alice.alias, alice.onion), ('alice', 'alice-onion'))
+        self.assertEqual((bob.alias, bob.onion), ('bob', 'bob-onion'))
         self.assertIsNotNone(alice.action_handle)
         self.assertIsNotNone(bob.action_handle)
         self.assertNotEqual(alice.action_handle, bob.action_handle)
 
-        accept = AcceptCommand(cast(str, alice.action_handle))
+        accept = AcceptCommand('alice', action_handle=cast(str, alice.action_handle))
         self.assertTrue(controller.authorize(accept, conn, True))
         self.assertEqual(accept.target, 'alice-onion')
         pending.pop('bob-onion')
@@ -446,7 +415,7 @@ class SessionAuthContractTests(unittest.TestCase):
             ),
         )
         self.assertEqual(expired.action_handle, bob.action_handle)
-        reject = RejectCommand(cast(str, bob.action_handle))
+        reject = RejectCommand('bob', action_handle=cast(str, bob.action_handle))
         self.assertFalse(controller.authorize(reject, conn, True))
 
     def test_device_lifecycle_scope_requires_prior_authenticated_session(self) -> None:

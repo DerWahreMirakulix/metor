@@ -87,7 +87,9 @@ class InventoryPages:
             owner_token=controller.voice_owner.token,
         )
         if controller.submit(
-            operation, lambda: client.request(command, RetainedMessagesEvent)
+            operation,
+            lambda: client.request(command, RetainedMessagesEvent),
+            background=True,
         ):
             self._serial, self._operation = serial, operation
             self.needed = False

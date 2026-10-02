@@ -197,13 +197,10 @@ class Transcript:
             return True
         if isinstance(event, VoiceIncomingStartedEvent) and event.onion:
             key = (event.onion, event.delivery, MessageDirectionCode.IN, event.msg_id)
-            fresh = key not in self.items
-            admitted = self.admit(
+            self.admit(
                 self.items.get(key)
                 or TranscriptItem(*key, codec=event.codec, size_bytes=event.next_offset)
             )
-            if fresh and admitted:
-                self.controller.playback.incoming(event)
             return True
         if isinstance(event, VoiceChunkReceivedEvent) and event.onion:
             key = (event.onion, event.delivery, MessageDirectionCode.IN, event.msg_id)

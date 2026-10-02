@@ -131,7 +131,7 @@ class VoiceProducerRepository:
         """Records producer loss before attempting accepted-prefix finalization.
 
         Args:
-            item: Revoked LIVE producer claim.
+            item: Interrupted local Voice producer claim.
         Returns:
             None
         """
@@ -174,15 +174,13 @@ class VoiceProducerRepository:
             )
             rows = cursor.fetchall()
             if len(rows) >= Constants.VOICE_OWNER_MAX_ITEMS or (
-                delivery is Delivery.DROP
-                and sum(row[0] == Delivery.DROP.value for row in rows)
-                >= Constants.VOICE_OWNER_MAX_DRAFTS
+                len(rows) >= Constants.VOICE_OWNER_MAX_DRAFTS
             ):
                 return False
-            if delivery is Delivery.DROP:
+            if rows:
                 cursor.execute(
-                    "SELECT 1 FROM voice_producer_items WHERE owner_token = ? AND peer_onion = ? AND delivery = 'drop'",
-                    (owner_token, onion),
+                    'SELECT 1 FROM voice_producer_items WHERE owner_token = ? AND peer_onion = ? AND delivery = ?',
+                    (owner_token, onion, delivery.value),
                 )
                 if cursor.fetchone() is not None:
                     return False
@@ -202,6 +200,13 @@ class VoiceProducerRepository:
                 (msg_id, onion, owner_token, delivery.value),
             )
             return True
+
+    def rebind(self, item: VoiceProducerItem, owner_token: str) -> None:
+        """Moves an interrupted orphan to a newly authorized exact client lease."""
+        self._sql.execute(
+            'UPDATE voice_producer_items SET owner_token = ? WHERE msg_id = ? AND owner_token = ? AND interrupted = 1',
+            (owner_token, item.msg_id, item.owner_token),
+        )
 
     def prepare_cleanup(self, item: VoiceProducerItem, payload: str) -> None:
         """Persists the exact blob inventory before deleting any draft receipt.

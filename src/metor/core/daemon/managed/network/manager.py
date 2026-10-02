@@ -27,6 +27,7 @@ from metor.data import HistoryManager, ContactManager, MessageDirection, Message
 from metor.data.blob import BlobStore
 
 # Local Package Imports
+from metor.core.daemon.managed.network.calls import CallController
 from metor.core.daemon.managed.network.state import (
     PendingConnectionSnapshot,
     StateTracker,
@@ -87,6 +88,9 @@ class NetworkManager:
         """
         self._cm: ContactManager = cm
         self._state: StateTracker = state or StateTracker()
+        self.calls = CallController(
+            tm, cm, crypto, self._state, broadcast_callback, stop_flag
+        )
 
         self._router: MessageRouter = MessageRouter(
             cm=cm,
@@ -116,6 +120,13 @@ class NetworkManager:
             stop_flag=stop_flag,
             config=config,
             operation_lock=operation_lock,
+            retain_call_transport=self.calls.retain_after_chat_end,
+        )
+        self.calls.chat_end = lambda onion, conn: self._controller.disconnect(
+            onion,
+            initiated_by_self=False,
+            socket_to_close=conn,
+            origin=ConnectionOrigin.INCOMING,
         )
         self._state.set_peer_writer_failure_callback(
             lambda onion, conn: self._controller.disconnect(
@@ -132,6 +143,10 @@ class NetworkManager:
             disconnect_cb=self._controller.disconnect,
             reject_cb=self._controller.reject,
             config=config,
+            call_frame_callback=self.calls.process_frame,
+            call_lost_callback=self.calls.transport_lost,
+            call_keeps_transport_callback=self.calls.keeps_transport,
+            call_owns_transport_callback=self.calls.owns_transport,
         )
 
         self._controller.set_receiver(self._receiver)
@@ -151,6 +166,7 @@ class NetworkManager:
             enqueue_live_reconnect_callback=self._controller._enqueue_live_reconnect,
             stop_flag=stop_flag,
             config=config,
+            call_transport_callback=self.calls.accept_transport,
         )
 
     def start_listener(self) -> None:
@@ -246,6 +262,7 @@ class NetworkManager:
         Returns:
             None
         """
+        self.calls.close()
         self._controller.disconnect_all()
 
     def disconnect_qualified(
@@ -284,6 +301,7 @@ class NetworkManager:
         Returns:
             None
         """
+        self.calls.close()
         self._state.abort_all_sockets()
 
     def retunnel(self, target: str, context_generation: Optional[int] = None) -> None:
@@ -478,19 +496,8 @@ class NetworkManager:
         """
         self._router.release_consumed_voice(onion, msg_ids)
 
-    def voice_target(self, msg_id: str) -> Optional[str]:
-        """Returns the onion identity bound to one active outbound Voice turn.
-
-        Args:
-            msg_id (str): The msg id input.
-
-        Returns:
-            Optional[str]: The resulting value.
-        """
-        return self._router.voice_target(msg_id)
-
     def voice_context(self, onion: str, msg_id: str, direction: str) -> int | None:
-        """Returns immutable message provenance for restricted media access.
+        """Returns immutable recording provenance for protected draft ownership.
 
         Args:
             onion (str): The onion input.
@@ -501,29 +508,6 @@ class NetworkManager:
             int | None: The resulting value.
         """
         return self._router.voice_context(onion, msg_id, direction)
-
-    def voice_delivery(self, msg_id: str) -> Optional[Delivery]:
-        """Returns the delivery semantics fixed at Voice begin.
-
-        Args:
-            msg_id (str): The msg id input.
-
-        Returns:
-            Optional[Delivery]: The resulting value.
-        """
-        return self._router.voice_delivery(msg_id)
-
-    def inbound_voice_delivery(self, onion: str, msg_id: str) -> Optional[Delivery]:
-        """Returns semantics for an exact retained inbound Voice identity.
-
-        Args:
-            onion (str): Stable peer identity.
-            msg_id (str): Stable Voice identity.
-
-        Returns:
-            Optional[Delivery]: Retained delivery semantics, if present.
-        """
-        return self._router.inbound_voice_delivery(onion, msg_id)
 
     def live_context_token(self, onion: str) -> object | None:
         """Returns logical ownership for a restricted LIVE conversation.
@@ -589,8 +573,14 @@ class NetworkManager:
         """
         return self._router.release_inbound_voice_item(onion, msg_id)
 
-    def commit_voice_draft(self, target: str, msg_id: str) -> bool:
-        """Publishes one finalized DROP Voice draft.
+    def commit_voice_draft(
+        self,
+        target: str,
+        msg_id: str,
+        delivery: Delivery | None = None,
+        context_generation: int | None = None,
+    ) -> bool:
+        """Publishes one finalized local Voice draft after explicit Send.
 
         Args:
             target (str): The target input.
@@ -599,10 +589,12 @@ class NetworkManager:
         Returns:
             bool: Whether the documented condition holds.
         """
-        return self._router.commit_voice_draft(target, msg_id)
+        return self._router.commit_voice_draft(
+            target, msg_id, delivery, context_generation
+        )
 
     def cancel_voice_draft(self, target: str, msg_id: str) -> bool:
-        """Cancels one unsent DROP Voice draft.
+        """Cancels one unsent local Voice draft in either delivery mode.
 
         Args:
             target (str): The target input.

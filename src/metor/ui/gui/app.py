@@ -27,8 +27,8 @@ from metor.ui.gui.runtime.voice import PressSource
 from metor.ui.gui.theme import color
 from metor.ui.gui.views import Shell
 from metor.ui.gui.views.calls import CallOverlay
-from metor.ui.gui.views.continued import ContinuedOverlay
 from metor.ui.gui.views.input import InputDock
+from metor.ui.gui.views.live_invitation import LiveInvitationOverlay
 from metor.ui.gui.views.profiles import request_exit
 from metor.ui.gui.widgets import Label, PointerTooltip, TextField
 from metor.ui.gui.widgets.sheet import ActionSheet
@@ -67,7 +67,7 @@ class MetorApp(App):
         self.viewport: BoxLayout | None = None
         self.input_dock: InputDock | None = None
         self.call_overlay: CallOverlay | None = None
-        self.continued_overlay: ContinuedOverlay | None = None
+        self.invitation_overlay: LiveInvitationOverlay | None = None
         self._prompt_identity: object = None
         self.accessibility: AccessibilityBridge | None = None
         self._lifecycle_source: DesktopLifecycleSource | None = None
@@ -79,6 +79,7 @@ class MetorApp(App):
             self.controller.resume,
             self.refresh,
             self._lifecycle_source_failed,
+            screen_lock=self.controller.screen_lock,
         )
         self._lifecycle_handoff = LifecycleHandoff(
             lambda callback: Clock.schedule_once(callback, 0),
@@ -133,8 +134,8 @@ class MetorApp(App):
         stage = FloatLayout()
         self.stage = stage
         stage.add_widget(self.viewport)
-        self.continued_overlay = ContinuedOverlay(self.controller, self.refresh)
-        stage.add_widget(self.continued_overlay)
+        self.invitation_overlay = LiveInvitationOverlay(self.controller, self.refresh)
+        stage.add_widget(self.invitation_overlay)
         self.call_overlay = CallOverlay(self.controller, self.refresh)
         stage.add_widget(self.call_overlay)
         root.add_widget(stage)
@@ -230,20 +231,17 @@ class MetorApp(App):
         ActionSheet.reconcile()
         if self.shell is not None:
             self.shell.render()
-        if self.continued_overlay is not None:
-            self.continued_overlay.keyboard_inset = (
+        if self.invitation_overlay is not None:
+            self.invitation_overlay.render()
+        if self.call_overlay is not None:
+            self.call_overlay.bottom_inset = (
                 self.input_dock.keyboard.height
                 if self.input_dock and self.input_dock.keyboard
                 else 0
             )
-            self.continued_overlay.render()
-            if self.shell is not None:
-                self.shell.inset_locked_media(self.continued_overlay.safe_bottom)
-        if self.call_overlay is not None:
-            self.call_overlay.bottom_inset = (
-                self.continued_overlay.safe_bottom if self.continued_overlay else 0
-            )
             self.call_overlay.render()
+            if self.shell is not None:
+                self.shell.inset_locked_call(self.call_overlay.occupied_height)
         if self.accessibility is not None and self.root is not None:
             self.accessibility.rendered(self.root)
 
@@ -377,7 +375,6 @@ class MetorApp(App):
         Returns:
             None
         """
-        self.controller.playback.auto.focused = focused
         if self.accessibility is not None:
             self.accessibility.native.focus(focused)
         if not focused:

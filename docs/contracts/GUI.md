@@ -75,6 +75,14 @@ The OS lifecycle notification source is replaced by an inert test adapter;
 the real toolkit, app, frontend discovery and CLI still run. This smoke does
 not exercise microphone, media, OS suspend, or physical devices.
 
+The locked-call layout fixture
+`python tests/gui_native_locked_call.py --result RESULT.json --images IMAGE_DIR`
+checks concrete Kivy widgets at 360×640 with 1.5× text scaling. Synthetic public
+Call DTOs and pointer input exercise mute, hangup and the scrollable unlock form
+for PIN, password and no-local-secret methods, including the touch keyboard.
+Its result records that Core and physical audio hardware are absent; it proves
+layout and hit targets rather than call transport or acoustic continuation.
+
 On Windows, add `--windows-launch` to check both installed entry-point
 executables, the graphical launcher without standard streams, the temporary
 locked `--start-daemon` path through native UI Automation, the original
@@ -237,6 +245,10 @@ pending or unseen content is never discarded because a GUI cache evicts it.
 Peer-linked pins and preferences use the protected public profile boundary,
 not a plaintext address or content side store.
 
+Confirmed DROP sends refresh the open archive without requiring navigation or
+a prior LIVE connection. Explicit successful Send as Drop opens that peer's DROP
+projection so the converted item is visible under its preserved identity.
+
 ## Contacts, notifications, and settings
 
 Saved Contacts is the address book. Discovered peers appear in communication
@@ -246,7 +258,7 @@ its label without disconnecting active communication; old aliases must leave
 notifications, accessibility nodes, and cached presentation. A QR scan is an
 explicit camera action using the accepted contact format, bounded validation,
 and the user's current intent. It cannot execute a URL or command, duplicate a
-saved identity, or start a LIVE call without an explicit Start Live intent.
+saved identity, or start a LIVE chat without an explicit Start Live intent.
 Address regeneration is a confirmed profile action and does not imply that old
 contacts or conversations move automatically.
 
@@ -264,12 +276,11 @@ privacy-permitted facts; it is never reconstructed from unread totals.
 Settings present user concepts under Live, Privacy, Device, Profiles, and
 Advanced. Core descriptors own types, limits, scope, effective values, and
 policy. The GUI shows only supported controls and displays failed updates as
-failures. Auto-play, locked LIVE continuation, locked-call acceptance, lock
-notification privacy, application idle timeout, profile-name visibility,
-keyboard layout, and pins are distinct preferences; changing one does not
-silently grant another. Auto-play and locked LIVE continuation default Off;
-manual locked-call acceptance defaults None. A profile password is the default
-unlock method until a stronger explicit setup. Core-owned receipt, fallback,
+failures. Accept calls without unlocking, lock notification privacy,
+application idle timeout, profile-name visibility, keyboard layout, and pins are
+independent protected preferences. Accept calls without unlocking defaults Off;
+LIVE auto-accept never grants conversation audio. A profile password is the
+default unlock method. Core-owned receipt, fallback,
 history, resource, and contact policies retain their registry defaults. The GUI
 does not add a second settings database or expose dangerous debug controls as
 ordinary options. Activity history is Core metadata, separate from DROP
@@ -284,19 +295,37 @@ focus, authorization, or device capability safely stops admission. Long I/O and
 decode work stay off the UI thread; queues, caches, capture, and playback are
 bounded and report overload rather than silently dropping accepted content.
 
-DROP Voice enters an explicit review stage before commit or cancellation.
-Uncommitted review drafts follow this GUI's disposable owner policy. LIVE Voice
-uses the authorized current connection and keeps accepted data recoverable
-under Core's owner-loss rules. Capture and playback may run concurrently where
-the selected route supports them. A headset route is distinct from proven
-speaker echo cancellation; unavailable routes are reported honestly. Playback
-and range reads do not implicitly consume Voice. Release follows the public
-safe handoff contract, and auto-play requires current foreground eligibility.
-Scroll position and audio position are separate controls.
+Both DROP and LIVE Voice use Record → Stop → Preview → Send or Discard.
+Releasing GUI or hardware PTT stops recording and opens review; it never sends.
+Preview and received messages play only after a manual Play action. Listening
+to the whole draft is unnecessary for sending. Before explicit Send, bytes stay
+in protected local Core staging. Capture and finalization cannot publish them.
+If LIVE ends during recording or review, the draft remains unsent and offers
+explicit reconnection or Send as Drop. That action preserves the draft identity.
+Owner loss freezes uncommitted drafts; a later authenticated client must explicitly claim the exact interrupted recording for review or discard it.
+
+Playback and range reads do not implicitly consume Voice. Release follows the
+public safe handoff contract. Scroll and playback positions are separate; the
+waveform is not a redundant keyboard focus target. Headset selection remains
+distinct from proven speaker echo cancellation.
+
+Telephone calls use a separate Call action in contacts and DROP/LIVE chats.
+A direct call requires one call acceptance and keeps the selected message mode.
+A call from LIVE requests additional audio permission; rejection or hangup keeps
+the accepted chat. The call view offers status/duration, mute/unmute, cancel,
+reject/accept and hangup according to Core state. Only accepted calls start
+local duplex audio, using the explicitly configured headset endpoints. Calls
+have no replayable Voice card, conversation recording or Send as Drop action.
+Transport loss ends the call; reconnecting a chat never reopens or accepts it.
 
 No microphone or camera starts on boot, navigation, reattach, or unlock.
 Permissions are requested at explicit use. Missing optional media capability
 disables dependent controls while text remains available.
+
+The composer offers Set up audio until a headset route has been selected.
+Playing a supported Voice message with no output configured opens the same
+explicit device selection. Selecting a route never starts capture or playback;
+the user initiates the next recording or Play action.
 
 ## Privacy and lifecycle
 
@@ -304,11 +333,18 @@ Notifications contain no message body or Voice preview. Notification Center,
 playback position, consumed LIVE presentation, and other GUI caches are bounded
 volatile state. Application lock covers pixels, accessibility text, tooltips,
 input, media, and indicators before private content can leak. A restricted
-client is distinct from a hard-locked profile runtime; only an explicitly
-authorized continued LIVE context may remain active. OS lock, suspend, and
-resume keep the GUI covered until SDK/Core generation and authorization are
-revalidated. Resume never reconstructs held PTT, starts capture, auto-plays,
-or unlocks automatically.
+client is distinct from a hard-locked profile runtime. Message capture and
+playback stop for every delivery mode; accepted prefixes remain protected,
+unsent drafts. A held PTT must be released and freshly pressed after unlock.
+Unlock restores the preview but never starts capture, playback or sending.
+An already accepted call continues through application/screen lock with its
+mute state intact. Its reduced view contains status/duration, mute and hangup,
+with identity filtered by notification privacy. Accept calls without unlocking
+allows explicit acceptance of only that exact call; the rest stays covered.
+Hard profile lock, profile switch, client loss and purge end the call. System
+suspend ends real-time audio rather than replaying a backlog after resume.
+The Linux logind/screen-lock and Windows session/power adapters distinguish
+screen lock from suspend; physical continuation requires a named native run.
 
 Profile switch is a public lifecycle transaction: stop local producers,
 preserve accepted Core work, clear old presentation, and attach the new profile
@@ -341,10 +377,10 @@ hard-lock command. Core validates PIN, password, cooldown, and locked-action
 scope. A PIN cannot authenticate a cold or new client, and PIN-only access
 cannot weaken profile credentials. Forgot PIN requests a password challenge.
 An unconfirmed restriction stays covered and cannot create a second
-unrestricted connection. Continued locked LIVE, when explicitly enabled, is
-limited to the exact authorized foreground context generation; ending that
-context revokes it even if the same peer calls again. Auto-accept from saved
-contacts, manual locked-call acceptance, and auto-play are independent policies.
+unrestricted connection. App restriction permits neither LIVE invitation
+acceptance nor message media. Automatic LIVE acceptance is chat permission only.
+An active call's exact client and call identity own its limited exception;
+ending it cannot grant access to a later call from the same peer.
 
 The software keyboard is local and offers QWERTY and QWERTZ without cloud
 suggestions or a learned persistent dictionary. Desktop typing uses the
@@ -361,6 +397,12 @@ Master navigation returns Back to the active DROP/LIVE overview. Selection
 follows the foreground section; keyboard focus survives a repaint of that same
 route and clears when the route changes.
 
+Pointer actions show hover and press feedback while preserving the current
+typing owner; keyboard navigation retains its visible focus ring. Recovery
+snapshots do not reopen LIVE invitation presentation, and ended requests are
+excluded from call selection. Read-only snapshot and page loading do not disable
+foreground actions.
+
 ## Design and accessibility
 
 The minimum usable client rectangle is **360 × 640 logical units**, excluding
@@ -373,7 +415,7 @@ instead of shrinking text or hiding required actions. A keyboard inset must not
 cover focused input or required actions.
 Entry, lock, and profile management content stays fixed when it fits the
 viewport. Scrolling is enabled only for actual overflow, including locked
-activity or continued-media controls. Pending profile activation shows covered
+activity or accepted-call controls. Pending profile activation shows covered
 progress until a graphical prompt or the complete profile becomes available.
 
 DROP and LIVE require distinct labels as well as color. Status, disabled state,
@@ -408,6 +450,9 @@ visually distinct without relying on color alone. The text composer, recording
 state, DROP Voice review, and playback controls are separate states. Timeline
 scrolling and audio seeking have separate affordances. Status notices align
 with the active content column and do not create extra communication actions.
+Message and conversation menus sit inside their surface. Voice waveforms do
+not take keyboard focus; Play and the explicit message actions remain separate
+keyboard targets.
 Required controls stay visible or reachable at the minimum viewport and text
 scale. Buttons and touch targets use at least 48 logical units where the
 current component permits it; labels wrap or controls stack when necessary.

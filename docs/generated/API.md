@@ -28,11 +28,13 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 **Commands (UI -> Daemon)**
 
 - [AcceptCommand](#acceptcommand)
+- [AcceptCallCommand](#acceptcallcommand)
 - [AddContactCommand](#addcontactcommand)
 - [AddProfileCommand](#addprofilecommand)
 - [AppendVoiceChunkCommand](#appendvoicechunkcommand)
 - [AuthenticateSessionCommand](#authenticatesessioncommand)
 - [BeginVoiceCommand](#beginvoicecommand)
+- [CancelCallCommand](#cancelcallcommand)
 - [CancelVoiceCommand](#cancelvoicecommand)
 - [ChangePasswordCommand](#changepasswordcommand)
 - [ClearContactsCommand](#clearcontactscommand)
@@ -50,6 +52,7 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [FrontendLeaseCommand](#frontendleasecommand)
 - [GenerateAddressCommand](#generateaddresscommand)
 - [GetAddressCommand](#getaddresscommand)
+- [GetCallsCommand](#getcallscommand)
 - [GetChatStartupStateCommand](#getchatstartupstatecommand)
 - [GetConfigCommand](#getconfigcommand)
 - [GetConfigListCommand](#getconfiglistcommand)
@@ -67,16 +70,20 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [GetSettingsListCommand](#getsettingslistcommand)
 - [GetTransportStateCommand](#gettransportstatecommand)
 - [GetVoiceChunkCommand](#getvoicechunkcommand)
+- [HangupCallCommand](#hangupcallcommand)
 - [InitCommand](#initcommand)
 - [ListRetainedMessagesCommand](#listretainedmessagescommand)
 - [LockCommand](#lockcommand)
 - [MarkReadCommand](#markreadcommand)
 - [MigrateProfileSecurityCommand](#migrateprofilesecuritycommand)
+- [MuteCallCommand](#mutecallcommand)
 - [PrepareProfileExitCommand](#prepareprofileexitcommand)
+- [ReadCallAudioCommand](#readcallaudiocommand)
 - [ReauthorizeClientCommand](#reauthorizeclientcommand)
 - [RegisterLiveConsumerCommand](#registerliveconsumercommand)
 - [RegisterVoiceOwnerCommand](#registervoiceownercommand)
 - [RejectCommand](#rejectcommand)
+- [RejectCallCommand](#rejectcallcommand)
 - [ReleaseVoiceCommand](#releasevoicecommand)
 - [ReleaseVoiceOwnerCommand](#releasevoiceownercommand)
 - [RemoveContactCommand](#removecontactcommand)
@@ -86,11 +93,13 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [RestrictClientCommand](#restrictclientcommand)
 - [RetunnelCommand](#retunnelcommand)
 - [SelfDestructCommand](#selfdestructcommand)
+- [SendCallAudioCommand](#sendcallaudiocommand)
 - [SendMessageCommand](#sendmessagecommand)
 - [SetConfigCommand](#setconfigcommand)
 - [SetDefaultProfileCommand](#setdefaultprofilecommand)
 - [SetGuiPreferencesCommand](#setguipreferencescommand)
 - [SetSettingCommand](#setsettingcommand)
+- [StartCallCommand](#startcallcommand)
 - [SwitchCommand](#switchcommand)
 - [SyncConfigCommand](#syncconfigcommand)
 - [UnlockCommand](#unlockcommand)
@@ -110,6 +119,11 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 - [AuthRequiredEvent](#authrequiredevent)
 - [AutoFallbackQueuedEvent](#autofallbackqueuedevent)
 - [AutoReconnectScheduledEvent](#autoreconnectscheduledevent)
+- [CallAudioEvent](#callaudioevent)
+- [CallAudioSentEvent](#callaudiosentevent)
+- [CallRejectedEvent](#callrejectedevent)
+- [CallStateEvent](#callstateevent)
+- [CallsStateEvent](#callsstateevent)
 - [CannotConnectSelfEvent](#cannotconnectselfevent)
 - [CannotDropSelfEvent](#cannotdropselfevent)
 - [CannotSwitchSelfEvent](#cannotswitchselfevent)
@@ -284,6 +298,30 @@ Accepts a pending live connection.
 
 ---
 
+### `AcceptCallCommand`
+
+Accepts the current incoming Core identity for this exact IPC client.
+
+Acceptance grants Call audio only. Restricted clients additionally require
+the protected locked-call preference; no message or general LIVE grant follows.
+
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
+| `call_id`    | `str`              | ``      |
+
+**Wire Value:** `accept_call`
+
+**Example JSON**
+
+```json
+{
+  "command_type": "accept_call"
+}
+```
+
+---
+
 ### `AddContactCommand`
 
 Adds a new contact or promotes a discovered peer.
@@ -412,9 +450,30 @@ Begins one peer-bound logical Voice turn.
 
 ---
 
+### `CancelCallCommand`
+
+Withdraws an exact owned request, including acceptance that raced cancellation.
+
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
+| `call_id`    | `str`              | ``      |
+
+**Wire Value:** `cancel_call`
+
+**Example JSON**
+
+```json
+{
+  "command_type": "cancel_call"
+}
+```
+
+---
+
 ### `CancelVoiceCommand`
 
-Cancels one unsent DROP Voice draft.
+Cancels one unsent local Voice draft in either delivery mode.
 
 | Field         | Type               | Default  |
 | ------------- | ------------------ | -------- |
@@ -546,14 +605,16 @@ Requests a full profile-database wipe.
 
 ### `CommitVoiceCommand`
 
-Commits one finalized DROP Voice draft to pending delivery.
+Publishes one finalized local Voice draft after explicit Send.
 
-| Field         | Type               | Default  |
-| ------------- | ------------------ | -------- |
-| `request_id`  | `Union[str, None]` | `None`   |
-| `target`      | `str`              | Required |
-| `msg_id`      | `str`              | Required |
-| `owner_token` | `Union[str, None]` | `None`   |
+| Field                | Type                             | Default  |
+| -------------------- | -------------------------------- | -------- |
+| `request_id`         | `Union[str, None]`               | `None`   |
+| `target`             | `str`                            | Required |
+| `msg_id`             | `str`                            | Required |
+| `owner_token`        | `Union[str, None]`               | `None`   |
+| `delivery`           | `Union[<enum 'Delivery'>, None]` | `None`   |
+| `context_generation` | `Union[int, None]`               | `None`   |
 
 **Wire Value:** `commit_voice`
 
@@ -792,6 +853,26 @@ Requests the current onion address.
 ```json
 {
   "command_type": "get_address"
+}
+```
+
+---
+
+### `GetCallsCommand`
+
+Reads bounded, privacy-filtered Call metadata without granting or consuming audio.
+
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
+
+**Wire Value:** `get_calls`
+
+**Example JSON**
+
+```json
+{
+  "command_type": "get_calls"
 }
 ```
 
@@ -1186,6 +1267,27 @@ Reads one authenticated bounded range from retained Voice content.
 
 ---
 
+### `HangupCallCommand`
+
+Ends this client's accepted Call and releases audio and Call-only transport.
+
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
+| `call_id`    | `str`              | ``      |
+
+**Wire Value:** `hangup_call`
+
+**Example JSON**
+
+```json
+{
+  "command_type": "hangup_call"
+}
+```
+
+---
+
 ### `InitCommand`
 
 Requests initialization and advertises the client IPC support range.
@@ -1308,6 +1410,28 @@ Requests migration of one local profile between encrypted and plaintext storage.
 
 ---
 
+### `MuteCallCommand`
+
+Changes microphone admission for an owned active Call, preserving receive audio.
+
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
+| `call_id`    | `str`              | ``      |
+| `muted`      | `bool`             | `False` |
+
+**Wire Value:** `mute_call`
+
+**Example JSON**
+
+```json
+{
+  "command_type": "mute_call"
+}
+```
+
+---
+
 ### `PrepareProfileExitCommand`
 
 Releases only the requesting frontend's active profile resources.
@@ -1323,6 +1447,31 @@ Releases only the requesting frontend's active profile resources.
 ```json
 {
   "command_type": "prepare_profile_exit"
+}
+```
+
+---
+
+### `ReadCallAudioCommand`
+
+Consumes up to max_frames fresh received frames for this Call's exact owner.
+
+Core returns bounded ephemeral audio and discards expired frames. This command
+has no message receipt, history, retention or Voice-consume side effect.
+
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
+| `call_id`    | `str`              | ``      |
+| `max_frames` | `int`              | `4`     |
+
+**Wire Value:** `read_call_audio`
+
+**Example JSON**
+
+```json
+{
+  "command_type": "read_call_audio"
 }
 ```
 
@@ -1373,12 +1522,12 @@ Marks the current IPC session as an interactive live consumer.
 
 ### `RegisterVoiceOwnerCommand`
 
-Registers disposable DROP staging and interrupted-LIVE producer cleanup.
+Registers protected unsent staging for DROP and LIVE recordings.
 
-| Field             | Type               | Default |
-| ----------------- | ------------------ | ------- |
-| `request_id`      | `Union[str, None]` | `None`  |
-| `disposable_drop` | `bool`             | `True`  |
+| Field               | Type               | Default |
+| ------------------- | ------------------ | ------- |
+| `request_id`        | `Union[str, None]` | `None`  |
+| `protected_staging` | `bool`             | `True`  |
 
 **Wire Value:** `register_voice_owner`
 
@@ -1410,6 +1559,27 @@ Rejects a pending live connection.
 {
   "command_type": "reject",
   "target": "string"
+}
+```
+
+---
+
+### `RejectCallCommand`
+
+Declines an incoming Call without ending an independently accepted LIVE chat.
+
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
+| `call_id`    | `str`              | ``      |
+
+**Wire Value:** `reject_call`
+
+**Example JSON**
+
+```json
+{
+  "command_type": "reject_call"
 }
 ```
 
@@ -1559,16 +1729,13 @@ Requests renaming of one local profile directory.
 
 Places only the requesting authenticated IPC session in restricted state.
 
-| Field                               | Type                           | Default                               |
-| ----------------------------------- | ------------------------------ | ------------------------------------- |
-| `request_id`                        | `Union[str, None]`             | `None`                                |
-| `unlock_method`                     | `<enum 'ClientUnlockMethod'>`  | `ClientUnlockMethod.PROFILE_PASSWORD` |
-| `continued_live_target`             | `Union[str, None]`             | `None`                                |
-| `live_while_locked`                 | `bool`                         | `False`                               |
-| `accept_while_locked`               | `<enum 'LockedAcceptPolicy'>`  | `LockedAcceptPolicy.NONE`             |
-| `notification_privacy`              | `<enum 'NotificationPrivacy'>` | `NotificationPrivacy.OFF`             |
-| `device_lifecycle`                  | `bool`                         | `False`                               |
-| `continued_live_context_generation` | `Union[int, None]`             | `None`                                |
+| Field                  | Type                           | Default                               |
+| ---------------------- | ------------------------------ | ------------------------------------- |
+| `request_id`           | `Union[str, None]`             | `None`                                |
+| `unlock_method`        | `<enum 'ClientUnlockMethod'>`  | `ClientUnlockMethod.PROFILE_PASSWORD` |
+| `notification_privacy` | `<enum 'NotificationPrivacy'>` | `NotificationPrivacy.OFF`             |
+| `device_lifecycle`     | `bool`                         | `False`                               |
+| `accept_calls_locked`  | `bool`                         | `False`                               |
 
 **Wire Value:** `restrict_client`
 
@@ -1621,6 +1788,32 @@ Triggers daemon self-destruction.
 ```json
 {
   "command_type": "self_destruct"
+}
+```
+
+---
+
+### `SendCallAudioCommand`
+
+Admits one base64 PCM frame and its monotonic sequence for an owned active Call.
+
+The frame must match the shared codec and bounds. Admission does not guarantee
+playback: expired queued frames are discarded, never recorded or sent as DROP.
+
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
+| `call_id`    | `str`              | ``      |
+| `sequence`   | `int`              | `0`     |
+| `data`       | `str`              | ``      |
+
+**Wire Value:** `send_call_audio`
+
+**Example JSON**
+
+```json
+{
+  "command_type": "send_call_audio"
 }
 ```
 
@@ -1757,6 +1950,32 @@ command_type (CommandType): The stable IPC routing code.
   "command_type": "set_setting",
   "setting_key": "string",
   "setting_value": "string"
+}
+```
+
+---
+
+### `StartCallCommand`
+
+Requests phone consent from a target under a fresh caller-chosen identity.
+
+Core establishes a call-only transport or borrows an accepted LIVE transport;
+this command does not grant LIVE chat access or start local microphone input.
+Admission returns CallStateEvent or a typed CallRejectedEvent.
+
+| Field        | Type               | Default |
+| ------------ | ------------------ | ------- |
+| `request_id` | `Union[str, None]` | `None`  |
+| `target`     | `str`              | ``      |
+| `call_id`    | `str`              | ``      |
+
+**Wire Value:** `start_call`
+
+**Example JSON**
+
+```json
+{
+  "command_type": "start_call"
 }
 ```
 
@@ -2151,6 +2370,124 @@ Signals that an automatic reconnect was scheduled.
 
 ---
 
+### `CallAudioEvent`
+
+Transfers fresh received frames to the exact owner, removing them from Core's queue.
+
+| Field        | Type                   | Default     |
+| ------------ | ---------------------- | ----------- |
+| `request_id` | `Union[str, None]`     | `None`      |
+| `revision`   | `Union[int, None]`     | `None`      |
+| `epoch`      | `Union[str, None]`     | `None`      |
+| `call_id`    | `str`                  | ``          |
+| `frames`     | `List[CallAudioFrame]` | `Factory()` |
+
+**Wire Value:** `call_audio`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "call_audio"
+}
+```
+
+---
+
+### `CallAudioSentEvent`
+
+Acknowledges local frame admission and the next sequence, without promising playback.
+
+| Field           | Type               | Default |
+| --------------- | ------------------ | ------- |
+| `request_id`    | `Union[str, None]` | `None`  |
+| `revision`      | `Union[int, None]` | `None`  |
+| `epoch`         | `Union[str, None]` | `None`  |
+| `call_id`       | `str`              | ``      |
+| `next_sequence` | `int`              | `0`     |
+
+**Wire Value:** `call_audio_sent`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "call_audio_sent"
+}
+```
+
+---
+
+### `CallRejectedEvent`
+
+Rejects an exact Call operation with a domain reason and no new media authority.
+
+| Field        | Type                  | Default                    |
+| ------------ | --------------------- | -------------------------- |
+| `request_id` | `Union[str, None]`    | `None`                     |
+| `revision`   | `Union[int, None]`    | `None`                     |
+| `epoch`      | `Union[str, None]`    | `None`                     |
+| `call_id`    | `str`                 | ``                         |
+| `reason`     | `<enum 'CallReason'>` | `CallReason.INVALID_STATE` |
+
+**Wire Value:** `call_rejected`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "call_rejected"
+}
+```
+
+---
+
+### `CallStateEvent`
+
+Reports one lifecycle transition with privacy and ownership projected per client.
+
+| Field        | Type               | Default     |
+| ------------ | ------------------ | ----------- |
+| `request_id` | `Union[str, None]` | `None`      |
+| `revision`   | `Union[int, None]` | `None`      |
+| `epoch`      | `Union[str, None]` | `None`      |
+| `call`       | `CallInfo`         | `Factory()` |
+
+**Wire Value:** `call_state`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "call_state"
+}
+```
+
+---
+
+### `CallsStateEvent`
+
+Returns bounded current and recent Call metadata visible to the requesting client.
+
+| Field        | Type               | Default     |
+| ------------ | ------------------ | ----------- |
+| `request_id` | `Union[str, None]` | `None`      |
+| `revision`   | `Union[int, None]` | `None`      |
+| `epoch`      | `Union[str, None]` | `None`      |
+| `calls`      | `List[CallInfo]`   | `Factory()` |
+
+**Wire Value:** `calls_state`
+
+**Example JSON**
+
+```json
+{
+  "event_type": "calls_state"
+}
+```
+
+---
+
 ### `CannotConnectSelfEvent`
 
 Signals that the local onion cannot connect to itself.
@@ -2295,17 +2632,16 @@ Confirms that only the requesting restricted client was reauthorized.
 
 Confirms per-session restriction and supplies a one-use unlock challenge.
 
-| Field                               | Type                          | Default  |
-| ----------------------------------- | ----------------------------- | -------- |
-| `request_id`                        | `Union[str, None]`            | `None`   |
-| `revision`                          | `Union[int, None]`            | `None`   |
-| `epoch`                             | `Union[str, None]`            | `None`   |
-| `unlock_method`                     | `<enum 'ClientUnlockMethod'>` | Required |
-| `challenge`                         | `Union[str, None]`            | `None`   |
-| `salt`                              | `Union[str, None]`            | `None`   |
-| `device_lifecycle`                  | `bool`                        | `False`  |
-| `continued_live_target`             | `Union[str, None]`            | `None`   |
-| `continued_live_context_generation` | `Union[int, None]`            | `None`   |
+| Field                 | Type                          | Default  |
+| --------------------- | ----------------------------- | -------- |
+| `request_id`          | `Union[str, None]`            | `None`   |
+| `revision`            | `Union[int, None]`            | `None`   |
+| `epoch`               | `Union[str, None]`            | `None`   |
+| `unlock_method`       | `<enum 'ClientUnlockMethod'>` | Required |
+| `challenge`           | `Union[str, None]`            | `None`   |
+| `salt`                | `Union[str, None]`            | `None`   |
+| `device_lifecycle`    | `bool`                        | `False`  |
+| `accept_calls_locked` | `bool`                        | `False`  |
 
 **Wire Value:** `client_restricted`
 
@@ -4823,21 +5159,16 @@ Synchronizes a peer alias rename across UIs.
 
 ### `RestrictedClientStateEvent`
 
-Projects only current per-client grants and notification-permitted call metadata.
+Projects only the requesting client's immutable restriction policy.
 
-| Field                               | Type                           | Default                   |
-| ----------------------------------- | ------------------------------ | ------------------------- |
-| `request_id`                        | `Union[str, None]`             | `None`                    |
-| `revision`                          | `Union[int, None]`             | `None`                    |
-| `epoch`                             | `Union[str, None]`             | `None`                    |
-| `restricted`                        | `bool`                         | `False`                   |
-| `continued_live_target`             | `Union[str, None]`             | `None`                    |
-| `continued_live_context_generation` | `Union[int, None]`             | `None`                    |
-| `session_state`                     | `str`                          | `disconnected`            |
-| `notification_privacy`              | `<enum 'NotificationPrivacy'>` | `NotificationPrivacy.OFF` |
-| `accept_while_locked`               | `<enum 'LockedAcceptPolicy'>`  | `LockedAcceptPolicy.NONE` |
-| `pending`                           | `List[PendingConnectionEntry]` | `Factory()`               |
-| `accepted_handles`                  | `List[str]`                    | `Factory()`               |
+| Field                  | Type                           | Default                   |
+| ---------------------- | ------------------------------ | ------------------------- |
+| `request_id`           | `Union[str, None]`             | `None`                    |
+| `revision`             | `Union[int, None]`             | `None`                    |
+| `epoch`                | `Union[str, None]`             | `None`                    |
+| `restricted`           | `bool`                         | `False`                   |
+| `notification_privacy` | `<enum 'NotificationPrivacy'>` | `NotificationPrivacy.OFF` |
+| `accept_calls_locked`  | `bool`                         | `False`                   |
 
 **Wire Value:** `restricted_client_state`
 
@@ -5706,16 +6037,17 @@ Streams one bounded inbound Voice chunk to an attached consumer.
 
 ### `VoiceCommittedEvent`
 
-Confirms explicit publication of one DROP Voice draft.
+Confirms explicit publication of one finalized Voice draft.
 
-| Field        | Type               | Default  |
-| ------------ | ------------------ | -------- |
-| `request_id` | `Union[str, None]` | `None`   |
-| `revision`   | `Union[int, None]` | `None`   |
-| `epoch`      | `Union[str, None]` | `None`   |
-| `alias`      | `str`              | Required |
-| `msg_id`     | `str`              | Required |
-| `onion`      | `Union[str, None]` | `None`   |
+| Field        | Type                | Default         |
+| ------------ | ------------------- | --------------- |
+| `request_id` | `Union[str, None]`  | `None`          |
+| `revision`   | `Union[int, None]`  | `None`          |
+| `epoch`      | `Union[str, None]`  | `None`          |
+| `alias`      | `str`               | Required        |
+| `msg_id`     | `str`               | Required        |
+| `onion`      | `Union[str, None]`  | `None`          |
+| `delivery`   | `<enum 'Delivery'>` | `Delivery.DROP` |
 
 **Wire Value:** `voice_committed`
 

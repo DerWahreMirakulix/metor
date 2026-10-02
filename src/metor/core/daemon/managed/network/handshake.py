@@ -27,6 +27,7 @@ class HandshakeProtocol:
         signature: str,
         *,
         is_async: bool = False,
+        is_call: bool = False,
         origin: Optional[ConnectionOrigin] = None,
     ) -> str:
         """
@@ -49,7 +50,9 @@ class HandshakeProtocol:
             str(PEER_PROTOCOL_VERSION),
             str(PEER_PROTOCOL_MIN_SUPPORTED),
         ]
-        if is_async:
+        if is_call:
+            parts.append(Constants.CALL_AUTH_FLAG)
+        elif is_async:
             parts.append(_AUTH_ASYNC_FLAG)
         elif origin in _RECOVERY_HINT_ORIGINS:
             parts.append(_AUTH_RECOVERY_FLAG)
@@ -145,7 +148,7 @@ class HandshakeProtocol:
                 is_async = True
             elif extra_token == _AUTH_RECOVERY_FLAG:
                 is_recovery = True
-            else:
+            elif extra_token != Constants.CALL_AUTH_FLAG:
                 raise ValueError('Invalid handshake auth frame.')
 
         return (

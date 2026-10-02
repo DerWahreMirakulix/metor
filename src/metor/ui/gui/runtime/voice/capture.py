@@ -7,7 +7,6 @@ import time
 from metor.client import MetorClient, MetorRequestRejectedError
 from metor.client.platform import CapturePort
 from metor.core.api import (
-    Delivery,
     IpcEvent,
     MessageDirectionCode,
     RetainedMessageEntry,
@@ -45,7 +44,7 @@ class CaptureWorker:
             binding: Target and activation from the initiating press.
             audio: Explicitly configured supported headset capture port.
             mailbox: Bounded UI handoff queue.
-            cache: Optional shared bounded cache for confirmed own LIVE source bytes.
+            cache: Optional bounded cache for exact-owner staged preview bytes.
         Returns:
             None
         """
@@ -63,6 +62,7 @@ class CaptureWorker:
             binding.delivery,
             MessageDirectionCode.OUT,
             binding.msg_id,
+            owner,
         )
         self.stop = threading.Event()
         self.purge = threading.Event()
@@ -168,7 +168,7 @@ class CaptureWorker:
         self.accepted_bytes = item.size_bytes
         if self.purge.is_set():
             return
-        if item.size_bytes == 0 and self.binding.delivery is Delivery.DROP:
+        if item.size_bytes == 0:
             cancelled = self.client.cancel_voice(
                 self.binding.peer, self.binding.msg_id, owner_token=self.owner
             )
@@ -277,7 +277,7 @@ class CaptureWorker:
                 ):
                     status = 'Recording stopped; checking the accepted audio'
                     break
-                if self.cache is not None and self.binding.delivery is Delivery.LIVE:
+                if self.cache is not None:
                     self.cache.append(
                         self.cache_target,
                         self.accepted_bytes,

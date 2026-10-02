@@ -4,7 +4,10 @@ from collections.abc import Callable
 
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.widget import Widget
 
+from metor.core.api import MessageDirectionCode
+from metor.ui.gui.constants import Geometry
 from metor.ui.gui.platform.audio import PcmVoice
 from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.state.media import PlaybackTarget
@@ -15,7 +18,7 @@ from ..symbol import IconAction, Symbol
 from .waveform import WaveformSeek
 
 
-class VoiceCard(Panel):
+class VoiceCard(BoxLayout):
     """Keeps Play, duration/status and Go live in separate nonoverlapping columns."""
 
     def __init__(
@@ -24,6 +27,7 @@ class VoiceCard(Panel):
         target: PlaybackTarget,
         refresh: Callable[[], None],
         context: Callable[[], object] | None = None,
+        configure_audio: Callable[[], None] | None = None,
     ) -> None:
         """Builds one stable Voice message control from its exact source identity.
 
@@ -32,34 +36,79 @@ class VoiceCard(Panel):
             target: Immutable source identity captured by this card.
             refresh: Coalesced repaint request.
             context: Optional exact-item More action.
+            configure_audio: Explicit route setup when output is not configured.
         Returns:
             None
         """
-        super().__init__(
-            orientation='horizontal', padding=dp(16), spacing=dp(12), size_hint_y=None
+        super().__init__(size_hint_y=None)
+        surface = (
+            'raised'
+            if target.direction is MessageDirectionCode.IN
+            else target.delivery.value + 'Surface'
         )
+        self.card = Panel(
+            surface=surface,
+            orientation='vertical',
+            padding=dp(12),
+            spacing=dp(4),
+            size_hint_x=None,
+        )
+        if target.direction is MessageDirectionCode.OUT:
+            self.add_widget(Widget())
+        self.add_widget(self.card)
+        if target.direction is MessageDirectionCode.IN:
+            self.add_widget(Widget())
+        self.bind(width=self._reflow)
         self.controller, self.target, self.refresh = controller, target, refresh
+        self.configure_audio = configure_audio
+        track = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(12))
+        self.track = track
+        self.card.add_widget(track)
         self._available = 0
         self._finalized = False
         self.play = IconAction(
-            'play', 'Play voice message', self._play, context=context
+            'play', 'Play voice message', self._play, context=context, surface=surface
         )
         self._playing = False
-        self.add_widget(self.play)
+        track.add_widget(self.play)
         self.body = BoxLayout(orientation='vertical', spacing=dp(4), size_hint_y=None)
         self.seek = WaveformSeek(self._seek, context)
+        self.seek.surface = surface
+        self.seek._feedback()
         self.title = self.seek.hint
-        self.metadata = self.seek.metadata
+        self.metadata = Label('', role='caption', tone='textSecondary')
+        self.metadata.pos_hint = {'center_y': 0.5}
+        self.metadata.bind(height=self._measure)
+        self.seek.remove_widget(self.seek.metadata)
         self.body.add_widget(self.seek)
         self.body.bind(minimum_height=self.body.setter('height'), height=self._measure)
-        self.add_widget(self.body)
+        track.add_widget(self.body)
+        footer = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(8))
+        self.footer = footer
+        footer.add_widget(self.metadata)
         if context is not None:
-            self.add_widget(IconAction('ellipsis', 'Message actions', context))
+            footer.add_widget(
+                IconAction(
+                    'ellipsis',
+                    'Message actions',
+                    context,
+                    surface=surface,
+                    tone='textSecondary',
+                )
+            )
+        self.card.add_widget(footer)
+        footer.bind(minimum_height=self._measure)
         self.edge = BoxLayout(size_hint_x=None, width=dp(80))
         self.jump = Action('Go live', self._jump, surface='liveSurface', tone='live')
         self.jump.accessible_name = 'Jump to current audio'
         self.at_edge = Label('At live edge', role='caption', tone='textSecondary')
-        self.height = dp(88)
+        self.height = dp(124)
+
+    def _reflow(self, *_args: object) -> None:
+        """Keeps audio aligned with its message direction at the current viewport width."""
+        self.card.width = min(
+            dp(Geometry.BUBBLE_MAX), self.width * Geometry.BUBBLE_RATIO
+        )
 
     def _measure(self, *_args: object) -> None:
         """Grows the card when truthful status text wraps in the allocated column.
@@ -69,7 +118,11 @@ class VoiceCard(Panel):
         Returns:
             None
         """
-        self.height = max(dp(88), self.body.height + dp(32))
+        if not hasattr(self, 'footer'):
+            return
+        self.track.height = max(dp(48), self.body.height)
+        self.footer.height = max(dp(48), self.metadata.height)
+        self.height = self.track.height + self.footer.height + dp(28)
 
     def _play(self) -> None:
         """Starts at the retained beginning or pauses only this source's output.
@@ -80,6 +133,9 @@ class VoiceCard(Panel):
             None
         """
         playback = self.controller.playback
+        if playback.audio is None and self.configure_audio is not None:
+            self.configure_audio()
+            return
         if (
             playback.running
             and playback.progress
@@ -135,7 +191,14 @@ class VoiceCard(Panel):
         matching = progress is not None and progress.target == self.target
         position = progress.position if matching and progress is not None else 0
         state = progress.state if matching and progress is not None else ''
-        self.play.disabled = playback.audio is None or codec != PcmVoice.CODEC
+        self.play.disabled = (
+            codec != PcmVoice.CODEC
+            or self.controller.state.covered
+            or self.controller.calls.active
+            or self.controller.calls.media_active
+            or playback.audio is None
+            and self.configure_audio is None
+        )
         playing = matching and playback.running
         if playing != self._playing:
             self.play.clear_widgets()
@@ -153,10 +216,14 @@ class VoiceCard(Panel):
         )
         elapsed = PcmVoice.duration_ms(position) / PcmVoice.MILLISECONDS
         envelope = playback.cache.envelope(self.target)
-        self.seek.disabled = self.play.disabled or size <= 0 or not envelope[1]
+        self.seek.disabled = (
+            self.play.disabled or playback.audio is None or size <= 0 or not envelope[1]
+        )
         self.title.text = (
             'Audio unavailable'
             if self.play.disabled or state == 'unavailable'
+            else 'Set up audio to play'
+            if playback.audio is None
             else 'Buffering…'
             if state == 'buffering'
             else 'Played; confirmation unavailable'
@@ -171,15 +238,19 @@ class VoiceCard(Panel):
             else f'{elapsed:.1f} s / … · {status}'
         )
         self.seek.set_source(size, position, envelope)
-        if not finalized:
+        if (
+            not finalized
+            and self.target.direction is MessageDirectionCode.IN
+            and playback.audio is not None
+        ):
             if self.edge.parent is None:
-                self.add_widget(self.edge)
+                self.footer.add_widget(self.edge)
             action = (
                 self.jump if position + PcmVoice.FRAME_BYTES < size else self.at_edge
             )
             if action.parent is None:
                 self.edge.clear_widgets()
                 self.edge.add_widget(action)
-            self.jump.disabled = self.play.disabled
-        elif self.edge.parent is self:
-            self.remove_widget(self.edge)
+            self.jump.disabled = self.play.disabled or playback.audio is None
+        elif self.edge.parent is self.footer:
+            self.footer.remove_widget(self.edge)

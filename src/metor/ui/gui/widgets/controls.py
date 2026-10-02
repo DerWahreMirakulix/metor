@@ -5,6 +5,7 @@ from typing import ClassVar, Protocol, cast
 
 from kivy.core.window import Window
 from kivy.graphics import Canvas, Color, Line, RoundedRectangle
+from kivy.input.motionevent import MotionEvent
 from kivy.metrics import dp
 from kivy.uix.behaviors import ButtonBehavior, FocusBehavior
 from kivy.uix.boxlayout import BoxLayout
@@ -208,10 +209,30 @@ class Action(FocusBehavior, ButtonBehavior, Panel):  # pyright: ignore[reportInc
         Returns:
             None
         """
-        self._hovered = self.get_root_window() is not None and self.collide_point(
+        hovered = self.get_root_window() is not None and self.collide_point(
             *self.to_widget(*position, relative=False)
         )
+        if hovered == self._hovered:
+            return
+        self._hovered = hovered
         self._feedback()
+
+    def on_touch_down(  # pyright: ignore[reportIncompatibleMethodOverride]
+        self, touch: MotionEvent
+    ) -> bool:
+        """Dispatches pointer presses without replacing the current keyboard owner.
+
+        Args:
+            touch: Native pointer event; child actions receive it first.
+        Returns:
+            bool: Whether an enabled control owns the press.
+        """
+        if self.disabled:
+            return False
+        handled = bool(ButtonBehavior.on_touch_down(self, touch))
+        if handled and touch not in FocusBehavior.ignored_touch:
+            FocusBehavior.ignored_touch.append(touch)
+        return handled
 
     def _release(self, *_args: object) -> None:
         """Invokes only an enabled deliberate release.

@@ -85,7 +85,7 @@ class ResendActions:
         owner = controller.voice_owner.token
         if source.text is None and (
             owner is None
-            or 'disposable_voice_owner' not in controller.state.capabilities
+            or 'protected_voice_owner' not in controller.state.capabilities
         ):
             controller.state.status = 'Voice resend is unavailable'
             return False

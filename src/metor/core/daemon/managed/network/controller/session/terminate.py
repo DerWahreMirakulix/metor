@@ -569,9 +569,21 @@ def disconnect(
             )
         return
 
-    conn: Optional[socket.socket] = controller._state.pop_any_connection(
-        onion, socket_to_close
-    )
+    retain_call = getattr(controller, '_retain_call_transport', None)
+    call_id: Optional[str] = None
+    with controller._state.snapshot_barrier():
+        current = controller._state.get_connection(onion)
+        if (
+            current is not None
+            and (socket_to_close is None or current is socket_to_close)
+            and callable(retain_call)
+            and not is_fallback
+            and origin is not ConnectionOrigin.RETUNNEL
+        ):
+            call_id = retain_call(current)
+        conn: Optional[socket.socket] = controller._state.pop_any_connection(
+            onion, socket_to_close
+        )
     if socket_to_close is not None and conn is None:
         controller._state.retire_connection(socket_to_close)
         return
@@ -618,7 +630,13 @@ def disconnect(
         )
 
     if conn:
-        if initiated_by_self:
+        if call_id is not None:
+            if initiated_by_self:
+                controller._state.send_frame(
+                    conn,
+                    f'{TorCommand.CALL_CHAT_END.value} {call_id}\n'.encode('ascii'),
+                )
+        elif initiated_by_self:
             mark_local_termination = getattr(
                 controller._state,
                 'mark_locally_terminated_socket',

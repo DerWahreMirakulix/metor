@@ -20,7 +20,7 @@ from metor.ui.gui.widgets.context import ContextAction
 TITLES: dict[NoticeKind, str] = {
     NoticeKind.DROP: 'New Drop',
     NoticeKind.LIVE: 'New Live activity',
-    NoticeKind.CALL: 'Incoming Live',
+    NoticeKind.INVITATION: 'Incoming Live',
     NoticeKind.PENDING: 'Pending Live',
     NoticeKind.UNSTABLE: 'Connection unstable',
     NoticeKind.FALLBACK: 'Queued as Drop',

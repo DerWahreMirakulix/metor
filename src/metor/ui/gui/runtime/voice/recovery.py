@@ -4,8 +4,10 @@ from typing import TYPE_CHECKING
 
 from metor.client import MetorClient
 from metor.core.api import (
-    Delivery,
     IpcEvent,
+    ContentType,
+    MessageStatusCode,
+    RetainedMessageEntry,
     MessageDirectionCode,
     RetainedMessagesEvent,
     VoiceCancelledEvent,
@@ -16,6 +18,7 @@ from metor.ui.gui.state.mailbox import Update
 
 # Local Package Imports
 from .press import CaptureBinding, PressPhase
+from .models import VoiceReview
 
 if TYPE_CHECKING:
     from .controller import VoiceController
@@ -34,6 +37,7 @@ class CaptureRecovery:
         """
         self.voice = voice
         self.pending: CaptureBinding | None = None
+        self._claiming = False
 
     def retry(self, binding: CaptureBinding) -> bool:
         """Recovers only the failed capture shown by the initiating control.
@@ -63,6 +67,60 @@ class CaptureRecovery:
             return False
         self.pending = binding
         controller.state.status = 'Checking accepted recording before finalizing…'
+        return True
+
+    def claim(self, item: RetainedMessageEntry) -> bool:
+        """Explicitly reclaims one interrupted producer into review without publishing.
+
+        Args:
+            item: Exact publicly advertised orphan draft shown by this control.
+        Returns:
+            bool: Whether a safe same-profile owner claim was admitted.
+        """
+        voice, controller = self.voice, self.voice.controller
+        state, client, owner = (
+            controller.state,
+            controller.client,
+            controller.voice_owner.token,
+        )
+        snapshot = state.snapshot
+        if (
+            state.covered
+            or snapshot is None
+            or not snapshot.profile_instance_id
+            or not snapshot.epoch
+            or client is None
+            or owner is None
+            or self.pending is not None
+            or voice.running
+            or voice.press.active
+            or item.onion in voice.reviews
+            or item.direction is not MessageDirectionCode.OUT
+            or item.status is not MessageStatusCode.DRAFT
+            or item.content_type is not ContentType.VOICE
+            or not item.producer_interrupted
+            or not item.can_retry_finalization
+        ):
+            return False
+        binding = CaptureBinding(
+            snapshot.profile_instance_id or '',
+            snapshot.epoch or '',
+            state.generation,
+            item.onion,
+            item.delivery,
+            item.msg_id,
+            item.context_generation,
+        )
+        if not controller.submit(
+            'capture:claim:' + binding.msg_id,
+            lambda: client.finalize_voice(
+                binding.msg_id, PcmVoice.duration_ms(item.size_bytes), owner_token=owner
+            ),
+        ):
+            return False
+        self.pending = binding
+        self._claiming = True
+        state.status = 'Recovering the unsent recording for review…'
         return True
 
     @staticmethod
@@ -112,7 +170,7 @@ class CaptureRecovery:
         try:
             result: IpcEvent | None = (
                 client.cancel_voice(binding.peer, binding.msg_id, owner_token=owner)
-                if item.size_bytes == 0 and binding.delivery is Delivery.DROP
+                if item.size_bytes == 0
                 else client.finalize_voice(
                     binding.msg_id,
                     PcmVoice.duration_ms(item.size_bytes),
@@ -134,12 +192,34 @@ class CaptureRecovery:
         Returns:
             bool: Whether this recovery owner handled the update.
         """
-        if not update.operation.startswith('capture:recover:'):
+        if not update.operation.startswith(('capture:recover:', 'capture:claim:')):
             return False
         binding = self.pending
-        if binding is None or update.operation != 'capture:recover:' + binding.msg_id:
+        if binding is None or not update.operation.endswith(':' + binding.msg_id):
             return True
         self.pending = None
+        if self._claiming:
+            self._claiming = False
+            event = update.event
+            if (
+                isinstance(event, VoiceFinalizedEvent)
+                and event.msg_id == binding.msg_id
+                and event.onion == binding.peer
+                and event.delivery is binding.delivery
+                and event.size_bytes > 0
+            ):
+                self.voice.reviews[binding.peer] = VoiceReview(
+                    binding, event.size_bytes, event.duration_ms
+                )
+                self.voice.controller.state.status = (
+                    'Recovered recording ready to review'
+                )
+                self.voice.controller.inventory.reset()
+            else:
+                self.voice.controller.state.status = (
+                    'Recording recovery was not confirmed'
+                )
+            return True
         if self.voice.press.binding != binding:
             return True
         event = update.event

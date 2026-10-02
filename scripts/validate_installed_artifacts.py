@@ -44,7 +44,7 @@ def _emit_failure_annotation(
 
 GOOD_CONSUMER = """from typing import assert_type
 from metor.client import MetorClient, FrontendHost, FrontendInteractions
-from metor.core.api import Delivery, RuntimeSnapshotEvent
+from metor.core.api import Delivery, RuntimeSnapshotEvent, CallStateEvent, CallsStateEvent, CallAudioEvent, CallAudioSentEvent, CallRejectedEvent
 from metor.core.auth import derive_pin_verifier, build_session_auth_proof_from_key
 from metor.versioning import APP_VERSION
 client = MetorClient(1234)
@@ -55,6 +55,10 @@ assert_type(APP_VERSION, str)
 def endpoint(host: FrontendHost, interactions: FrontendInteractions) -> int:
     return host.bootstrap(interactions).port
 client.send_text("peer", Delivery.LIVE, "text", "id")
+assert_type(client.start_call("peer", "call-id"), CallStateEvent | CallRejectedEvent | None)
+assert_type(client.get_calls(), CallsStateEvent | None)
+assert_type(client.read_call_audio("call-id"), CallAudioEvent | CallRejectedEvent | None)
+assert_type(client.send_call_audio("call-id", 0, "AA=="), CallAudioSentEvent | CallRejectedEvent | None)
 """
 BAD_CONSUMER = """from metor.client import MetorClient
 from metor.core.api import Delivery

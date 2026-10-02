@@ -1,5 +1,17 @@
 """Facade exports for strict command DTO packages."""
 
+from metor.core.api.commands.calls import (
+    StartCallCommand,
+    AcceptCallCommand,
+    RejectCallCommand,
+    CancelCallCommand,
+    HangupCallCommand,
+    MuteCallCommand,
+    GetCallsCommand,
+    SendCallAudioCommand,
+    ReadCallAudioCommand,
+)
+
 from metor.core.api.commands.producers import (
     RegisterVoiceOwnerCommand,
     ReleaseVoiceOwnerCommand,
@@ -90,6 +102,15 @@ from metor.core.api.commands.transport import GetTransportStateCommand
 
 
 __all__ = [
+    'StartCallCommand',
+    'AcceptCallCommand',
+    'RejectCallCommand',
+    'CancelCallCommand',
+    'HangupCallCommand',
+    'MuteCallCommand',
+    'GetCallsCommand',
+    'SendCallAudioCommand',
+    'ReadCallAudioCommand',
     'RegisterVoiceOwnerCommand',
     'ReleaseVoiceOwnerCommand',
     'GetMessageOutcomeCommand',

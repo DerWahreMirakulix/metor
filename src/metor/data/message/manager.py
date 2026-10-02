@@ -240,6 +240,10 @@ class MessageManager:
         """
         return self._messages.get_voice_payload(contact_onion, msg_id, direction)
 
+    def has_outbound_identity(self, msg_id: str) -> bool:
+        """Guards a new Voice recording from reusing any retained outbound identity."""
+        return self._messages.has_outbound_identity(msg_id)
+
     def message_outcome(
         self, onion: str, msg_id: str, direction: MessageDirection
     ) -> tuple[Delivery, MessageStatus] | None:
@@ -372,8 +376,12 @@ class MessageManager:
         """
         return self._messages.get_pending_outbox()
 
+    def get_voice_drafts(self) -> List[PendingLiveRecord]:
+        """Lists local uncommitted Voice draft records for Core recovery."""
+        return self._messages.get_voice_drafts()
+
     def get_voice_draft_payloads(self) -> List[str]:
-        """Returns outbound DROP Voice drafts for ownership reconciliation.
+        """Returns local Voice draft metadata for ownership reconciliation.
 
         Args:
             None
@@ -477,8 +485,15 @@ class MessageManager:
             byte_limit,
         )
 
-    def commit_voice_draft(self, contact_onion: str, msg_id: str) -> bool:
-        """Publishes one finalized DROP Voice draft to the durable outbox.
+    def commit_voice_draft(
+        self,
+        contact_onion: str,
+        msg_id: str,
+        delivery: Delivery | None = None,
+        max_count: int = -1,
+        max_bytes: int = -1,
+    ) -> bool:
+        """Publishes one finalized local Voice draft through the canonical outbox.
 
         Args:
             contact_onion (str): The contact onion input.
@@ -487,10 +502,12 @@ class MessageManager:
         Returns:
             bool: Whether the documented condition holds.
         """
-        return self._messages.commit_voice_draft(contact_onion, msg_id)
+        return self._messages.commit_voice_draft(
+            contact_onion, msg_id, delivery, max_count, max_bytes
+        )
 
     def cancel_voice_draft(self, contact_onion: str, msg_id: str) -> Optional[str]:
-        """Deletes one unsent DROP Voice draft and returns its metadata.
+        """Deletes one unsent local Voice draft and returns its metadata.
 
         Args:
             contact_onion (str): The contact onion input.

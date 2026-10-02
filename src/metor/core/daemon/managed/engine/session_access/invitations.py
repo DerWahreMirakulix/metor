@@ -1,4 +1,4 @@
-"""Connection-owned handles that bind call actions to an exact pending socket."""
+"""Connection-owned handles that bind invitation actions to an exact pending socket."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ from metor.core.api import (
 from metor.utils import Constants
 
 # Local Package Imports
-from .grants import PendingCallGrant
+from .grants import PendingInvitationGrant
 
 if TYPE_CHECKING:
     from .controller import SessionAccessController
@@ -42,24 +42,24 @@ def issue_handle(
         str | None: Stable per-client handle; stale source projections get no handle.
     """
     with owner._lock:
-        pending = owner._pending_call(onion)
+        pending = owner._pending_invitation(onion)
         if pending is None:
             return None
         if owner._pending_token is not None and (
             token is None or token != owner._pending_token(onion)
         ):
             return None
-        handles = owner._call_handles.setdefault(conn, {})
+        handles = owner._invitation_handles.setdefault(conn, {})
         for handle, grant in tuple(handles.items()):
-            if not owner._valid_call_grant(conn, grant):
+            if not owner._valid_invitation_grant(conn, grant):
                 handles.pop(handle, None)
         for handle, grant in handles.items():
             if grant.onion == onion and grant.pending is pending[0]:
                 return handle
-        if len(handles) >= Constants.MAX_ANONYMOUS_CALL_HANDLES:
+        if len(handles) >= Constants.MAX_PENDING_INVITATION_HANDLES:
             return None
-        handle = secrets.token_urlsafe(Constants.PENDING_CALL_TOKEN_BYTES)
-        handles[handle] = PendingCallGrant(
+        handle = secrets.token_urlsafe(Constants.PENDING_INVITATION_TOKEN_BYTES)
+        handles[handle] = PendingInvitationGrant(
             onion,
             owner._restriction_generations.get(conn, 0),
             owner._auth_runtime_generation,
@@ -91,9 +91,9 @@ def project_event(
     if isinstance(event, PendingConnectionExpiredEvent):
         handle = None
         with owner._lock:
-            handles = owner._call_handles.get(conn, {})
+            handles = owner._invitation_handles.get(conn, {})
             for candidate, grant in tuple(handles.items()):
-                if grant.onion == event.onion and not owner._valid_call_grant(
+                if grant.onion == event.onion and not owner._valid_invitation_grant(
                     conn, grant
                 ):
                     handle = candidate
@@ -133,14 +133,14 @@ def project_snapshot(
     )
     if isinstance(projected, RuntimeSnapshotEvent):
         with owner._lock:
-            accepted = owner._accepted_calls.get(conn, {})
+            accepted = owner._accepted_invitations.get(conn, {})
             for handle, (onion, context, _generation) in tuple(accepted.items()):
                 if owner._live_context(onion) != context:
                     accepted.pop(handle, None)
             projected.live_contexts = [
                 replace(
                     entry,
-                    call_handle=next(
+                    invitation_handle=next(
                         (
                             handle
                             for handle, (
@@ -177,7 +177,7 @@ def observe_transition(owner: SessionAccessController, event: IpcEvent) -> None:
     with owner._lock:
         accepted = [
             (conn, handle)
-            for conn, handles in owner._call_handles.items()
+            for conn, handles in owner._invitation_handles.items()
             for handle, grant in handles.items()
             if grant.onion == event.onion
             and grant.pending is active
@@ -195,7 +195,7 @@ def record_accepted(
     onion: str,
     generation: int,
 ) -> None:
-    """Binds an accepted call handle to one still-authorized logical LIVE context.
+    """Binds an accepted invitation handle to one still-authorized logical LIVE context.
 
     Args:
         owner: Session access owner.
@@ -210,11 +210,11 @@ def record_accepted(
     if context is None:
         return
     with owner._lock:
-        accepted = owner._accepted_calls.setdefault(conn, {})
+        accepted = owner._accepted_invitations.setdefault(conn, {})
         for previous, (peer, old_context, _generation) in tuple(accepted.items()):
             if peer == onion or owner._live_context(peer) != old_context:
                 accepted.pop(previous, None)
-        if len(accepted) >= Constants.MAX_ANONYMOUS_CALL_HANDLES:
+        if len(accepted) >= Constants.MAX_PENDING_INVITATION_HANDLES:
             accepted.pop(next(iter(accepted)))
         accepted[handle] = (onion, context, generation)
 
@@ -236,11 +236,11 @@ def authorize_action(
     if command.action_handle is None:
         return True
     with owner._lock:
-        grant = owner._call_handles.get(conn, {}).get(command.action_handle)
-        valid = grant is not None and owner._valid_call_grant(conn, grant)
+        grant = owner._invitation_handles.get(conn, {}).get(command.action_handle)
+        valid = grant is not None and owner._valid_invitation_grant(conn, grant)
     if not valid or grant is None:
         owner._send(conn, NoPendingConnectionEvent(alias='unknown'))
         return False
     command.target = grant.onion
-    owner._consume_call_handle(conn, command.action_handle)
+    owner._consume_invitation_handle(conn, command.action_handle)
     return True

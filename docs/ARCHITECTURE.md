@@ -356,6 +356,50 @@ content DTO is a blob reference. Voice uses the same ACK, dedupe, pending,
 reconnect/replay, selective fallback, consume, and DROP history semantics as
 text. `FILE` and `PAYMENT_REQUEST` remain extension examples.
 
+## Voice drafts and telephone calls
+
+All Voice recording uses protected Core staging. Begin and exact-offset append
+accept bytes locally; finalize closes the recording into an unpublished draft
+for DROP and LIVE alike. Only explicit commit publishes. Review playback is
+manual and does not require listening to the complete draft before sending.
+Capture limits, producer interruption, app lock, connection loss and automatic
+message fallback cannot publish an unsent draft. An ended LIVE draft requires
+an explicit eligible LIVE reconnection or an explicit commit as DROP with the
+same logical identity. Published messages retain their existing receipt,
+recovery, retention and consume rules.
+
+CALL is a separate runtime domain, with its own exact identity, consent,
+signaling, owner and lifetime. It is not a Delivery or ContentType value and
+cannot enter message history or fallback. Call acceptance authorizes only
+conversation audio. A direct call uses a call-only authenticated transport and
+requires one acceptance; it does not create a LIVE chat permission. Calls may
+reuse an accepted LIVE transport, while rejecting or hanging up the call leaves
+that chat intact. Ending LIVE transfers the shared connection to the call alone and revokes message permission; physical transport loss terminates the call explicitly.
+
+Local frontend adapters own capture and output. Calls use mono signed 16-bit
+PCM at 16 kHz in 20 ms frames, allowing independent frame expiry without
+retaining decoder state. Core transfers sequence-qualified frames independently
+in both directions, with call-relative monotonic timing. Each direction retains
+at most ten frames (200 ms); Core and native adapters discard expired audio
+instead of building a replay backlog. A transport interruption
+ends the call, so reconnect cannot replay conversation audio or silently accept
+another call. Audio requires explicitly selected headset endpoints; no speaker
+echo cancellation or automatic conversation recording is claimed.
+
+App restriction always stops message capture/playback and hardware PTT, while
+preserving protected unsent staging. An already accepted exact-owner call keeps
+its narrowly scoped audio/mute/hangup permissions through app or screen lock.
+New call acceptance while covered requires the distinct protected preference
+and an explicit action; all chat contents remain covered. Hard profile lock,
+profile departure, owner disconnect or purge ends calls and frees their audio.
+System suspend ends calls; display lock alone does not imply suspend, and resume
+never reconstructs microphone input or consent.
+
+The change uses IPC generation 4 (retired preference/restriction fields and new
+Voice publication semantics) and peer generation 4 (explicit call transport and
+frames), both with minimum 4. Older peers fail closed during negotiation.
+Application SemVer, SQL schema, encrypted blobs and key derivation are unchanged.
+
 ## Core system boundaries
 
 ### Frontend-independent, typed platform contracts
@@ -424,7 +468,7 @@ ownership. The native PortAudio implementation and PCM codec remain in the GUI
 distribution. New hardware contracts do not declare any untested board supported.
 
 The platform contract itself adds no IPC, persistence or cryptographic format.
-The separate frontend lifetime and profile-exit change uses IPC generation 3.
+The frontend lifetime and profile-exit contracts remain independent of calls.
 
 1. The UI owns presentation and interaction state only.
    It may hold transient presentation state such as focus or scroll position, but it must not own Tor, database, or cryptographic lifecycle.
@@ -453,7 +497,7 @@ exposed. Accessibility is a presentation surface, never an authorization path or
 a second message inventory. Concrete screen-reader and desktop-environment
 support requires evidence for the declared platform and capability.
 
-Desktop focus loss revokes focus-owned input and media; it is not promoted to an
+Desktop focus loss revokes focus-owned input and message media; it is not promoted to an
 OS lock. Actual Windows session/power events and validated Linux logind or
 supported screen-lock signals enter one bounded typed lifecycle path. Privacy
 departure wins over resume under pressure. Resume keeps the cover and never
@@ -1132,7 +1176,7 @@ disconnecting replacements. Runtime release attempts each sensitive phase even
 after failure, remains LOCKING on failure, and permits retry; keyslot removal is
 not proof of successful live-key or physical media erasure.
 
-Unfinalized DROP drafts retain temporary ownership. Exact committed fallback
+Unpublished DROP and LIVE drafts retain temporary ownership, including after finalization. Explicit DROP publication promotes their protected blobs; published LIVE messages retain temporary ownership until their defined delivery/consume lifecycle ends. Exact committed fallback
 intents are additive internal receipt JSON (`fallback_committed`), not a new
 wire/schema/crypto generation. They authorize same-identity repair after partial
 blob promotion; absence of a LIVE generation alone never authorizes a sweep.

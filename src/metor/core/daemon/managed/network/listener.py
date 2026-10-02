@@ -84,6 +84,9 @@ class InboundListener:
         enqueue_live_reconnect_callback: Callable[[str], bool],
         stop_flag: threading.Event,
         config: 'Config',
+        call_transport_callback: Optional[
+            Callable[[str, socket.socket, TcpStreamReader], None]
+        ] = None,
     ) -> None:
         """
         Initializes the InboundListener.
@@ -123,6 +126,7 @@ class InboundListener:
         )
         self._stop_flag: threading.Event = stop_flag
         self._config: 'Config' = config
+        self._call_transport = call_transport_callback
         self._listener_thread: Optional[threading.Thread] = None
         self._startup_event: threading.Event = threading.Event()
         self._startup_lock: threading.Lock = threading.Lock()
@@ -365,6 +369,7 @@ class InboundListener:
         auth_successful: bool = False
         onion: Optional[str] = None
         is_async: bool = False
+        is_call: bool = False
         stream: Optional[TcpStreamReader] = None
 
         try:
@@ -380,6 +385,7 @@ class InboundListener:
             line: Optional[str] = stream.read_line()
 
             if line:
+                is_call = line.split()[-1] == Constants.CALL_AUTH_FLAG
                 (
                     remote_onion,
                     signature,
@@ -416,6 +422,13 @@ class InboundListener:
                 self._state.retire_connection(conn)
             except Exception:
                 pass
+            return
+
+        if is_call:
+            if self._call_transport is None:
+                self._state.retire_connection(conn)
+            else:
+                self._call_transport(onion, conn, stream)
             return
 
         if is_async:

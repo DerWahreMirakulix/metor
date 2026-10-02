@@ -11,6 +11,12 @@ from enum import Enum
 class TorCommand(str, Enum):
     """Enumeration of all valid Tor protocol commands."""
 
+    CALL_OFFER = 'CALL_OFFER'
+    CALL_ACCEPT = 'CALL_ACCEPT'
+    CALL_END = 'CALL_END'
+    CALL_AUDIO = 'CALL_AUDIO'
+    CALL_PING = 'CALL_PING'
+    CALL_CHAT_END = 'CALL_CHAT_END'
     CHALLENGE = '/challenge'
     AUTH = '/auth'
     PENDING = '/pending'

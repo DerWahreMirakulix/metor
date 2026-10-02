@@ -4,6 +4,7 @@ from typing import Callable, Optional, Type, TypeVar, cast
 import time
 import secrets
 
+from metor.client.calls import CallClientMixin
 from metor.client.auth import (
     AuthProvider,
     IpcAuthExchange,
@@ -110,7 +111,7 @@ def parse_endpoint(endpoint: str | int) -> tuple[str, int]:
     return Constants.LOCALHOST, int(endpoint_str)
 
 
-class MetorClient:
+class MetorClient(CallClientMixin):
     """High-level client managing connection, auth, and event streaming with a Metor daemon."""
 
     def __init__(
@@ -273,7 +274,7 @@ class MetorClient:
         owner_token: Optional[str] = None,
         context_generation: Optional[int] = None,
     ) -> Optional[VoiceStartedEvent]:
-        """Begins one bounded Voice upload or LIVE turn.
+        """Begins one local-only Voice draft for explicit review and publication.
 
         Args:
             target (str): The target input.
@@ -301,13 +302,13 @@ class MetorClient:
         *,
         owner_token: Optional[str] = None,
     ) -> Optional[VoiceAppendOutcome]:
-        """Appends a chunk and returns every terminal admission outcome.
+        """Appends a local staging chunk and returns its bounded admission outcome.
 
         Args:
             msg_id (str): Stable Voice identity.
             offset (int): Expected contiguous byte offset.
             data (str): Strict Base64 chunk payload.
-            owner_token: Optional Core-issued disposable producer qualification.
+            owner_token: Optional Core-issued protected staging qualification.
 
         Returns:
             Optional[VoiceAppendOutcome]: Accepted, finalized, or refused outcome.
@@ -332,7 +333,7 @@ class MetorClient:
         *,
         owner_token: Optional[str] = None,
     ) -> Optional[VoiceFinalizedEvent]:
-        """Finalizes capture without publishing a DROP draft.
+        """Finalizes local capture for review without publishing in either mode.
 
         Args:
             msg_id (str): The msg id input.
@@ -347,9 +348,15 @@ class MetorClient:
         )
 
     def commit_voice(
-        self, target: str, msg_id: str, *, owner_token: Optional[str] = None
+        self,
+        target: str,
+        msg_id: str,
+        *,
+        owner_token: Optional[str] = None,
+        delivery: Optional[Delivery] = None,
+        context_generation: Optional[int] = None,
     ) -> Optional[VoiceCommittedEvent]:
-        """Publishes one finalized DROP Voice draft for delivery.
+        """Publishes one finalized draft; delivery=DROP explicitly converts a LIVE draft.
 
         Args:
             target (str): The target input.
@@ -360,13 +367,16 @@ class MetorClient:
             Optional[VoiceCommittedEvent]: The resulting value.
         """
         return self.request(
-            CommitVoiceCommand(target, msg_id, owner_token), VoiceCommittedEvent
+            CommitVoiceCommand(
+                target, msg_id, owner_token, delivery, context_generation
+            ),
+            VoiceCommittedEvent,
         )
 
     def cancel_voice(
         self, target: str, msg_id: str, *, owner_token: Optional[str] = None
     ) -> Optional[VoiceCancelledEvent]:
-        """Cancels one unpublished DROP Voice draft.
+        """Cancels one unpublished local Voice draft.
 
         Args:
             target (str): The target input.

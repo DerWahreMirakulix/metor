@@ -189,17 +189,17 @@ TRANSLATIONS: Dict[EventType, TranslationDef] = {
         'You cannot switch focus to yourself.', StatusTone.SYSTEM
     ),
     EventType.NO_CONNECTION_TO_REJECT: TranslationDef(
-        "No connection with '{alias}' to reject.",
+        "No live-chat invitation from '{alias}' to reject.",
         StatusTone.SYSTEM,
         AliasPolicy.DYNAMIC,
     ),
     EventType.NO_CONNECTION_TO_DISCONNECT: TranslationDef(
-        "No active connection with '{alias}' to disconnect.",
+        "No active live chat with '{alias}' to end.",
         StatusTone.SYSTEM,
         AliasPolicy.DYNAMIC,
     ),
     EventType.NO_PENDING_CONNECTION: TranslationDef(
-        "No pending connection from '{alias}' to accept.",
+        "No pending live-chat invitation from '{alias}' to accept.",
         StatusTone.INFO,
         AliasPolicy.DYNAMIC,
     ),
@@ -254,7 +254,7 @@ TRANSLATIONS: Dict[EventType, TranslationDef] = {
         AliasPolicy.DYNAMIC,
     ),
     EventType.INCOMING_CONNECTION: TranslationDef(
-        f"Incoming connection from '{{alias}}'. Type '{Theme.GREEN}/accept {{alias}}{Theme.RESET}' or '{Theme.RED}/reject {{alias}}{Theme.RESET}'.",
+        f"'{{alias}}' would like to start a live chat. Accepting enables chat messages only. Type '{Theme.GREEN}/accept {{alias}}{Theme.RESET}' or '{Theme.RED}/reject {{alias}}{Theme.RESET}'.",
         StatusTone.INFO,
         AliasPolicy.DYNAMIC,
     ),
@@ -264,7 +264,7 @@ TRANSLATIONS: Dict[EventType, TranslationDef] = {
         AliasPolicy.DYNAMIC,
     ),
     EventType.CONNECTION_AUTO_ACCEPTED: TranslationDef(
-        "Pending request found. Auto-accepting connection with '{alias}'...",
+        "Pending chat invitation found. Auto-accepting live chat with '{alias}'...",
         StatusTone.INFO,
         AliasPolicy.DYNAMIC,
     ),

@@ -1,4 +1,4 @@
-"""Exact-handle call selection, explicit navigation and normal unlock continuation."""
+"""Exact-handle invitation selection, explicit navigation and normal unlock continuation."""
 
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -8,14 +8,14 @@ from metor.core.api import (
     AcceptCommand,
     RejectCommand,
     IpcEvent,
-    RestrictedClientStateEvent,
     IncomingConnectionEvent,
     PendingConnectionExpiredEvent,
     ConnectedEvent,
     ConnectionRejectedEvent,
     ClientAccessRestrictedEvent,
-    NotificationPrivacy,
     Delivery,
+    ConnectionOrigin,
+    PendingConnectionReasonCode,
 )
 from metor.ui.gui.constants import GuiLimits
 from metor.ui.gui.state import Route
@@ -24,7 +24,7 @@ from metor.ui.gui.state.mailbox import Update
 if TYPE_CHECKING:
     from ..controller import GuiController
 
-CallAction = Literal['accept', 'decline', 'open']
+InvitationAction = Literal['accept', 'decline', 'open']
 
 
 def _safe_label(label: str) -> str:
@@ -38,12 +38,12 @@ def _safe_label(label: str) -> str:
     return (
         label
         if len(label.encode('utf-8')) <= GuiLimits.DEVICE_STRING
-        else 'Incoming Live'
+        else 'Live chat invitation'
     )
 
 
 @dataclass
-class CallNotice:
+class InvitationNotice:
     """Permitted metadata for one request; its handle never changes under a press."""
 
     handle: str
@@ -54,11 +54,11 @@ class CallNotice:
     status: str = ''
 
 
-class IncomingCalls:
-    """Owns bounded call presentation; Core decides every action and privacy grant."""
+class LiveInvitations:
+    """Owns bounded invitation presentation; Core decides every action and privacy grant."""
 
     def __init__(self, controller: 'GuiController') -> None:
-        """Creates an empty per-activation call presentation.
+        """Creates an empty per-activation invitation presentation.
 
         Args:
             controller: Owning public-service GUI controller.
@@ -66,13 +66,12 @@ class IncomingCalls:
             None
         """
         self.controller = controller
-        self.entries: OrderedDict[str, CallNotice] = OrderedDict()
+        self.entries: OrderedDict[str, InvitationNotice] = OrderedDict()
         self.selected: str | None = None
         self.visible = False
         self.revision = 0
         self._snapshot: object = None
-        self._operation: tuple[str, str, CallAction, Route] | None = None
-        self._after_unlock: tuple[str, CallAction, Route] | None = None
+        self._operation: tuple[str, str, InvitationAction, Route] | None = None
         self._opening: tuple[str, Route] | None = None
         self._serial = 0
 
@@ -88,17 +87,20 @@ class IncomingCalls:
         self.selected = None
         self.visible = False
         self._snapshot = None
-        self._after_unlock = self._opening = None
+        self._opening = None
         self._operation = None
         self.revision += 1
 
-    def _add(self, handle: str, peer: str | None, label: str) -> None:
+    def _add(
+        self, handle: str, peer: str | None, label: str, *, notify: bool = True
+    ) -> None:
         """Admits one content-free request while keeping the selected target stable.
 
         Args:
             handle: Exact public per-session authority.
             peer: Permitted public identity, absent when anonymized.
             label: Permitted no-preview display label.
+            notify: Whether a fresh request warrants unsolicited presentation.
         Returns:
             None
         """
@@ -112,14 +114,15 @@ class IncomingCalls:
             if victim is None:
                 return
             self.entries.pop(victim)
-        self.entries[handle] = CallNotice(handle, peer, label)
-        if self.selected is None:
+        self.entries[handle] = InvitationNotice(handle, peer, label)
+        if self.selected is None or self.entries[self.selected].phase == 'ended':
             self.selected = handle
-        self.visible = True
+        if notify:
+            self.visible = True
         self.revision += 1
 
     def observe(self, event: IpcEvent) -> None:
-        """Installs only permitted metadata; unsolicited calls never navigate or focus.
+        """Installs only permitted metadata; unsolicited invitations never navigate or focus.
 
         Args:
             event: Current activation's public Core event.
@@ -127,19 +130,19 @@ class IncomingCalls:
             None
         """
         state = self.controller.state
-        privacy = NotificationPrivacy.SHOW_ALL
         if state.covered:
-            if self.controller.security.restriction is None:
-                return
-            privacy = self.controller.security.notification_privacy
-            if privacy is NotificationPrivacy.OFF:
-                return
+            return
         if isinstance(event, IncomingConnectionEvent) and event.action_handle:
-            anonymous = privacy is NotificationPrivacy.ANONYMIZE or event.onion is None
             self._add(
                 event.action_handle,
-                None if anonymous else event.onion,
-                'Incoming Live' if anonymous else event.alias,
+                event.onion,
+                event.alias,
+                notify=event.origin
+                not in {
+                    ConnectionOrigin.AUTO_RECONNECT,
+                    ConnectionOrigin.GRACE_RECONNECT,
+                    ConnectionOrigin.RETUNNEL,
+                },
             )
         elif isinstance(event, PendingConnectionExpiredEvent) and event.action_handle:
             entry = self.entries.get(event.action_handle)
@@ -148,7 +151,7 @@ class IncomingCalls:
                 self.revision += 1
 
     def show(self, handle: str | None = None) -> None:
-        """Explicitly opens a selected current call surface without accepting it.
+        """Explicitly opens a selected current invitation surface without accepting it.
 
         Args:
             handle: Optional exact entry chosen from another authorized view.
@@ -166,11 +169,15 @@ class IncomingCalls:
                 (key for key, entry in self.entries.items() if entry.phase != 'ended'),
                 self.selected,
             )
-        self.visible = self.selected in self.entries
+        self.visible = (
+            self.selected is not None
+            and self.selected in self.entries
+            and self.entries[self.selected].phase != 'ended'
+        )
         self.revision += 1
 
     def dismiss(self) -> None:
-        """Closes presentation while preserving discoverable current call facts.
+        """Closes presentation while preserving discoverable current invitation facts.
 
         Args:
             None
@@ -188,15 +195,15 @@ class IncomingCalls:
         Returns:
             None
         """
-        handles = list(self.entries)
+        handles = [key for key, entry in self.entries.items() if entry.phase != 'ended']
         if self.selected in handles:
             self.selected = handles[
                 (handles.index(self.selected) + delta) % len(handles)
             ]
             self.revision += 1
 
-    def perform(self, handle: str, action: CallAction) -> bool:
-        """Admits an exact call action or its configured normal unlock continuation.
+    def perform(self, handle: str, action: InvitationAction) -> bool:
+        """Admits an exact invitation action or its configured normal unlock continuation.
 
         Args:
             handle: Handle captured when the action control was built.
@@ -208,15 +215,8 @@ class IncomingCalls:
         entry = self.entries.get(handle)
         if entry is None or entry.phase == 'ended' or self._operation is not None:
             return False
-        if state.covered and (
-            action == 'open' or (action == 'accept' and entry.denied)
-        ):
-            self._after_unlock = (handle, action, controller.security.return_route)
-            state.status = (
-                'Unlock to open Live' if action == 'open' else 'Unlock to accept'
-            )
-            self.dismiss()
-            return True
+        if state.covered:
+            return False
         if action == 'open' and entry.phase == 'accepted':
             self._opening = (handle, state.route)
             controller.refresh_state()
@@ -224,7 +224,7 @@ class IncomingCalls:
         if entry.phase != 'pending' or controller.client is None:
             return False
         self._serial += 1
-        operation = f'calls:{self._serial}'
+        operation = f'live-invitation:{self._serial}'
         client = controller.client
         command = (
             RejectCommand(entry.peer or handle, handle)
@@ -246,7 +246,7 @@ class IncomingCalls:
         Returns:
             bool: Whether this flow consumed the operation result.
         """
-        if not update.operation.startswith('calls:'):
+        if not update.operation.startswith('live-invitation:'):
             return False
         operation, self._operation = self._operation, None
         if operation is None or operation[0] != update.operation:
@@ -258,14 +258,6 @@ class IncomingCalls:
         event = update.event
         if isinstance(event, ClientAccessRestrictedEvent):
             entry.denied, entry.status = True, 'Unlock to accept'
-            if self.controller.state.covered:
-                self._after_unlock = (
-                    handle,
-                    'accept',
-                    self.controller.security.return_route,
-                )
-                self.controller.state.status = 'Unlock to accept'
-                self.dismiss()
         elif isinstance(event, ConnectedEvent):
             entry.phase, entry.status = 'accepted', 'Live accepted'
             if action == 'open':
@@ -302,54 +294,13 @@ class IncomingCalls:
             for entry in self.entries.values()
         )
 
-    def restricted(self, event: RestrictedClientStateEvent) -> None:
-        """Reconciles covered actions using only Core's privacy-projected state.
-
-        Args:
-            event: Current same-client restricted projection.
-        Returns:
-            None
-        """
-        if event.notification_privacy is NotificationPrivacy.OFF:
-            if self.entries:
-                self.clear()
-            return
-        before = self._facts()
-        pending = {
-            entry.action_handle: entry for entry in event.pending if entry.action_handle
-        }
-        anonymous = event.notification_privacy is NotificationPrivacy.ANONYMIZE
-        for handle, source in pending.items():
-            assert handle is not None
-            self._add(
-                handle,
-                None if anonymous else source.onion,
-                'Incoming Live' if anonymous else source.alias,
-            )
-        for handle, entry in self.entries.items():
-            current = pending.get(handle)
-            if current is not None:
-                entry.peer = None if anonymous else current.onion
-                entry.label = (
-                    'Incoming Live' if anonymous else _safe_label(current.alias)
-                )
-                entry.phase = 'pending'
-                if entry.status == 'Checking request…':
-                    entry.status = ''
-            elif handle in event.accepted_handles:
-                entry.phase, entry.status = 'accepted', 'Live accepted'
-            else:
-                entry.phase, entry.status = 'ended', 'Request ended'
-        if self._facts() != before:
-            self.revision += 1
-
     def poll(self) -> bool:
         """Revalidates exact requests after unlock or an unknown outcome before navigation.
 
         Args:
             None
         Returns:
-            bool: Whether the call surface changed.
+            bool: Whether the invitation surface changed.
         """
         controller, state = self.controller, self.controller.state
         snapshot = state.snapshot
@@ -364,13 +315,24 @@ class IncomingCalls:
             if entry.action_handle
         }
         accepted = {
-            entry.call_handle: entry
+            entry.invitation_handle: entry
             for entry in snapshot.live_contexts
-            if entry.call_handle
+            if entry.invitation_handle
         }
         for handle, source in pending.items():
             assert handle is not None
-            self._add(handle, source.onion, source.alias)
+            self._add(
+                handle,
+                source.onion,
+                source.alias,
+                notify=source.reason is PendingConnectionReasonCode.USER_ACCEPT
+                and source.origin
+                not in {
+                    ConnectionOrigin.AUTO_RECONNECT,
+                    ConnectionOrigin.GRACE_RECONNECT,
+                    ConnectionOrigin.RETUNNEL,
+                },
+            )
         for handle, entry in self.entries.items():
             if handle in pending:
                 source = pending[handle]
@@ -385,11 +347,6 @@ class IncomingCalls:
                 )
             else:
                 entry.phase, entry.status = 'ended', 'Request ended'
-        if self._after_unlock is not None:
-            handle, action, origin = self._after_unlock
-            self._after_unlock = None
-            if state.route == origin and (handle in pending or handle in accepted):
-                self.perform(handle, action)
         if self._opening is not None:
             handle, origin = self._opening
             opened = accepted.get(handle)
@@ -403,4 +360,16 @@ class IncomingCalls:
                 state.status = 'Request ended'
         if self._facts() != prior_facts:
             self.revision += 1
+        if (
+            self.selected is not None
+            and self.selected in self.entries
+            and self.entries[self.selected].phase == 'ended'
+        ):
+            current = next(
+                (key for key, entry in self.entries.items() if entry.phase != 'ended'),
+                None,
+            )
+            self.selected = current
+            if current is None:
+                self.visible = False
         return before != self.revision

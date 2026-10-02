@@ -1,5 +1,5 @@
-"""Presentation-only incoming-call flow facade."""
+"""Explicit phone Call presentation and local duplex ownership facade."""
 
-from .flow import IncomingCalls, CallAction
+from .controller import CallActions
 
-__all__ = ['IncomingCalls', 'CallAction']
+__all__ = ['CallActions']

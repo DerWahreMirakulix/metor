@@ -1,11 +1,11 @@
-"""Exact runtime identities for restricted anonymous pending-call actions."""
+"""Exact runtime identities for restricted anonymous pending-invitation actions."""
 
 from dataclasses import dataclass
 import socket
 
 
 @dataclass(frozen=True)
-class PendingCallGrant:
+class PendingInvitationGrant:
     """One requesting session's opaque authority over one pending socket."""
 
     onion: str

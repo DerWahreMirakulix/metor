@@ -114,7 +114,7 @@ class ContextAction(Action):
             self._open_context()
             return True
         handled = bool(super().on_touch_down(touch))
-        if handled:
+        if handled and self in touch.ud:
             self._hold = Clock.schedule_once(
                 self._open_context, GuiLimits.LONG_PRESS_SECONDS
             )

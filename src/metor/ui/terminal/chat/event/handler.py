@@ -16,6 +16,7 @@ from metor.ui.terminal.constants import Constants
 from metor.shared import clean_onion
 
 # Local Package Imports
+from metor.ui.terminal.chat.calls import handle_call_event
 from metor.ui.terminal.chat.event.content import handle_content_event
 from metor.ui.terminal.chat.event.models import BufferedInboxNotification
 from metor.ui.terminal.chat.event.state import handle_state_event
@@ -399,6 +400,8 @@ class EventHandler:
         Returns:
             None
         """
+        if handle_call_event(self, event):
+            return
         if self._voice.handle(event):
             return
         if handle_content_event(self, event):

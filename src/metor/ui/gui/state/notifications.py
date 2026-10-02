@@ -17,7 +17,7 @@ class NoticeKind(str, Enum):
 
     DROP = 'new_drop'
     LIVE = 'new_live'
-    CALL = 'incoming_live'
+    INVITATION = 'incoming_live'
     PENDING = 'pending_live'
     UNSTABLE = 'connection_unstable'
     FALLBACK = 'queued_as_drop'
@@ -48,7 +48,7 @@ class Notice:
 
     @property
     def priority(self) -> int:
-        """Keeps current calls and unresolved outbound actions ahead of informational churn.
+        """Keeps current invitations and unresolved outbound actions ahead of informational churn.
 
         Args:
             None
@@ -57,7 +57,7 @@ class Notice:
         """
         return (
             0
-            if self.kind is NoticeKind.CALL
+            if self.kind is NoticeKind.INVITATION
             else 1
             if self.kind is NoticeKind.PENDING
             else 2

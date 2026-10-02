@@ -1,4 +1,4 @@
-"""Durable reclamation of disposable recordings and interrupted LIVE producers."""
+"""Protected Voice draft preservation and explicit discard cleanup."""
 
 import json
 from typing import Callable
@@ -34,8 +34,8 @@ class ProducerCleanup:
             repository: Durable claims and deletion journal.
             messages: Canonical receipt owner.
             blobs: Active encrypted object store.
-            cancel: Existing exact DROP cancellation operation.
-            finalize: Accepted-prefix LIVE finalization operation.
+            cancel: Existing exact local draft cancellation operation.
+            finalize: Local accepted-prefix finalization operation.
         Returns:
             None
         """
@@ -72,30 +72,28 @@ class ProducerCleanup:
         return (anchor, *chunks)
 
     def reclaim(self, item: VoiceProducerItem) -> bool:
-        """Reclaims a draft or freezes LIVE without guessing uncertain outcomes.
-
-        Args:
-            item: Durable claim belonging to a revoked producer.
-        Returns:
-            bool: True only after ownership transfer or complete cleanup.
-        """
+        """Freezes lost capture locally, preserving an unsent protected draft."""
         record = self._messages.get_voice_payload(
             item.onion, item.msg_id, MessageDirection.OUT
         )
-        if item.delivery is Delivery.LIVE:
-            self.repository.mark_interrupted(item)
-            if record is not None and not self._finalize(item.onion, item.msg_id):
-                return False
+        if record is not None and record.status != MessageStatus.DRAFT.value:
             self.release_transferred(item)
             return True
+        if record is None:
+            return self.discard(item)
+        self.repository.mark_interrupted(item)
+        return self._finalize(item.onion, item.msg_id)
+
+    def discard(self, item: VoiceProducerItem) -> bool:
+        """Explicitly discards an unpublished draft with retryable blob cleanup."""
+        record = self._messages.get_voice_payload(
+            item.onion, item.msg_id, MessageDirection.OUT
+        )
         payload = item.cleanup_payload
         if record is not None:
             if record.status != MessageStatus.DRAFT.value:
-                # A committed receipt wins over a lost Commit response.
                 self.release_transferred(item)
                 return True
-            if record.delivery != Delivery.DROP.value:
-                return False
             payload = record.payload
             self._blob_ids(payload)
             self.repository.prepare_cleanup(item, payload)
@@ -185,8 +183,22 @@ class ProducerCleanup:
             duration_ms=metadata.get('duration_ms'),
         )
 
+    def cleanup_pending(self, item: VoiceProducerItem) -> bool:
+        """Reports unfinished freezing/deletion rather than retained review ownership."""
+        if item.cleanup_payload is not None:
+            return True
+        record = self._messages.get_voice_payload(
+            item.onion, item.msg_id, MessageDirection.OUT
+        )
+        if record is None:
+            return bool(item.allocated_ids)
+        return record.status == MessageStatus.DRAFT.value and not (
+            isinstance(metadata := json.loads(record.payload), dict)
+            and metadata.get('finalized') is True
+        )
+
     def transferred(self, item: VoiceProducerItem) -> bool:
-        """Reconciles successful commit/finalize without cancelling pending bytes.
+        """Reconciles explicit publication without treating finalization as Send.
 
         Args:
             item: Current producer claim after a domain operation.
@@ -198,7 +210,4 @@ class ProducerCleanup:
         )
         if record is None:
             return False
-        if item.delivery is Delivery.DROP:
-            return record.status != MessageStatus.DRAFT.value
-        metadata = json.loads(record.payload)
-        return isinstance(metadata, dict) and metadata.get('finalized') is True
+        return record.status != MessageStatus.DRAFT.value

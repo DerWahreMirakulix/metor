@@ -70,6 +70,7 @@ class ActionSheet(ModalView):
         self._keyboard_top = 0.0
         self._generation = controller.state.generation
         self._snapshot = id(controller.state.snapshot)
+        self._busy = controller.state.busy
         self.body = Panel(orientation='vertical', padding='24dp', spacing='16dp')
         self.add_widget(self.body)
         self.column = BoxLayout()
@@ -100,10 +101,10 @@ class ActionSheet(ModalView):
         )
         header.add_widget(IconAction('x', 'Close', self.dismiss))
         self.header = header
-        self.call_indicator = IconAction(
-            'bell', 'Incoming Live', self._open_call, tone='live', badge=True
+        self.invitation_indicator = IconAction(
+            'bell', 'Incoming Live', self._open_invitation, tone='live', badge=True
         )
-        self._update_call_indicator()
+        self._update_invitation_indicator()
         self.body.add_widget(header)
         self.scroll = ScrollView(do_scroll_x=False)
         self.column = BoxLayout(
@@ -260,15 +261,20 @@ class ActionSheet(ModalView):
         sheet = cls.current
         if sheet is None:
             return
-        sheet._update_call_indicator()
+        sheet._update_invitation_indicator()
         state = sheet.controller.state
         if state.covered or state.generation != sheet._generation:
             sheet.dismiss(animation=False)
-        elif sheet._snapshot != id(state.snapshot) or (
-            sheet._eligibility_revision is not None
-            and sheet._eligibility_key != sheet._eligibility_revision()
+        elif (
+            sheet._snapshot != id(state.snapshot)
+            or sheet._busy != state.busy
+            or (
+                sheet._eligibility_revision is not None
+                and sheet._eligibility_key != sheet._eligibility_revision()
+            )
         ):
             sheet._snapshot = id(state.snapshot)
+            sheet._busy = state.busy
             sheet._eligibility_key = (
                 sheet._eligibility_revision() if sheet._eligibility_revision else None
             )
@@ -276,7 +282,7 @@ class ActionSheet(ModalView):
                 sheet._build()
                 sheet.cancel.focus = True
 
-    def _update_call_indicator(self) -> None:
+    def _update_invitation_indicator(self) -> None:
         """Makes incoming activity reachable above the native modal without stealing focus.
 
         Args:
@@ -285,14 +291,15 @@ class ActionSheet(ModalView):
             None
         """
         visible = any(
-            item.phase != 'ended' for item in self.controller.calls.entries.values()
+            item.phase != 'ended'
+            for item in self.controller.live_invitations.entries.values()
         )
-        if visible and self.call_indicator.parent is None:
-            self.header.add_widget(self.call_indicator, index=1)
-        elif not visible and self.call_indicator.parent is not None:
-            self.header.remove_widget(self.call_indicator)
+        if visible and self.invitation_indicator.parent is None:
+            self.header.add_widget(self.invitation_indicator, index=1)
+        elif not visible and self.invitation_indicator.parent is not None:
+            self.header.remove_widget(self.invitation_indicator)
 
-    def _open_call(self) -> None:
+    def _open_invitation(self) -> None:
         """Cancels this modal before the user's explicit switch to an incoming request.
 
         Args:
@@ -301,7 +308,7 @@ class ActionSheet(ModalView):
             None
         """
         self.dismiss(animation=False)
-        self.controller.calls.show()
+        self.controller.live_invitations.show()
 
 
 def confirm(
