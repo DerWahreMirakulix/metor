@@ -122,7 +122,7 @@ class ResendActions:
             or 'message_outcome' not in controller.state.capabilities
         ):
             return False
-        return controller.submit(
+        admitted = controller.submit(
             'resend:check:' + worker.msg_id,
             lambda: worker.client.request(
                 GetMessageOutcomeCommand(
@@ -130,7 +130,14 @@ class ResendActions:
                 ),
                 MessageOutcomeEvent,
             ),
+            background=True,
         )
+        if admitted:
+            self.pending = True
+            self.state = 'checking'
+            self.status = 'Checking new Drop result…'
+            self.revision += 1
+        return admitted
 
     def discard(self) -> bool:
         """Cancels only a read-confirmed uncommitted new Voice copy, never its original source.
@@ -159,6 +166,9 @@ class ResendActions:
         )
         if admitted:
             self.pending = True
+            self.state = 'discarding'
+            self.status = 'Discarding unsent copy…'
+            self.revision += 1
         return admitted
 
     def cancel(self) -> None:

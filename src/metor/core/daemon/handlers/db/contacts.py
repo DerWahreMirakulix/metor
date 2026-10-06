@@ -145,8 +145,8 @@ class DatabaseCommandContactsMixin(DatabaseCommandHandlerSupportMixin):
                 create_event(
                     EventType.RENAME_SUCCESS,
                     {
-                        'old_alias': cmd.old_alias,
-                        'new_alias': cmd.new_alias,
+                        'old_alias': str(result.params['old_alias']),
+                        'new_alias': str(result.params['new_alias']),
                         'onion': str(result.params.get('onion') or '') or None,
                     },
                 )

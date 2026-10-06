@@ -99,7 +99,6 @@ class RootPanel(BoxLayout):
         )
         self.pager.add_widget(self.previous)
         self.pager.add_widget(self.next)
-        self.status = Label('', role='support', tone='info')
         self.new = Action(
             'New Drop' if self.delivery is Delivery.DROP else 'Start Live',
             partial(navigate, Route('V11', delivery=self.delivery)),
@@ -232,11 +231,6 @@ class RootPanel(BoxLayout):
             self.next.disabled = (page + 1) * GuiLimits.PAGE_ITEMS >= len(rows)
         elif self.pager.parent is not None:
             self.remove_widget(self.pager)
-        self.status.text = state.status
-        if state.status and self.status.parent is None:
-            self.add_widget(self.status, index=1)
-        elif not state.status and self.status.parent is not None:
-            self.remove_widget(self.status)
 
 
 def root_view(

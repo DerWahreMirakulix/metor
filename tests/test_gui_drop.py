@@ -15,15 +15,21 @@ from metor.core.api import (
     ClearMessagesCommand,
     GetGuiPreferencesCommand,
     GuiPreferencesEvent,
+    MessageEntry,
     MessageDirectionCode,
     MessageStatusCode,
+    MessagesDataEvent,
     SetGuiPreferencesCommand,
+    TextContent,
+    VoiceContent,
 )
 from metor.data import MessageDirection, MessageStatus
 from metor.ui.gui.runtime import GuiController, conversation_rows
+from metor.ui.gui.constants import GuiLimits
 from metor.ui.gui.runtime.transcript import TranscriptItem
 from metor.ui.gui.state import Route
 from metor.ui.gui.state.media import PlaybackTarget
+from metor.ui.gui.state.mailbox import Update
 
 
 class DropCoreTests(unittest.TestCase):
@@ -140,6 +146,88 @@ class DropCoreTests(unittest.TestCase):
         self.assertIsNotNone(self.gui.messages)
         self.assertEqual(len(self.gui.messages.messages), 1)
         self.assertEqual(self.gui.messages.messages[0].content.text, 'first drop')
+
+    def test_sending_from_older_history_returns_to_confirmed_newest_drop(self) -> None:
+        """Actual Core acceptance refreshes the latest page instead of reusing its old cursor."""
+        self.item('older', MessageDirection.IN, MessageStatus.READ)
+        self.item('more-recent', MessageDirection.IN, MessageStatus.READ)
+        route = Route('V08', self.h.onion, Delivery.DROP)
+        self.gui.navigate(route)
+        for _ in range(12):
+            if self.gui._worker is not None:
+                self.gui._worker.join(5)
+            self.gui.poll()
+        self.gui.archive.before = MessageDirectionCode.IN, 'more-recent'
+        self.gui.archive.needed = True
+        for _ in range(12):
+            if self.gui._worker is not None:
+                self.gui._worker.join(5)
+            self.gui.poll()
+        self.assertEqual(
+            [item.msg_id for item in self.gui.messages.messages], ['older']
+        )
+        self.gui.state.set_draft(self.h.onion, Delivery.DROP, 'new from older history')
+        self.gui.send_text(self.h.onion, Delivery.DROP)
+        for _ in range(12):
+            if self.gui._worker is not None:
+                self.gui._worker.join(5)
+            self.gui.poll()
+            if self.gui.messages is not None and any(
+                item.content.text == 'new from older history'
+                for item in self.gui.messages.messages
+            ):
+                break
+        self.assertEqual(self.gui.state.route, route)
+        self.assertIsNone(self.gui.archive.before)
+        self.assertNotIn((self.h.onion, Delivery.DROP), self.gui.state.drafts)
+        self.assertFalse(self.gui.state.snapshot.live_contexts)
+        self.assertIn(
+            'new from older history',
+            [item.content.text for item in self.gui.messages.messages],
+        )
+
+    def test_archive_handoff_releases_pending_ui_copy_and_uses_core_receipt(
+        self,
+    ) -> None:
+        """A real stored Delivered row replaces cached Pending without deleting durable text."""
+        self.h.messages.queue_message(
+            self.h.onion,
+            MessageDirection.OUT,
+            Delivery.DROP,
+            ContentType.TEXT,
+            'confirmed body',
+            MessageStatus.DELIVERED,
+            'archived-confirmed',
+        )
+        self.assertTrue(
+            self.gui.transcript.admit(
+                TranscriptItem(
+                    self.h.onion,
+                    Delivery.DROP,
+                    MessageDirectionCode.OUT,
+                    'archived-confirmed',
+                    'confirmed body',
+                    status=MessageStatusCode.PENDING,
+                )
+            )
+        )
+        self.gui.navigate(Route('V08', self.h.onion, Delivery.DROP))
+        for _ in range(12):
+            if self.gui._worker is not None:
+                self.gui._worker.join(5)
+            self.gui.poll()
+            if self.gui.messages is not None and self.gui.messages.messages:
+                break
+        self.assertIsNotNone(self.gui.messages)
+        row = self.gui.messages.messages[0]
+        self.assertEqual(row.msg_id, 'archived-confirmed')
+        self.assertEqual(row.status, MessageStatusCode.DELIVERED)
+        self.assertEqual(row.content.text, 'confirmed body')
+        self.assertFalse(self.gui.transcript.items)
+        records = self.h.messages.get_chat_history(self.h.onion)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].msg_id, 'archived-confirmed')
+        self.assertEqual(records[0].payload, 'confirmed body')
 
     def test_lost_delete_result_reads_archive_presence_with_exact_direction(
         self,
@@ -329,6 +417,194 @@ class DropCoreTests(unittest.TestCase):
             [(row.peer, row.pending, row.unseen) for row in rows],
             [(self.h.onion, 1, 0)],
         )
+
+
+class DropArchivePresentationTests(unittest.TestCase):
+    """Bounded duplicate presentation is released only by an exact available Core text row."""
+
+    def setUp(self) -> None:
+        """Creates an inert controller with an exact current DROP archive request."""
+        self.gui = GuiController(
+            FrontendLaunchContext('fixture', Mock()), simulator=True
+        )
+        self.addCleanup(self.gui.close)
+        self.peer = 'archive-peer'
+        self.gui.state.covered = False
+        self.gui.state.route = Route('V08', self.peer, Delivery.DROP)
+        self.operation = 'archive:1:' + self.peer
+        self.gui.archive._operation = self.operation
+
+    def cached(
+        self,
+        identity: str,
+        *,
+        peer: str | None = None,
+        delivery: Delivery = Delivery.DROP,
+        direction: MessageDirectionCode = MessageDirectionCode.OUT,
+        status: MessageStatusCode = MessageStatusCode.PENDING,
+        text: str | None = 'confirmed',
+    ) -> None:
+        """Admits one confirmed runtime copy under its full message identity."""
+        self.assertTrue(
+            self.gui.transcript.admit(
+                TranscriptItem(
+                    peer or self.peer,
+                    delivery,
+                    direction,
+                    identity,
+                    text=text,
+                    status=status,
+                )
+            )
+        )
+
+    def install(self, entries: list[MessageEntry], **fields: object) -> None:
+        """Installs one typed page through the actual exact archive owner."""
+        event = MessagesDataEvent(entries, 'archive', self.peer, **fields)
+        self.assertTrue(
+            self.gui.archive.install(
+                Update(self.gui.state.generation, self.operation, event)
+            )
+        )
+
+    def row(
+        self, identity: str, status: MessageStatusCode = MessageStatusCode.DELIVERED
+    ) -> MessageEntry:
+        """Returns one positively stored outgoing text row."""
+        return MessageEntry(
+            MessageDirectionCode.OUT,
+            status,
+            Delivery.DROP,
+            TextContent('confirmed'),
+            'timestamp',
+            identity,
+        )
+
+    def test_current_actual_text_releases_only_matching_published_own_identity(
+        self,
+    ) -> None:
+        """Metadata, absent rows, drafts, other peers and directions do not release recent text."""
+        self.cached('matched')
+        self.cached('recent')
+        self.cached('matched', direction=MessageDirectionCode.IN)
+        self.cached('matched', delivery=Delivery.LIVE)
+        self.cached('matched', peer='other-peer')
+        self.cached('voice', text=None)
+        self.cached('review', status=MessageStatusCode.DRAFT)
+        self.cached('missing-id')
+        self.install([])
+        self.assertEqual(len(self.gui.transcript.items), 8)
+        rows = [
+            self.row('matched'),
+            self.row('review', MessageStatusCode.DRAFT),
+            replace(self.row('voice'), content=VoiceContent('blob', 'codec', 1)),
+            replace(self.row('missing-id'), msg_id=None),
+        ]
+        self.install(rows)
+        self.assertEqual(len(self.gui.transcript.items), 7)
+        self.assertNotIn(
+            (self.peer, Delivery.DROP, MessageDirectionCode.OUT, 'matched'),
+            self.gui.transcript.items,
+        )
+        self.assertEqual(
+            self.gui.messages.messages[0].status, MessageStatusCode.DELIVERED
+        )
+        self.assertIn(
+            (self.peer, Delivery.DROP, MessageDirectionCode.OUT, 'recent'),
+            self.gui.transcript.items,
+        )
+
+    def test_unavailable_wrong_request_and_invalidated_read_retain_recent_row(
+        self,
+    ) -> None:
+        """Only the current available page can release a recent confirmed copy."""
+        self.cached('recent')
+        self.install([self.row('recent')], page_available=False)
+        event = MessagesDataEvent([self.row('recent')], 'archive', self.peer)
+        self.gui.archive.install(
+            Update(self.gui.state.generation, 'archive:old', event)
+        )
+        self.gui._operations.invalidate_reads()
+        self.gui.archive.install(
+            Update(self.gui.state.generation, self.operation, event, read_epoch=0)
+        )
+        self.assertEqual(len(self.gui.transcript.items), 1)
+        self.assertTrue(self.gui.archive.needed)
+        self.install([self.row('recent')])
+        self.assertFalse(self.gui.transcript.items)
+
+    def test_matching_archive_preserves_more_advanced_cached_read_receipt(self) -> None:
+        """Cache release retains a known Read receipt when the archive reply was captured earlier."""
+        self.cached('recent', status=MessageStatusCode.READ)
+        self.install([self.row('recent')])
+        self.assertFalse(self.gui.transcript.items)
+        self.assertEqual(self.gui.messages.messages[0].status, MessageStatusCode.READ)
+
+    def test_held_archive_does_not_downgrade_visible_receipts_after_cache_handoff(
+        self,
+    ) -> None:
+        """Archived positive receipts survive an older reply after runtime copies are gone."""
+        self.install(
+            [
+                self.row('read', MessageStatusCode.READ),
+                self.row('delivered', MessageStatusCode.DELIVERED),
+                replace(
+                    self.row('inbound-read', MessageStatusCode.READ),
+                    direction=MessageDirectionCode.IN,
+                ),
+            ]
+        )
+        self.assertFalse(self.gui.transcript.items)
+        self.install(
+            [
+                self.row('read', MessageStatusCode.PENDING),
+                self.row('delivered', MessageStatusCode.PENDING),
+                replace(
+                    self.row('inbound-read', MessageStatusCode.UNREAD),
+                    direction=MessageDirectionCode.IN,
+                ),
+            ]
+        )
+        self.assertEqual(
+            [entry.status for entry in self.gui.messages.messages],
+            [
+                MessageStatusCode.READ,
+                MessageStatusCode.DELIVERED,
+                MessageStatusCode.READ,
+            ],
+        )
+
+    def test_many_confirmed_archived_rows_restore_bounded_presentation_capacity(
+        self,
+    ) -> None:
+        """Repeated confirmed DROPs do not permanently exhaust the runtime transcript budget."""
+        for index in range(GuiLimits.LIVE_ITEMS):
+            self.cached('confirmed-' + str(index))
+        self.assertEqual(self.gui.transcript.capacity()[0], 0)
+        self.assertFalse(
+            self.gui.transcript.admit(
+                TranscriptItem(
+                    self.peer,
+                    Delivery.DROP,
+                    MessageDirectionCode.OUT,
+                    'next',
+                    'confirmed',
+                )
+            )
+        )
+        for offset in range(0, GuiLimits.LIVE_ITEMS, GuiLimits.PAGE_ITEMS):
+            self.install(
+                [
+                    self.row('confirmed-' + str(index))
+                    for index in range(
+                        offset, min(offset + GuiLimits.PAGE_ITEMS, GuiLimits.LIVE_ITEMS)
+                    )
+                ]
+            )
+        self.assertFalse(self.gui.transcript.items)
+        self.assertEqual(self.gui.transcript.bytes, 0)
+        self.assertEqual(self.gui.transcript.capacity()[0], GuiLimits.LIVE_ITEMS)
+        self.cached('next')
 
 
 if __name__ == '__main__':

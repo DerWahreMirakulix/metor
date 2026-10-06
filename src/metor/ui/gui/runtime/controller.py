@@ -1,19 +1,14 @@
-"""Serial bounded SDK operations and generation-safe UI result installation."""
+"""Bounded SDK operations and generation-safe UI result installation."""
 
 import threading
 from collections.abc import Callable
-from dataclasses import replace
 
 from metor.client import (
-    FrontendBootstrapError,
     FrontendLaunchContext,
     FrontendProfileManagement,
     FrontendSelection,
     FrontendSelectionKind,
-    IpcDisconnectedError,
-    IpcTimeoutError,
     MetorClient,
-    MetorRequestRejectedError,
 )
 from metor.core.api import (
     DaemonLockedEvent,
@@ -31,7 +26,6 @@ from metor.core.api import (
     VoiceOwnerRegisteredEvent,
 )
 from metor.ui.gui.constants import GuiLimits
-from metor.ui.gui.launcher import report_worker_failure
 from metor.ui.gui.state import GuiState, Route
 from metor.ui.gui.state.mailbox import Mailbox, Update
 
@@ -47,6 +41,7 @@ from .interaction import Interactions
 from .live import LiveActions
 from .live_invitation import LiveInvitations
 from .notifications import Notifications
+from .operations import OperationScheduler
 from .pages import ArchivePages, InventoryPages
 from .playback import PlaybackController
 from .preferences import PreferenceBridge
@@ -93,10 +88,7 @@ class GuiController:
         self.history = ActivityHistory(self)
         self.security = SecurityController(self)
         self._worker: threading.Thread | None = None
-        self._worker_background = False
-        self._deferred_work: tuple[int, str, Callable[[], IpcEvent | None]] | None = (
-            None
-        )
+        self._operations = OperationScheduler(self.mailbox, debug=context.debug)
         self._guard = threading.Lock()
         self._refresh_needed: bool = False
         self._messages_needed: bool = False
@@ -227,104 +219,75 @@ class GuiController:
         *,
         background: bool = False,
     ) -> bool:
-        """Admits one operation; double activation cannot enqueue duplicates.
+        """Admits one foreground action independently of a bounded background read.
 
         Args:
             operation: Stable operation/route identity.
             work: Worker callable using a captured client and target.
-            background: Read-only restricted refresh that must not replace auth focus.
+            background: Read-only projection that never owns foreground busy state.
         Returns:
             bool: Whether this exact operation was admitted.
         """
         with self._guard:
-            if self.purge.active:
-                return False
             if (
-                not background
-                and not self.state.busy
-                and operation not in self._unknown_actions
-                and self._deferred_work is None
-                and self._worker_background
-                and self._worker is not None
-                and self._worker.is_alive()
-            ):
-                self._deferred_work = (self.state.generation, operation, work)
-                self.state.busy = True
-                return True
-            if (
-                operation in self._unknown_actions
+                self.purge.active
+                or operation in self._unknown_actions
                 or self.state.busy
-                or (self._worker is not None and self._worker.is_alive())
             ):
                 return False
-            generation = self.state.generation
-            self._worker_background = background
+            worker = self._operations.admit(
+                self.state.generation, operation, work, background=background
+            )
+            if worker is None:
+                return False
+            self._worker = worker
             if not background:
                 self.state.busy = True
-
-            def run() -> None:
-                """Executes one bounded SDK request off the GUI loop.
-
-                Args:
-                    None
-                Returns:
-                    None
-                """
-                try:
-                    event = work()
-                    update = Update(generation, operation, event)
-                    if event is None and (
-                        operation == 'bootstrap' or operation.startswith('A')
-                    ):
-                        update = Update(
-                            generation,
-                            operation,
-                            status=(
-                                'Profile opening was cancelled or rejected.'
-                                if operation == 'bootstrap'
-                                else 'Operation could not be confirmed'
-                            ),
-                        )
-                except MetorRequestRejectedError as exc:
-                    update = Update(
-                        generation,
-                        operation,
-                        exc.event,
-                        status='Operation was rejected',
-                    )
-                except FrontendBootstrapError as exc:
-                    update = Update(generation, operation, status=str(exc))
-                except IpcTimeoutError:
-                    update = Update(
-                        generation,
-                        operation,
-                        status='Connection timed out. Retry opening the profile.',
-                    )
-                except IpcDisconnectedError:
-                    update = Update(
-                        generation,
-                        operation,
-                        status='Connection lost. Retry opening the profile.',
-                    )
-                except Exception as exc:  # noqa: BLE001 - contain worker failures
-                    if self.context.debug:
-                        report_worker_failure(exc)
-                    update = Update(
-                        generation,
-                        operation,
-                        status=(
-                            'Profile opening failed. Retry or choose another profile.'
-                            if operation == 'bootstrap'
-                            else 'Operation could not be confirmed'
-                        ),
-                    )
-                self.mailbox.put(replace(update, background=background))
-
-            self._worker = threading.Thread(
-                target=run, name='metor-gui-operation', daemon=True
-            )
-            self._worker.start()
             return True
+
+    def read_is_current(self, update: Update) -> bool:
+        """Checks whether a projection predates a confirmed or admitted mutation.
+
+        Args:
+            update: Typed background response or unsolicited current event.
+        Returns:
+            bool: Whether this activation can install its projection.
+        """
+        return (
+            update.generation == self.state.generation
+            and self._operations.read_is_current(update)
+        )
+
+    def _superseded_projection(self, update: Update) -> bool:
+        """Retries obsolete projection reads while retaining exact outcome and handoff facts.
+
+        Args:
+            update: Generation-valid operation completion.
+        Returns:
+            bool: Whether a newer mutation superseded this projection.
+        """
+        if self.read_is_current(update):
+            return False
+        if update.operation == 'snapshot':
+            current = self.state.snapshot
+            if (
+                isinstance(update.event, RuntimeSnapshotEvent)
+                and current is not None
+                and current.epoch != update.event.epoch
+            ):
+                return False
+            self._refresh_needed = True
+            return True
+        if update.operation.startswith('archive:'):
+            self.archive.needed = True
+            return True
+        if update.operation.startswith('inventory-page:'):
+            self.inventory.needed = True
+            return True
+        if update.operation == 'core-settings:read':
+            self.core_settings.refresh_needed = True
+            return True
+        return False
 
     def open_profile(self) -> bool:
         """Starts deferred graphical profile activation.
@@ -444,6 +407,31 @@ class GuiController:
         self._refresh_needed = True
         self._messages_needed = True
 
+    def _poll_snapshot(self) -> None:
+        """Admits one coalesced snapshot when its fair read turn becomes available."""
+        if (
+            self._refresh_needed
+            and not self.state.covered
+            and not self.state.busy
+            and self.client is not None
+        ):
+            if self.submit('snapshot', self.client.runtime_snapshot, background=True):
+                self._refresh_needed = False
+
+    def _poll_archive(self) -> None:
+        """Polls the current archive and its coalesced explicit-mutation refresh flag."""
+        self.archive.poll()
+        if (
+            self._messages_needed
+            and not self.state.busy
+            and (
+                self.state.route.peer is None
+                or self.state.route.delivery is not Delivery.DROP
+                or self.load_messages()
+            )
+        ):
+            self._messages_needed = False
+
     def command(
         self, action: str, command: IpcCommand, expected: type[IpcEvent]
     ) -> bool:
@@ -489,8 +477,11 @@ class GuiController:
             update = self.mailbox.take()
             if update is None:
                 break
+            foreground_completed = self._operations.complete(update)
             if update.generation != self.state.generation:
                 continue
+            if foreground_completed:
+                self.state.busy = False
             changed = True
             if update.event is not None and self.purge.observe(
                 update.generation, update.event
@@ -498,6 +489,26 @@ class GuiController:
                 self.purge.poll()
                 if self.purge.active:
                     return True
+                continue
+            if update.event is not None and (
+                (
+                    isinstance(update.event, RuntimeStateChangedEvent)
+                    and update.event.scope != 'messages'
+                )
+                or update.event.event_type
+                in {
+                    EventType.CONTACT_ADDED,
+                    EventType.CONTACT_REMOVED,
+                    EventType.CONTACT_DOWNGRADED,
+                    EventType.CONTACT_REMOVED_DOWNGRADED,
+                    EventType.CONTACTS_CLEARED,
+                    EventType.ALIAS_RENAMED,
+                    EventType.RENAME_SUCCESS,
+                    EventType.PEER_PROMOTED,
+                }
+            ):
+                self._operations.invalidate_reads()
+            if self._superseded_projection(update):
                 continue
             if self.device.install(update):
                 continue
@@ -528,22 +539,6 @@ class GuiController:
                 self.close()
                 self.state.status = 'Connection lost. Unsent drafts were not restored. Open profile to reconnect.'
                 continue
-            if (
-                not update.background
-                and not update.operation.startswith('voice-')
-                and update.operation
-                not in (
-                    'event',
-                    'status',
-                    'inventory',
-                    'capabilities',
-                    'voice_owner',
-                    'playback',
-                    'playback-done',
-                    'security:state',
-                )
-            ):
-                self.state.busy = False
             covered_status = self.state.status
             if self.profiles.install(update):
                 continue
@@ -673,52 +668,37 @@ class GuiController:
             self.close()
             self.state.status = 'Updating state failed. Open profile to reconnect.'
             changed = True
-        if self._deferred_work is not None and (
-            self._worker is None or not self._worker.is_alive()
-        ):
-            generation, operation, work = self._deferred_work
-            self._deferred_work = None
-            if generation == self.state.generation:
-                self.state.busy = False
-                self.submit(operation, work)
-        if (
-            self._refresh_needed
-            and not self.state.covered
-            and not self.state.busy
-            and self.client is not None
-        ):
-            client = self.client
-            if self.submit('snapshot', client.runtime_snapshot, background=True):
-                self._refresh_needed = False
+        if self._operations.foreground_pending(self.state.generation):
+            self.state.busy = True
         self.security.poll()
-        self.preferences.poll()
-        self.core_settings.poll()
-        self.history.poll()
-        self.profiles.poll()
+        # Exact uncertain-action readbacks precede general projection refreshes.
+        # Continuous state notifications must not prevent their confirmation.
+        self.contacts.poll()
+        self.text.poll()
         self.resend.poll()
         self.receipts.poll()
-        self.text.poll()
         self.voice.review_actions.poll()
         self.playback.poll()
         self.handoff.poll()
-        self.archive.poll()
-        self.inventory.poll()
-        self.contacts.poll()
         self.drop.poll()
         self.live.poll()
         changed = self.notifications.poll() or changed
         changed = self.live_invitations.poll() or changed
-        changed = self.calls.poll() or changed
-        if (
-            self._messages_needed
-            and not self.state.busy
-            and (
-                self.state.route.peer is None
-                or self.state.route.delivery is not Delivery.DROP
-                or self.load_messages()
+        changed = (
+            self._operations.poll_reads(
+                (
+                    self._poll_snapshot,
+                    self.preferences.poll,
+                    self.core_settings.poll,
+                    self.history.poll,
+                    self.profiles.poll,
+                    self._poll_archive,
+                    self.inventory.poll,
+                    self.calls.poll,
+                )
             )
-        ):
-            self._messages_needed = False
+            or changed
+        )
         return changed or initially_covered != self.state.covered
 
     def close(
@@ -759,7 +739,7 @@ class GuiController:
             client, self.client = self.client, None
             owner, self.voice_owner.token = self.voice_owner.token, None
             self.state.abandon()
-            self._deferred_work = None
+            self._operations.invalidate_reads()
         self.messages = None
         self.preferences = PreferenceBridge(self)
         self.core_settings = CoreSettings(self)

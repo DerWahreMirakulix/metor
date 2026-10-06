@@ -15,11 +15,18 @@ from metor.core.api import (
     DropQueuedEvent,
     TextRejectedEvent,
     MessageOperationReason,
+    MessageOutcomeEvent,
+    GetMessageOutcomeCommand,
+    DropsDisabledEvent,
+    MessagesDataEvent,
+    MessageEntry,
+    TextContent,
 )
 from metor.ui.gui.constants import GuiLimits
 from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.runtime.transcript import TranscriptItem
 from metor.ui.gui.state.mailbox import Update
+from metor.ui.gui.state import Route
 
 
 class TextAdmissionTests(unittest.TestCase):
@@ -75,7 +82,9 @@ class TextAdmissionTests(unittest.TestCase):
                     'other', Delivery.LIVE, MessageDirectionCode.IN, 'existing'
                 )
             )
-            self.gui.send_text('peer', Delivery.LIVE)
+            for delivery in (Delivery.LIVE, Delivery.DROP):
+                self.gui.state.set_draft('peer', delivery, 'keep the exact text')
+                self.gui.send_text('peer', delivery)
         self.gui.command.assert_not_called()
         self.assertEqual(self.gui.text.operations, {})
         self.assertIn(('peer', Delivery.LIVE), self.gui.state.drafts)
@@ -93,6 +102,163 @@ class TextAdmissionTests(unittest.TestCase):
             self.gui.state.drafts[('peer', Delivery.DROP)], 'the next draft'
         )
         self.assertFalse(self.gui.text.operations)
+
+    def test_confirmed_drop_is_immediately_presented_without_clearing_latest_history(
+        self,
+    ) -> None:
+        """Core-positive acceptance appends one exact local row while the existing page stays visible."""
+        self.gui.state.route = Route('V08', 'peer', Delivery.DROP)
+        prior = MessagesDataEvent(
+            [
+                MessageEntry(
+                    MessageDirectionCode.IN,
+                    MessageStatusCode.READ,
+                    Delivery.DROP,
+                    TextContent('earlier message'),
+                    '2026-10-06',
+                    'earlier',
+                )
+            ],
+            'Peer',
+            'peer',
+        )
+        self.gui.messages = prior
+        self.gui.state.set_draft('peer', Delivery.DROP, 'new message')
+        self.gui.send_text('peer', Delivery.DROP)
+        action = next(iter(self.gui.text.operations))
+        identity = action.removeprefix('A11:')
+        self.assertFalse(self.gui.transcript.items)
+        self.gui.text.install(Update(0, action, DropQueuedEvent('Peer', 'peer')))
+        self.assertIs(self.gui.messages, prior)
+        row = self.gui.transcript.items[
+            ('peer', Delivery.DROP, MessageDirectionCode.OUT, identity)
+        ]
+        self.assertEqual(row.text, 'new message')
+        self.assertEqual(row.status, MessageStatusCode.PENDING)
+        self.assertNotIn(('peer', Delivery.DROP), self.gui.state.drafts)
+
+    def test_confirmed_drop_returns_older_archive_to_latest_without_navigation(
+        self,
+    ) -> None:
+        """An accepted new message cannot remain behind the previously selected page cursor."""
+        route = Route('V08', 'peer', Delivery.DROP)
+        self.gui.state.route = route
+        self.gui.archive.before = MessageDirectionCode.IN, 'oldest-on-older-page'
+        self.gui.state.set_draft('peer', Delivery.DROP, 'newest message')
+        self.gui.send_text('peer', Delivery.DROP)
+        action = next(iter(self.gui.text.operations))
+        self.gui.text.install(Update(0, action, DropQueuedEvent('Peer', 'peer')))
+        self.assertEqual(self.gui.state.route, route)
+        self.assertIsNone(self.gui.archive.before)
+        self.assertTrue(self.gui.archive.needed)
+        self.assertNotIn(('peer', Delivery.DROP), self.gui.state.drafts)
+
+    def test_accepting_background_peer_preserves_visible_archive_cursor(self) -> None:
+        """A late receipt cannot navigate away from the peer currently being read."""
+        self.gui.state.route = Route('V08', 'other', Delivery.DROP)
+        cursor = MessageDirectionCode.IN, 'reading-history'
+        self.gui.archive.before = cursor
+        self.gui.state.set_draft('peer', Delivery.DROP, 'background message')
+        self.gui.send_text('peer', Delivery.DROP)
+        action = next(iter(self.gui.text.operations))
+        self.gui.text.install(Update(0, action, DropQueuedEvent('Peer', 'peer')))
+        self.assertEqual(self.gui.archive.before, cursor)
+
+    def test_rejected_worker_admission_keeps_draft_and_reports_no_send(self) -> None:
+        """A click refused before IPC has visible feedback and no unresolved identity."""
+        self.gui.command.return_value = False
+        self.gui.state.set_draft('peer', Delivery.DROP, 'keep this draft')
+        self.gui.send_text('peer', Delivery.DROP)
+        self.assertFalse(self.gui.text.pending('peer', Delivery.DROP))
+        self.assertEqual(
+            self.gui.state.drafts[('peer', Delivery.DROP)], 'keep this draft'
+        )
+        self.assertIn('has not been sent', self.gui.state.status)
+
+    def test_disabled_drops_report_rejection_without_erasing_draft(self) -> None:
+        """A definite Core policy rejection unlocks retry without claiming acceptance."""
+        self.gui.state.set_draft('peer', Delivery.DROP, 'keep this draft')
+        self.gui.send_text('peer', Delivery.DROP)
+        action = next(iter(self.gui.text.operations))
+        self.gui.text.install(Update(0, action, DropsDisabledEvent()))
+        self.assertFalse(self.gui.text.pending('peer', Delivery.DROP))
+        self.assertEqual(
+            self.gui.state.drafts[('peer', Delivery.DROP)], 'keep this draft'
+        )
+        self.assertIn('Drops are disabled', self.gui.state.status)
+
+    def test_unknown_drop_rechecks_bounded_receipts_without_resending(self) -> None:
+        """A missing first receipt schedules another read of the same ID after its interval."""
+        self.gui.state.set_draft('peer', Delivery.DROP, 'one logical message')
+        self.gui.send_text('peer', Delivery.DROP)
+        action = next(iter(self.gui.text.operations))
+        identity = action.removeprefix('A11:')
+        self.assertEqual(
+            self.gui.text.pending_status('peer', Delivery.DROP), 'Sending…'
+        )
+        self.assertEqual(self.gui.text.pending_status('other', Delivery.DROP), '')
+        self.gui.client = Mock()
+        self.gui.submit = Mock(return_value=True)
+        self.gui.state.capabilities = frozenset({'message_outcome'})
+        self.gui.text.install(Update(0, action, None))
+        self.assertEqual(
+            self.gui.text.pending_status('peer', Delivery.DROP), 'Checking send result…'
+        )
+        with patch('metor.ui.gui.runtime.text.time.monotonic', return_value=10.0):
+            self.gui.text.poll()
+            first = self.gui.submit.call_args
+            self.assertEqual(first.args[0], 'text-check:' + action)
+            self.assertTrue(first.kwargs['background'])
+            first.args[1]()
+            self.gui.client.request.assert_called_once_with(
+                GetMessageOutcomeCommand('peer', identity), MessageOutcomeEvent
+            )
+            self.gui.text.install(
+                Update(0, 'text-check:' + action, MessageOutcomeEvent('peer', identity))
+            )
+            self.gui.text.poll()
+            self.assertEqual(self.gui.submit.call_count, 1)
+        with patch(
+            'metor.ui.gui.runtime.text.time.monotonic',
+            return_value=10.0 + GuiLimits.TEXT_OUTCOME_SECONDS,
+        ):
+            self.gui.text.poll()
+        self.assertEqual(self.gui.submit.call_count, 2)
+        self.assertTrue(self.gui.text.pending('peer', Delivery.DROP))
+        self.gui.send_text('peer', Delivery.DROP)
+        self.gui.command.assert_called_once()
+        self.gui.text.install(
+            Update(
+                0,
+                'text-check:' + action,
+                MessageOutcomeEvent(
+                    'peer',
+                    identity,
+                    delivery=Delivery.DROP,
+                    status=MessageStatusCode.PENDING,
+                ),
+            )
+        )
+        self.assertNotIn(('peer', Delivery.DROP), self.gui.state.drafts)
+        self.assertFalse(self.gui.text.pending('peer', Delivery.DROP))
+        self.assertEqual(self.gui.text.pending_status('peer', Delivery.DROP), '')
+
+    def test_wrong_drop_receipt_keeps_exact_send_identity_unknown(self) -> None:
+        """A success or rejection for another peer cannot open a duplicate-send path."""
+        self.gui.state.set_draft('peer', Delivery.DROP, 'one logical message')
+        self.gui.send_text('peer', Delivery.DROP)
+        action = next(iter(self.gui.text.operations))
+        for event in (
+            DropQueuedEvent('Other', 'other'),
+            TextRejectedEvent('other', action.removeprefix('A11:')),
+        ):
+            self.gui.text.install(Update(0, action, event))
+            self.assertTrue(self.gui.text.pending('peer', Delivery.DROP))
+            self.assertFalse(self.gui.text.pending('other', Delivery.DROP))
+            self.assertIn(action, self.gui._unknown_actions)
+        self.assertEqual(
+            self.gui.state.drafts[('peer', Delivery.DROP)], 'one logical message'
+        )
 
     def test_reserved_capacity_survives_arrivals_until_positive_acceptance(
         self,

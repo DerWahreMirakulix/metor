@@ -119,7 +119,7 @@ class ProfileCatalog:
             )
             return None
 
-        if controller.submit('profiles:read', read):
+        if controller.submit('profiles:read', read, background=True):
             self._pending_after = after
             self._needed = False
 

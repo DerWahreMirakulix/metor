@@ -23,7 +23,7 @@ from metor.data.sql.errors import (
 )
 from metor.data.sql.message import MessageRepository
 from metor.data.sql.migrations import migrate_schema
-from metor.data.sql.peer import PeerRepository
+from metor.data.sql.peer import PeerRepository, compare_aliases
 from metor.data.sql.metadata import ProfileMetadataRepository
 from metor.data.sql.producers import VoiceProducerRepository
 from metor.data.sql.runtime_mirror import (
@@ -283,6 +283,7 @@ class SqlManager:
 
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
             conn = sqlite3.connect(path_str, check_same_thread=False)
+            conn.create_collation('METOR_ALIAS', compare_aliases)
             conn.execute('PRAGMA foreign_keys = ON')
             if self._encryption_key:
                 conn.execute(f'PRAGMA key = "x\'{self._encryption_key.hex()}\'"')

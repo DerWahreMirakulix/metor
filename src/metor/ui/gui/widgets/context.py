@@ -41,6 +41,7 @@ class ContextAction(Action):
         self._hold: ClockEvent | None = None
         self._origin = (0.0, 0.0)
         self._pointer_identity: str | None = None
+        self._pointer_touch: MotionEvent | None = None
         self._context_used = False
         self._context_key_code: int | None = None
         super().__init__(text, callback, surface=surface, tone=tone, **kwargs)
@@ -70,8 +71,13 @@ class ContextAction(Action):
         if self.parent is not None and not self.disabled:
             return
         self._cancel_hold()
+        if self._pointer_touch is not None:
+            self._pointer_touch.ungrab(self)
+        self._pointer_touch = None
         self._pointer_identity = None
         self._context_used = True
+        self._keyboard_armed = False
+        self.state = 'normal'
 
     def _open_context(self, _elapsed: float = 0.0) -> None:
         """Consumes the primary press before opening one context menu.
@@ -97,8 +103,6 @@ class ContextAction(Action):
         Returns:
             bool: Whether this target owns the gesture.
         """
-        if self.context is None:
-            return bool(super().on_touch_down(touch))
         if (
             self.disabled
             or touch.is_mouse_scrolling
@@ -109,17 +113,19 @@ class ContextAction(Action):
             return True
         self._context_used = False
         self._pointer_identity = str(touch.uid)
+        self._pointer_touch = touch
         self._origin = touch.pos
-        if getattr(touch, 'button', None) == 'right':
+        if self.context is not None and getattr(touch, 'button', None) == 'right':
             self._open_context()
             return True
         handled = bool(super().on_touch_down(touch))
-        if handled and self in touch.ud:
+        if handled and self in touch.ud and self.context is not None:
             self._hold = Clock.schedule_once(
                 self._open_context, GuiLimits.LONG_PRESS_SECONDS
             )
-        else:
+        elif not handled or self not in touch.ud:
             self._pointer_identity = None
+            self._pointer_touch = None
         return handled
 
     def on_touch_move(self, touch: MotionEvent) -> bool:
@@ -145,9 +151,19 @@ class ContextAction(Action):
             bool: Whether this target handled release.
         """
         owned = str(touch.uid) == self._pointer_identity
-        if owned:
-            self._cancel_hold()
-            self._pointer_identity = None
+        if not owned:
+            if touch.grab_current is self:
+                touch.ungrab(self)
+            return False
+        if touch.grab_current is not self:
+            if self._context_used and self not in touch.ud:
+                self._pointer_identity = None
+                self._pointer_touch = None
+                return True
+            return bool(super().on_touch_up(touch))
+        self._cancel_hold()
+        self._pointer_identity = None
+        self._pointer_touch = None
         return bool(super().on_touch_up(touch) or owned)
 
     def _release(self, *_args: object) -> None:

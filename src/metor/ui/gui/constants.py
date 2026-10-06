@@ -36,6 +36,7 @@ class GuiLimits:
     MESSAGE_ID_BYTES: int = 16
     TEXT_CONTEXTS: int = 32
     TEXT_BYTES: int = 256 * 1024
+    TEXT_OUTCOME_SECONDS: float = 1.0
     REVIEW_CONTEXTS: int = 8
     LIVE_ITEMS: int = 1000
     LIVE_METADATA_BYTES: int = 2 * 1024 * 1024
@@ -66,6 +67,7 @@ class GuiLimits:
     SETTINGS_BYTES: int = 64 * 1024
     HISTORY_ANCHORS: int = 128
     SUCCESS_SECONDS: float = 3.0
+    FEEDBACK_SECONDS: float = 6.0
     LIFECYCLE_START_SECONDS: float = 3.0
     LIFECYCLE_CLOSE_SECONDS: float = 2.0
 

@@ -63,9 +63,9 @@ def exercise_responsive(app: MetorApp, complete: Callable[[], None]) -> None:
         assert peer.timeline is timeline and timeline._widgets == controls
         assert timeline._anchor == anchor and not timeline._edge
         assert app.controller.state.route == route and app.controller.client is None
-        assert peer._end_parent is (
-            peer.header if Window.width >= dp(960) else peer.controls
-        )
+        assert peer.end.parent is peer.live_slot
+        assert peer.live_slot.parent is peer.controls
+        assert peer.controls.parent is peer.header
         assert peer.timeline.height >= dp(48)
         Clock.schedule_once(resize, 0)
 

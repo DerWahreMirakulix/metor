@@ -27,6 +27,7 @@ from metor.ui.gui.runtime.voice import PressSource
 from metor.ui.gui.theme import color
 from metor.ui.gui.views import Shell
 from metor.ui.gui.views.calls import CallOverlay
+from metor.ui.gui.views.feedback import FeedbackOverlay
 from metor.ui.gui.views.input import InputDock
 from metor.ui.gui.views.live_invitation import LiveInvitationOverlay
 from metor.ui.gui.views.profiles import request_exit
@@ -67,6 +68,7 @@ class MetorApp(App):
         self.viewport: BoxLayout | None = None
         self.input_dock: InputDock | None = None
         self.call_overlay: CallOverlay | None = None
+        self.feedback_overlay: FeedbackOverlay | None = None
         self.invitation_overlay: LiveInvitationOverlay | None = None
         self._prompt_identity: object = None
         self.accessibility: AccessibilityBridge | None = None
@@ -134,6 +136,9 @@ class MetorApp(App):
         stage = FloatLayout()
         self.stage = stage
         stage.add_widget(self.viewport)
+        self.feedback_overlay = FeedbackOverlay(self.controller, self.refresh)
+        stage.add_widget(self.feedback_overlay)
+        self.controller.state.privacy_fence = self._revoke_native_privacy
         self.invitation_overlay = LiveInvitationOverlay(self.controller, self.refresh)
         stage.add_widget(self.invitation_overlay)
         self.call_overlay = CallOverlay(self.controller, self.refresh)
@@ -231,14 +236,18 @@ class MetorApp(App):
         ActionSheet.reconcile()
         if self.shell is not None:
             self.shell.render()
+        keyboard_height = (
+            self.input_dock.keyboard.height
+            if self.input_dock and self.input_dock.keyboard
+            else 0
+        )
+        if self.feedback_overlay is not None:
+            self.feedback_overlay.bottom_inset = keyboard_height
+            self.feedback_overlay.render()
         if self.invitation_overlay is not None:
             self.invitation_overlay.render()
         if self.call_overlay is not None:
-            self.call_overlay.bottom_inset = (
-                self.input_dock.keyboard.height
-                if self.input_dock and self.input_dock.keyboard
-                else 0
-            )
+            self.call_overlay.bottom_inset = keyboard_height
             self.call_overlay.render()
             if self.shell is not None:
                 self.shell.inset_locked_call(self.call_overlay.occupied_height)
@@ -311,7 +320,7 @@ class MetorApp(App):
         _text: str | None = None,
         modifiers: list[str] | None = None,
     ) -> bool:
-        """Observes key identity before widget dispatch and handles explicit Ctrl+Enter.
+        """Observes key ownership while the focused composer owns Enter behavior.
 
         Args:
             _window: Native window.
@@ -320,23 +329,10 @@ class MetorApp(App):
             _text: Native text representation.
             modifiers: Current modifier names.
         Returns:
-            bool: Whether an explicit send shortcut consumed the key.
+            bool: False preserves dispatch to the focused editor or action.
         """
         self.controller.inputs.observe_key_down(str(key))
         self.controller.security.activity()
-        route = self.controller.state.route
-        if (
-            key == 13
-            and self.controller.inputs.fresh_key(str(key))
-            and modifiers
-            and 'ctrl' in modifiers
-            and route.peer
-            and route.view in {'V08', 'V09'}
-            and not self.controller.state.covered
-        ):
-            self.controller.send_text(route.peer, route.delivery)
-            self.refresh()
-            return True
         return False
 
     def _key_up(self, _window: object, key: int, *_args: object) -> bool:
@@ -389,6 +385,8 @@ class MetorApp(App):
             None
         """
         PointerTooltip.clear_all()
+        if self.feedback_overlay is not None:
+            self.feedback_overlay.revoke()
         self.controller.native_departure()
         self.refresh()
 
@@ -438,6 +436,8 @@ class MetorApp(App):
             self.accessibility.native.focus(False)
             self.accessibility.revoke()
         PointerTooltip.clear_all()
+        if self.feedback_overlay is not None:
+            self.feedback_overlay.revoke()
 
     def _lifecycle_source_failed(self) -> None:
         """Expose lost native monitoring while retaining the privacy cover.
@@ -525,5 +525,7 @@ class MetorApp(App):
                 cleanup.callback(source.close)
             cleanup.callback(self._lifecycle_handoff.close)
             cleanup.callback(PointerTooltip.clear_all)
+            if self.feedback_overlay is not None:
+                cleanup.callback(self.feedback_overlay.revoke)
             cleanup.callback(self.controller.lifecycle.cancel)
             cleanup.callback(self.controller.interactions.cancel)

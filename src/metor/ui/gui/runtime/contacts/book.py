@@ -17,6 +17,8 @@ from metor.core.api import (
 from metor.ui.gui.constants import GuiLimits
 from metor.ui.gui.state.mailbox import Update
 
+from .projection import project_contact
+
 if TYPE_CHECKING:
     from ..controller import GuiController
 
@@ -216,6 +218,7 @@ class ContactBook:
         if not controller.submit(
             'contact-batch:check:' + str(self._serial),
             lambda: client.request(GetContactsListCommand(), ContactsDataEvent),
+            background=True,
         ):
             return False
         self.pending = True
@@ -235,6 +238,11 @@ class ContactBook:
             return True
         self.pending = False
         state = self.controller.state
+        if update.operation.startswith(
+            'contact-batch:check:'
+        ) and not self.controller.read_is_current(update):
+            self._check_needed = True
+            return True
         if update.operation.startswith('contact-batch:remove:'):
             self.selected.difference_update(self._confirmed)
             self._confirmed.clear()
@@ -245,6 +253,7 @@ class ContactBook:
                     'Refreshing saved contacts; active communication continues'
                 )
         elif isinstance(update.event, ContactsDataEvent) and not state.covered:
+            project_contact(state, update.event)
             saved = {item.onion for item in update.event.saved}
             self.selected.intersection_update(saved)
             self.unknown = False

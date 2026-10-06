@@ -837,7 +837,10 @@ class SupervisorTests(unittest.TestCase):
                     if ignore_term and os.name != 'nt'
                     else ''
                 )
-                + f'Path({str(marker)!r}).write_text(str(os.getpid()))\n'
+                + f'pid_marker = Path({str(marker)!r})\n'
+                + 'pid_partial = pid_marker.with_suffix(".partial")\n'
+                + 'pid_partial.write_text(str(os.getpid()),encoding="ascii")\n'
+                + 'pid_partial.replace(pid_marker)\n'
                 + 'time.sleep(30)\n'
             )
             options = (

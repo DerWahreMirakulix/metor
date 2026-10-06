@@ -14,7 +14,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from typing import cast
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import psutil
 
@@ -359,6 +359,7 @@ def exercise_peer_input(app: MetorApp) -> None:
     with (
         patch.object(app.controller.voice, 'available', return_value=True),
         patch.object(app.controller.voice, 'headset_confirmed', True),
+        patch.object(app.controller.voice, 'audio', Mock(failed=False)),
         patch.object(app.controller.voice, 'down', return_value=False) as down,
     ):
         app.shell.render()

@@ -1,6 +1,6 @@
 """Intent-preserving contact forms and immutable-identity management through public IPC."""
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 import json
 from typing import TYPE_CHECKING, Literal
 
@@ -33,6 +33,7 @@ from metor.ui.gui.state.mailbox import Update
 
 # Local Package Imports
 from .book import ContactBook
+from .projection import project_contact
 
 if TYPE_CHECKING:
     from ..controller import GuiController
@@ -53,6 +54,8 @@ class ContactForm:
     error: str = ''
     unknown: bool = False
     fixed: bool = False
+    pending: bool = False
+    submitted_alias: str = ''
 
 
 class ContactFlow:
@@ -74,6 +77,7 @@ class ContactFlow:
         self._continuation: tuple[str, ContactIntent] | None = None
         self._opening: tuple[str, Route] | None = None
         self._start_unknown: set[str] = set()
+        self._check_needed = False
 
     def alias(self, peer: str) -> str:
         """Resolves current labels from Core projections without an alias cache.
@@ -137,6 +141,7 @@ class ContactFlow:
         """
         if self.controller.state.covered:
             return
+        self._check_needed = False
         self._serial += 1
         self.form = ContactForm(
             self._serial,
@@ -200,6 +205,7 @@ class ContactFlow:
         form, state = self.form, self.controller.state
         if (
             form is None
+            or form.pending
             or form.unknown
             or state.covered
             or state.busy
@@ -233,9 +239,14 @@ class ContactFlow:
             command = RenameContactCommand(self.alias(peer), form.alias.strip(), peer)
         else:
             command = AddContactCommand(form.alias.strip(), peer)
-        return self.controller.command(
+        admitted = self.controller.command(
             'contact:save:' + str(form.serial), command, IpcEvent
         )
+        if admitted:
+            form.pending = True
+            form.submitted_alias = form.alias.strip()
+            form.error = ''
+        return admitted
 
     def recheck(self) -> bool:
         """Reads the address book after an unknown mutation without repeating it.
@@ -245,14 +256,23 @@ class ContactFlow:
         Returns:
             bool: Whether read-only reconciliation was admitted.
         """
-        form = self.form
-        if form is None:
+        form, client = self.form, self.controller.client
+        if (
+            form is None
+            or not form.unknown
+            or form.pending
+            or client is None
+            or self.controller.state.covered
+        ):
             return False
-        return self.controller.command(
+        admitted = self.controller.submit(
             'contact:check:' + str(form.serial),
-            GetContactsListCommand(),
-            ContactsDataEvent,
+            lambda: client.request(GetContactsListCommand(), ContactsDataEvent),
+            background=True,
         )
+        if admitted:
+            form.pending = True
+        return admitted
 
     def select(self, peer: str, intent: ContactIntent) -> None:
         """Queues one labelled picker action for serialized admission.
@@ -311,7 +331,9 @@ class ContactFlow:
         """
         controller = self.controller
         form.unknown = False
+        form.pending = False
         form.error = ''
+        self._check_needed = False
         controller.refresh_state()
         if controller.state.covered or controller.state.route.view != 'V13':
             return
@@ -333,40 +355,18 @@ class ContactFlow:
         """
         if self.book.install(update):
             return True
+        if update.operation.startswith(
+            'contact:check:'
+        ) and not self.controller.read_is_current(update):
+            if self.form is not None and update.operation.endswith(
+                ':' + str(self.form.serial)
+            ):
+                self.form.pending = False
+                self._check_needed = self.form.unknown
+            return True
+        project_contact(self.controller.state, update.event)
         if isinstance(update.event, RenameSuccessEvent) and update.event.onion:
             renamed = update.event
-            state = self.controller.state
-            snapshot = state.snapshot
-            if snapshot is not None:
-                state.snapshot = replace(
-                    snapshot,
-                    contacts=[
-                        replace(
-                            item,
-                            alias=renamed.new_alias,
-                            saved=False if renamed.is_demotion else item.saved,
-                        )
-                        if item.onion == renamed.onion
-                        else item
-                        for item in snapshot.contacts
-                    ],
-                    conversations=[
-                        replace(item, alias=renamed.new_alias)
-                        if item.onion == renamed.onion
-                        else item
-                        for item in snapshot.conversations
-                    ],
-                    live_contexts=[
-                        replace(
-                            item,
-                            alias=renamed.new_alias,
-                            saved=False if renamed.is_demotion else item.saved,
-                        )
-                        if item.onion == renamed.onion
-                        else item
-                        for item in snapshot.live_contexts
-                    ],
-                )
             if renamed.is_demotion and self.form and self.form.peer == renamed.onion:
                 self.form.alias = ''
                 self.form.error = 'Contact changed. Review its current details.'
@@ -395,13 +395,15 @@ class ContactFlow:
         if update.operation.startswith(('contact:save:', 'contact:check:')):
             if form is None or update.operation.rsplit(':', 1)[1] != str(form.serial):
                 return True
+            form.pending = False
             confirmed = (
                 isinstance(event, (ContactAddedEvent, AliasRenamedEvent))
                 and event.onion == form.peer
             )
             if isinstance(event, ContactsDataEvent):
                 confirmed = any(
-                    item.onion == form.peer and item.alias == form.alias.strip().lower()
+                    item.onion == form.peer
+                    and item.alias == (form.submitted_alias or form.alias.strip())
                     for item in event.saved
                 )
             if confirmed:
@@ -442,6 +444,8 @@ class ContactFlow:
             None
         """
         self.book.poll()
+        if self._check_needed and self.recheck():
+            self._check_needed = False
         controller, pending = self.controller, self._continuation
         if pending is None or controller.state.busy:
             return

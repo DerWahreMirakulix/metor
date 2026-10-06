@@ -493,10 +493,10 @@ class PresentationTests(unittest.TestCase):
 
 
 class BackgroundAdmissionTests(unittest.TestCase):
-    """One foreground action can wait behind a read-only refresh without becoming duplicate work."""
+    """Foreground mutations execute independently of bounded read-only refreshes."""
 
-    def test_explicit_action_waits_behind_background_refresh_once(self) -> None:
-        """An explicit mutation remains admissible while a read-only operation is in flight.
+    def test_explicit_action_executes_during_background_refresh_once(self) -> None:
+        """An explicit mutation starts while a read is blocked and cannot be duplicated.
 
         Args:
             None
@@ -518,6 +518,7 @@ class BackgroundAdmissionTests(unittest.TestCase):
         self.addCleanup(release.set)
         self.addCleanup(controller.close)
         ran: list[str] = []
+        action_started = threading.Event()
 
         def refresh():
             release.wait(5)
@@ -525,17 +526,22 @@ class BackgroundAdmissionTests(unittest.TestCase):
 
         def action():
             ran.append('action')
+            action_started.set()
             return None
 
         self.assertTrue(controller.submit('background:read', refresh, background=True))
+        read_worker = controller._worker
         self.assertTrue(controller.submit('foreground:write', action))
         self.assertFalse(controller.submit('foreground:write', action))
         self.assertTrue(controller.state.busy)
-        self.assertFalse(ran)
-        release.set()
+        self.assertTrue(action_started.wait(5))
+        self.assertTrue(read_worker.is_alive())
         controller._worker.join(5)
         controller.poll()
-        controller._worker.join(5)
+        self.assertFalse(controller.state.busy)
+        release.set()
+        read_worker.join(5)
+        controller.poll()
         self.assertEqual(ran, ['action'])
 
     def test_completed_background_read_cannot_clear_a_new_foreground_action(

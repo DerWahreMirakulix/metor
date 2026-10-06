@@ -253,13 +253,18 @@ class Shell(BoxLayout):
                 state.generation,
                 state.route,
                 id(state.snapshot)
-                if state.route.view in {'V11', 'V12', 'V13', 'V15'}
+                if state.route.view in {'V11', 'V12', 'V15'}
                 else None,
-                (controller_form.serial, controller_form.error, controller_form.unknown)
+                (
+                    controller_form.serial,
+                    controller_form.error,
+                    controller_form.unknown,
+                    controller_form.pending,
+                )
                 if (controller_form := self.controller.contacts.form)
                 else None,
                 state.busy,
-                state.status,
+                state.status if state.covered or prompt is not None else None,
                 id(prompt),
                 id(self.controller.security.restriction),
                 state.preferences.preferences_revision if state.preferences else None,
@@ -484,7 +489,6 @@ class Shell(BoxLayout):
         return (
             id(state.snapshot),
             state.root_delivery,
-            state.status,
             self.controller.notifications.store.revision,
             state.preferences.preferences_revision if state.preferences else None,
             state.root_pages.get(state.root_delivery, 0),

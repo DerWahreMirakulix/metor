@@ -15,7 +15,7 @@ from metor.ui.gui.widgets.ptt import PttAction
 from metor.ui.gui.widgets.symbol import IconAction
 
 # Local Package Imports
-from ..audio import show_audio_routes
+from ..audio import show_audio_unavailable
 
 
 class Composer(BoxLayout):
@@ -60,20 +60,19 @@ class Composer(BoxLayout):
         )
         self.entry.use_bubble = False
         self.entry.use_handles = False
-        self.entry.bind(text=self._edit)
-        self.ptt = PttAction(controller, refresh)
+        self.entry.bind(text=self._edit, on_text_validate=self._submit)
+        self.entry.submit_on_enter = True
+        self.ptt = PttAction(
+            controller,
+            refresh,
+            lambda: show_audio_unavailable(controller, refresh, purpose='recording'),
+        )
         self.send = IconAction(
             'send',
             'Send Drop' if route.delivery is Delivery.DROP else 'Send Live message',
-            lambda: controller.send_text(route.peer or '', route.delivery),
+            lambda: self._submit(self.entry),
             surface=route.delivery.value,
             tone='onAccent',
-        )
-        self.setup = Action(
-            'Set up audio',
-            lambda: show_audio_routes(controller, refresh),
-            size_hint_x=None,
-            width=dp(148),
         )
         self.note = Label('', role='support', tone='textSecondary')
         self.review = Panel(
@@ -138,6 +137,26 @@ class Composer(BoxLayout):
             state.status = 'Draft limit reached, finish another draft'
         self.refresh()
 
+    def _submit(self, _widget: object) -> None:
+        """Sends the current text draft once while preserving native typing focus.
+
+        Args:
+            _widget: Explicit Send or text-field validation source.
+        Returns:
+            None.
+        """
+        state = self.controller.state
+        if (
+            state.covered
+            or self.controller.client is None
+            or state.route != self.route
+            or self.controller.voice.press.active
+            or self.controller.text.pending(self.route.peer or '', self.route.delivery)
+        ):
+            return
+        self.controller.send_text(self.route.peer or '', self.route.delivery)
+        self.refresh()
+
     def _review_action(self, send: bool, delivery: Delivery | None = None) -> None:
         """Runs one deliberate action on this route's owned recording.
 
@@ -166,6 +185,9 @@ class Composer(BoxLayout):
         if review is None:
             return
         playback = self.controller.playback
+        if playback.audio is None:
+            show_audio_unavailable(self.controller, self.refresh, purpose='playback')
+            return
         target = playback.target(
             peer,
             review.binding.delivery,
@@ -215,7 +237,6 @@ class Composer(BoxLayout):
             )
             self.preview.disabled = (
                 state.covered
-                or playback.audio is None
                 or review.unknown
                 or self.controller.calls.active
                 or self.controller.calls.media_active
@@ -282,13 +303,7 @@ class Composer(BoxLayout):
         self.entry.readonly = voice.press.active
         self.entry.disabled = voice.press.active
         action = (
-            self.ptt
-            if voice.press.active
-            else self.send
-            if draft.strip()
-            else self.setup
-            if not voice.headset_confirmed
-            else self.ptt
+            self.ptt if voice.press.active else self.send if draft.strip() else self.ptt
         )
         if self.entry.parent is None:
             self.bar.add_widget(self.entry)
@@ -297,11 +312,28 @@ class Composer(BoxLayout):
                 self.bar.remove_widget(self._action)
             self.bar.add_widget(action)
             self._action = action
-        self.send.disabled = state.busy or voice.press.active
-        self.setup.disabled = state.covered or self.controller.simulator
+        self.send.disabled = (
+            state.covered
+            or self.controller.client is None
+            or voice.press.active
+            or not draft.strip()
+            or self.controller.text.pending(self.route.peer or '', self.route.delivery)
+        )
         # Disabling a held native button can swallow its release callback.
-        self.ptt.disabled = (
-            not voice.press.active and not voice.press.held and not voice.available()
+        audio_ready = (
+            voice.audio is not None
+            and voice.headset_confirmed
+            and not voice.audio.failed
+        )
+        self.ptt.disabled = state.covered or (
+            not voice.press.active
+            and not voice.press.held
+            and (
+                self.controller.calls.active
+                or self.controller.calls.media_active
+                or audio_ready
+                and not voice.available()
+            )
         )
         self.ptt.label.text = (
             'Release to finish'
@@ -321,12 +353,10 @@ class Composer(BoxLayout):
             if phase == 'finalizing'
             else 'Recording outcome unconfirmed'
             if phase == 'failed'
-            else ''
-            if voice.headset_confirmed
-            else ''
+            else self.controller.text.pending_status(
+                self.route.peer or '', self.route.delivery
+            )
         )
-        if self.entry.local_keyboard_visible:
-            self.note.text = ''
         self._notice()
 
     def _notice(self) -> None:

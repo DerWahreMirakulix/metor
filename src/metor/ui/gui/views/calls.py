@@ -15,7 +15,7 @@ from metor.ui.gui.widgets import Action, Label, Panel
 from metor.ui.gui.widgets.symbol import IconAction
 
 # Local Package Imports
-from .audio import show_audio_routes
+from .audio import show_audio_unavailable
 
 
 class CallPanel(Panel):
@@ -61,6 +61,21 @@ class CallOverlay(FloatLayout):
             if state.covered
             else NotificationPrivacy.SHOW_ALL
         )
+        alias = current.alias if current is not None else ''
+        if current is not None and not state.covered and state.snapshot is not None:
+            snapshot = state.snapshot
+            alias = next(
+                (
+                    name
+                    for peer, name in (
+                        [(item.onion, item.alias) for item in snapshot.contacts]
+                        + [(item.onion, item.alias) for item in snapshot.conversations]
+                        + [(item.onion, item.alias) for item in snapshot.live_contexts]
+                    )
+                    if peer == current.peer
+                ),
+                alias,
+            )
         incoming = current is not None and current.state is CallState.INCOMING
         key = (
             state.generation,
@@ -72,6 +87,7 @@ class CallOverlay(FloatLayout):
             self.size[:],
             self.bottom_inset,
             privacy,
+            alias,
         )
         if key == self._key:
             return
@@ -81,7 +97,7 @@ class CallOverlay(FloatLayout):
         self._duration = self._status = None
         if incoming and state.covered and privacy is NotificationPrivacy.OFF:
             return
-        if current is None and calls.pending_peer is None:
+        if current is None and not calls.status:
             return
         if not calls.visible:
             if current is not None and current.state is not CallState.ENDED:
@@ -119,8 +135,8 @@ class CallOverlay(FloatLayout):
         body = BoxLayout(orientation='vertical', spacing=dp(12), size_hint_y=None)
         body.bind(minimum_height=body.setter('height'))
         if current is not None:
-            if privacy is NotificationPrivacy.SHOW_ALL and current.alias:
-                body.add_widget(Label(current.alias, role='peer'))
+            if privacy is NotificationPrivacy.SHOW_ALL and alias:
+                body.add_widget(Label(alias, role='peer'))
             phase = {
                 CallState.CONNECTING: 'Connecting call…',
                 CallState.OUTGOING: 'Ringing…',
@@ -151,22 +167,6 @@ class CallOverlay(FloatLayout):
             )
         self._status = Label(calls.status, role='support', tone='textSecondary')
         body.add_widget(self._status)
-        if not calls.ready and not state.covered:
-            body.add_widget(
-                Action(
-                    'Set up headset',
-                    lambda: show_audio_routes(controller, self.refresh),
-                )
-            )
-        if current is None and calls.pending_peer is not None:
-            peer = calls.pending_peer
-            body.add_widget(
-                Action(
-                    'Call',
-                    lambda: self._act(lambda: calls.start(peer)),
-                    disabled=not calls.ready or state.busy,
-                )
-            )
         scroll.add_widget(body)
         panel.add_widget(scroll)
         compact = state.covered and active
@@ -193,7 +193,7 @@ class CallOverlay(FloatLayout):
                 actions.add_widget(
                     Action(
                         'Accept' if can_locked else 'Unlock to accept',
-                        lambda: self._act(lambda: calls.accept(call_id)),
+                        lambda: self._accept(call_id),
                         disabled=state.busy,
                     )
                 )
@@ -309,6 +309,13 @@ class CallOverlay(FloatLayout):
 
         header.bind(height=measure)
         measure()
+
+    def _accept(self, call_id: str) -> None:
+        """Offers explicit closed audio setup before accepting this incoming Call."""
+        if not self.controller.calls.ready and not self.controller.state.covered:
+            show_audio_unavailable(self.controller, self.refresh, purpose='calls')
+        else:
+            self._act(lambda: self.controller.calls.accept(call_id))
 
     def _show(self) -> None:
         """Explicitly restores phone controls without navigating or accepting a Call."""

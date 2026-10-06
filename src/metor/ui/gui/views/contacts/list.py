@@ -290,7 +290,6 @@ class ContactListView(BoxLayout):
             book.pending,
             book.unknown,
             controller.state.busy,
-            controller.state.status,
         )
         if self._key == key:
             return
@@ -385,9 +384,5 @@ class ContactListView(BoxLayout):
             self.footer.add_widget(Action('Cancel selection', self.cancel))
         if book.unknown and not book.pending:
             self.footer.add_widget(Action('Check saved contacts', book.check))
-        if controller.state.status:
-            self.footer.add_widget(
-                Label(controller.state.status, role='support', tone='info')
-            )
         if not self.footer.children:
             self.footer.height = 0

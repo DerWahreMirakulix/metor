@@ -7,6 +7,7 @@ from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 
 from metor.core.api import Delivery
+from metor.ui.gui.constants import Geometry
 from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.state import Route
 from metor.ui.gui.widgets import Action, Label
@@ -16,6 +17,8 @@ from metor.ui.gui.widgets.sheet import ActionSheet
 # Local Package Imports
 from .composer import Composer
 from .timeline import Timeline
+from .header import LiveHeaderAction
+from ..audio import show_audio_unavailable
 from ..actions import clear_drops, live_context_actions
 
 
@@ -30,31 +33,48 @@ class PeerView(BoxLayout):
         Args:
             controller: Public-service presentation coordinator.
             refresh: Coalesced native repaint request.
-            wide: Whether End Live belongs in the desktop header.
+            wide: Whether the surrounding viewport has a desktop master pane.
         Returns:
             None
         """
         super().__init__(orientation='vertical', spacing=dp(16))
         self.controller, self.refresh = controller, refresh
         self.route = controller.state.route
-        header = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(12))
-        self.header = header
-        header.add_widget(IconAction('chevron-left', 'Back', self._back))
-        heading = BoxLayout(orientation='vertical')
-        self.name = Label('', role='peer', wrap=False)
-        self.subtitle = Label('', role='caption', tone='textSecondary', wrap=False)
-        heading.add_widget(self.name)
-        heading.add_widget(self.subtitle)
-        header.add_widget(heading)
-        header.add_widget(IconAction('phone', 'Call', self._call))
-        header.add_widget(IconAction('ellipsis', 'Conversation actions', self._menu))
-        self._end_identity: tuple[int | None, str | None] | None = None
-        self.end = Action(
-            'End Live', partial(self._end_live, None, None), tone='danger'
+        self.header = BoxLayout(orientation='vertical', size_hint_y=None, spacing=dp(8))
+        self.header.bind(minimum_height=self.header.setter('height'))
+        title_row = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(12))
+        title_row.add_widget(IconAction('chevron-left', 'Back', self._back))
+        self.name = Label('', role='peer')
+        self.name.bind(
+            height=lambda _widget, height: setattr(
+                title_row, 'height', max(dp(48), height)
+            )
         )
-        self.end.size_hint_x = None
-        self.end.width = dp(128)
-        self.add_widget(header)
+        title_row.add_widget(self.name)
+        self.header.add_widget(title_row)
+        self.controls = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(12))
+        self.subtitle = Label('', role='caption', tone='textSecondary')
+        self.subtitle.bind(
+            height=lambda _widget, height: setattr(
+                self.controls, 'height', max(dp(48), height)
+            )
+        )
+        self.controls.add_widget(self.subtitle)
+        self.live_slot = BoxLayout(size_hint_x=None, width=dp(48))
+        self.controls.add_widget(self.live_slot)
+        self.call = IconAction('phone', 'Call', self._call)
+        self.more = IconAction('ellipsis', 'Conversation actions', self._menu)
+        self.controls.add_widget(self.call)
+        self.controls.add_widget(self.more)
+        self.header.add_widget(self.controls)
+        self._end_identity: tuple[int | None, str | None] | None = None
+        self.end = LiveHeaderAction(
+            'End Live', 'x', partial(self._end_live, None, None), tone='danger'
+        )
+        self.connect = LiveHeaderAction(
+            'Start Live', 'plus', self._connect, surface='live', tone='onAccent'
+        )
+        self.add_widget(self.header)
         tabs = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(4))
         for delivery in (Delivery.DROP, Delivery.LIVE):
             tabs.add_widget(
@@ -69,32 +89,22 @@ class PeerView(BoxLayout):
             )
         Action.group(tuple(reversed(tabs.children)))
         self.add_widget(tabs)
-        self.controls = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(12))
-        self._end_parent = header if wide else self.controls
         self.timeline = Timeline(controller, self.route, refresh)
         self.add_widget(self.timeline)
-        self.connect = Action(
-            'Start Live', self._connect, surface='live', tone='onAccent'
-        )
-        self.status = Label('', role='support', tone='info')
         self.retry_recording: Action | None = None
         self._recovery_identity: tuple[int, str] | None = None
         self.composer = Composer(controller, self.route, refresh)
+        self.bind(width=lambda *_args: self.update())
         self.update()
 
     def reflow(self, *, wide: bool) -> None:
-        """Moves only the responsive action group while retaining focus, drafts and PTT widgets.
+        """Reflows visual action width while retaining header, focus, drafts and PTT ownership.
 
         Args:
             wide: Whether the available viewport includes the desktop master pane.
         Returns:
             None
         """
-        destination = self.header if wide else self.controls
-        if destination is not self._end_parent:
-            if self.end.parent is not None:
-                self.end.parent.remove_widget(self.end)
-            self._end_parent = destination
         self.update()
 
     def _menu(self) -> None:
@@ -190,8 +200,11 @@ class PeerView(BoxLayout):
         Returns:
             None
         """
-        self.controller.calls.start(self.route.peer or '')
-        self.refresh()
+        if not self.controller.calls.ready:
+            show_audio_unavailable(self.controller, self.refresh, purpose='calls')
+        else:
+            self.controller.calls.start(self.route.peer or '')
+            self.refresh()
 
     def _tab(self, delivery: Delivery) -> None:
         """Changes the projection with no implicit connect or consume action.
@@ -266,12 +279,11 @@ class PeerView(BoxLayout):
         if identity != self._end_identity:
             if self.end.parent is not None:
                 self.end.parent.remove_widget(self.end)
-            self.end = Action(
-                'Cancel' if connecting else 'End Live',
+            self.end = LiveHeaderAction(
+                'Cancel Live' if connecting else 'End Live',
+                'x',
                 partial(self._end_live, *identity),
                 tone='danger',
-                size_hint_x=None,
-                width=dp(128),
             )
             self._end_identity = identity
         self.subtitle.text = (
@@ -289,16 +301,27 @@ class PeerView(BoxLayout):
             if live and live.session_state == 'pending'
             else 'No Live connection'
         )
+        control: LiveHeaderAction | None
         if self.route.delivery is Delivery.LIVE:
-            show_controls = (active or connecting) and self._end_parent is self.controls
-            if show_controls and self.controls.parent is None:
-                self.add_widget(self.controls, index=len(self.children) - 2)
-            elif not show_controls and self.controls.parent is self:
-                self.remove_widget(self.controls)
-            if (active or connecting) and self.end.parent is None:
-                self._end_parent.add_widget(self.end)
-            elif not (active or connecting) and self.end.parent is not None:
-                self.end.parent.remove_widget(self.end)
+            control = self.end if active or connecting else self.connect
+            available = (
+                active
+                or connecting
+                or live is None
+                or live.session_state == 'disconnected'
+            )
+            if not available:
+                control = None
+        else:
+            control = None
+        for attached in tuple(self.live_slot.children):
+            if attached is not control:
+                self.live_slot.remove_widget(attached)
+        if control is not None:
+            if control.parent is None:
+                self.live_slot.add_widget(control)
+        else:
+            self.live_slot.width = 0
         self.end.disabled = self.connect.disabled = (
             state.busy
             or controller.client is None
@@ -309,23 +332,14 @@ class PeerView(BoxLayout):
             or 'qualified_live_control' not in state.capabilities
             or identity == (None, None)
         )
-        self.connect.label.text = 'Reconnect' if live else 'Start Live'
+        self.connect.label.text = self.connect.accessible_name = (
+            'Reconnect Live' if live else 'Start Live'
+        )
+        self.call.disabled = state.busy
+        if control is not None:
+            control.present(compact=self.width < dp(Geometry.COMPACT_MAX))
+            self.live_slot.width = control.width
         self.timeline.update(active=active)
-        if (
-            self.route.delivery is Delivery.LIVE
-            and not active
-            and not connecting
-            and (live is None or live.session_state == 'disconnected')
-        ):
-            if self.connect.parent is None:
-                self.add_widget(self.connect)
-        elif self.connect.parent is self:
-            self.remove_widget(self.connect)
-        self.status.text = state.status
-        if state.status and self.status.parent is None:
-            self.add_widget(self.status, index=1 if self.composer.parent is self else 0)
-        elif not state.status and self.status.parent is self:
-            self.remove_widget(self.status)
         draft_owned = bool(
             peer in controller.voice.reviews
             and controller.voice.reviews[peer or ''].binding.delivery

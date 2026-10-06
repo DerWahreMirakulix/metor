@@ -15,6 +15,8 @@ from metor.ui.gui.widgets import Action, Label
 from metor.ui.gui.widgets.qr import ContactQr
 from metor.ui.gui.widgets.sheet import ActionSheet, confirm
 
+from ..audio import show_audio_unavailable
+
 # Local Package Imports
 from .form import contact_form
 
@@ -61,6 +63,9 @@ def contact_sheet(
         def call() -> None:
             """Starts an explicit phone call while preserving the invoking route."""
             sheet.dismiss(animation=False)
+            if not controller.calls.ready:
+                show_audio_unavailable(controller, refresh, purpose='calls')
+                return
             controller.calls.start(peer)
             refresh()
 

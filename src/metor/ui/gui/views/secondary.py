@@ -162,8 +162,6 @@ def secondary_view(controller: GuiController, refresh: Callable[[], None]) -> Bo
         profiles_body(controller, body)
     else:
         body.add_widget(settings_body(controller, refresh))
-    if state.status:
-        panel.add_widget(Label(state.status, role='support', tone='info'))
     if route.view == 'V20':
         fit_profiles()
     return panel

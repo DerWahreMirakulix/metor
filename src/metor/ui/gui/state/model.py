@@ -6,6 +6,9 @@ from dataclasses import dataclass, field
 from metor.core.api import Delivery, RuntimeSnapshotEvent, GuiPreferencesEvent
 from metor.ui.gui.constants import GuiLimits
 
+# Local Package Imports
+from .feedback import ActionFeedback
+
 
 @dataclass(frozen=True)
 class Route:
@@ -35,8 +38,24 @@ class GuiState:
         default=None, repr=False, compare=False
     )
     busy: bool = False
-    status: str = ''
+    _status: str = field(default='', init=False, repr=False)
+    feedback: ActionFeedback = field(default_factory=ActionFeedback)
     drafts: dict[tuple[str, Delivery], str] = field(default_factory=dict)
+
+    @property
+    def status(self) -> str:
+        """Returns local action/progress text without creating domain state."""
+        return self._status
+
+    @status.setter
+    def status(self, value: str) -> None:
+        """Publishes one result while retaining covered startup/recovery text.
+
+        Args:
+            value: Locally formatted presentation text, never authorization truth.
+        """
+        self._status = value
+        self.feedback.publish(value)
 
     @property
     def covered(self) -> bool:
@@ -59,6 +78,8 @@ class GuiState:
             None
         """
         self._covered = value
+        if value:
+            self.feedback.clear()
         if value and self.privacy_fence is not None:
             self.privacy_fence()
 
@@ -81,11 +102,17 @@ class GuiState:
                     )
                 )
         if route != self.route:
-            if not from_root:
+            same_conversation = (
+                self.route.view in {'V08', 'V09'}
+                and route.view in {'V08', 'V09'}
+                and route.peer == self.route.peer
+            )
+            if not from_root and not same_conversation:
                 if len(self.back_stack) >= GuiLimits.TEXT_CONTEXTS:
                     self.back_stack.pop(0)
                 self.back_stack.append(self.route)
             self.route = route
+            self.feedback.clear()
 
     def back(self) -> None:
         """Returns to the caller or the originating root without a command.
@@ -95,6 +122,7 @@ class GuiState:
         Returns:
             None
         """
+        self.feedback.clear()
         self.route = (
             self.back_stack.pop()
             if self.back_stack
@@ -112,6 +140,8 @@ class GuiState:
         Returns:
             None
         """
+        if delivery is not self.root_delivery and self.route.view in {'V06', 'V07'}:
+            self.feedback.clear()
         self.root_delivery = delivery
         root = Route('V06' if delivery is Delivery.DROP else 'V07', delivery=delivery)
         if self.route.view in {'V06', 'V07'}:

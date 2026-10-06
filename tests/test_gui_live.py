@@ -8,19 +8,45 @@ from metor.client import FrontendProfileState
 from metor.client import FrontendLaunchContext
 from metor.core.api import (
     ContentType,
+    ConnectionConnectingEvent,
     Delivery,
     FallbackCommand,
     MessageDirectionCode,
     MessageStatusCode,
     RuntimeSnapshotEvent,
+    RetunnelInitiatedEvent,
 )
 from metor.data import MessageDirection, MessageStatus
 from metor.ui.gui.runtime import GuiController, conversation_rows
+from metor.ui.gui.runtime.live import LiveMutation
 from metor.ui.gui.runtime.transcript import TranscriptItem
 from metor.ui.gui.runtime.voice.press import CaptureBinding, PressSource
 from metor.ui.gui.state import Route
 from metor.ui.gui.state.media import PlaybackTarget
 from metor.ui.gui.state.mailbox import Update
+
+
+class LiveStatusPresentationTests(unittest.TestCase):
+    """Transport progress belongs to the persistent conversation header only."""
+
+    def test_successful_start_and_route_change_do_not_publish_action_feedback(
+        self,
+    ) -> None:
+        """Acknowledged progress refreshes Core state without duplicating status as a toast."""
+        gui = GuiController(FrontendLaunchContext('fixture', Mock()), simulator=True)
+        gui.state.covered = False
+        gui.refresh_state = Mock()
+        for kind, event in (
+            ('start', ConnectionConnectingEvent('Bob', 'bob')),
+            ('route', RetunnelInitiatedEvent('Bob', 'bob')),
+        ):
+            with self.subTest(kind=kind):
+                gui.live.pending = LiveMutation('live:fixture', 'bob', kind)
+                before = gui.state.feedback.revision
+                self.assertTrue(gui.live.install(Update(0, 'live:fixture', event)))
+                self.assertIsNone(gui.live.pending)
+                self.assertEqual(gui.state.feedback.revision, before)
+        self.assertEqual(gui.refresh_state.call_count, 2)
 
 
 class LiveCoreTests(unittest.TestCase):

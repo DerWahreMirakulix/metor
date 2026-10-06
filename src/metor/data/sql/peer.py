@@ -1,15 +1,29 @@
 """Centralized peer alias persistence helpers."""
 
 from dataclasses import dataclass
+from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, List, Optional, Tuple, cast
+from typing import TYPE_CHECKING, Iterator, List, Optional, Tuple, cast
 
 from metor.shared import clean_onion
 
-from metor.data.sql.backends import SqlParam
+from metor.data.sql.backends import SqlCipherCursor, SqlParam
 
 if TYPE_CHECKING:
     from metor.data.sql.manager import SqlManager
+
+
+def compare_aliases(left: str, right: str) -> int:
+    """Compares Unicode display labels without changing their persisted spelling.
+
+    Args:
+        left: First persisted or requested display alias.
+        right: Second persisted or requested display alias.
+    Returns:
+        int: Case-insensitive SQL comparison result.
+    """
+    first, second = left.casefold(), right.casefold()
+    return (first > second) - (first < second)
 
 
 @dataclass(frozen=True)
@@ -24,17 +38,79 @@ class PeerRow:
 class PeerRepository:
     """Centralized peer-alias persistence helpers."""
 
-    def __init__(self, sql: 'SqlManager') -> None:
+    def __init__(
+        self, sql: 'SqlManager', *, cursor: Optional[SqlCipherCursor] = None
+    ) -> None:
         """
         Initializes the peer repository.
 
         Args:
             sql (SqlManager): The owning SQL manager.
+            cursor: Existing transaction cursor for an atomic alias operation.
 
         Returns:
             None
         """
         self._sql: SqlManager = sql
+        self._cursor = cursor
+
+    @contextmanager
+    def alias_mutation(self) -> Iterator['PeerRepository']:
+        """Keeps alias identity checks and writes in one existing SQL transaction.
+
+        Args:
+            None
+        Yields:
+            PeerRepository: Cursor-bound helpers under the shared persistence lock.
+        """
+        with self._transaction() as cursor:
+            yield PeerRepository(self._sql, cursor=cursor)
+
+    @contextmanager
+    def _transaction(self) -> Iterator[SqlCipherCursor]:
+        """Reuses a bound transaction without nesting connection commits or locks.
+
+        Args:
+            None
+        Yields:
+            SqlCipherCursor: Existing or newly opened atomic SQL cursor.
+        """
+        if self._cursor is not None:
+            yield self._cursor
+        else:
+            with self._sql.transaction() as cursor:
+                yield cursor
+
+    def _fetchall(
+        self, query: str, params: Tuple[SqlParam, ...] = ()
+    ) -> List[Tuple[SqlParam, ...]]:
+        """Reads through the bound cursor while preserving the ordinary repository API.
+
+        Args:
+            query: Parameterized peer query.
+            params: Bound SQL values.
+        Returns:
+            List[Tuple[SqlParam, ...]]: Matching typed rows.
+        """
+        if self._cursor is None:
+            return self._sql.fetchall(query, params)
+        return cast(
+            List[Tuple[SqlParam, ...]], self._cursor.execute(query, params).fetchall()
+        )
+
+    def _execute(self, query: str, params: Tuple[SqlParam, ...] = ()) -> None:
+        """Writes without committing a cursor-bound alias operation prematurely.
+
+        Args:
+            query: Parameterized peer mutation.
+            params: Bound SQL values.
+        Returns:
+            None
+        """
+        if self._cursor is None:
+            self._sql.execute(query, params)
+        else:
+            self._cursor.execute(query, params)
 
     @staticmethod
     def _to_row(row: Tuple[SqlParam, ...]) -> PeerRow:
@@ -58,18 +134,36 @@ class PeerRepository:
         Retrieves one peer row by alias.
 
         Args:
-            alias (str): The normalized alias.
+            alias (str): The display alias, compared case-insensitively.
 
         Returns:
             Optional[PeerRow]: The matching row, if present.
         """
-        rows = self._sql.fetchall(
-            'SELECT onion, alias, alias_state FROM peers WHERE alias = ?',
+        rows = self._fetchall(
+            'SELECT onion, alias, alias_state FROM peers WHERE alias = ? COLLATE METOR_ALIAS',
             (alias,),
         )
-        if not rows:
-            return None
-        return self._to_row(rows[0])
+        if len(rows) == 1:
+            return self._to_row(rows[0])
+        # Older profiles can contain distinct labels that Unicode casefold now
+        # considers equal. Preserve exact resolution; never choose a random peer.
+        return next((self._to_row(row) for row in rows if row[1] == alias), None)
+
+    def alias_is_taken(self, alias: str, except_onion: str = '') -> bool:
+        """Checks all equivalent labels while permitting a peer's own case-only rename.
+
+        Args:
+            alias: Requested display label.
+            except_onion: Exact identity allowed to retain its equivalent label.
+        Returns:
+            bool: Whether another persisted peer occupies the requested label.
+        """
+        return bool(
+            self._fetchall(
+                'SELECT 1 FROM peers WHERE alias = ? COLLATE METOR_ALIAS AND onion <> ? LIMIT 1',
+                (alias, except_onion),
+            )
+        )
 
     def get_by_onion(self, onion: str) -> Optional[PeerRow]:
         """
@@ -81,7 +175,7 @@ class PeerRepository:
         Returns:
             Optional[PeerRow]: The matching row, if present.
         """
-        rows = self._sql.fetchall(
+        rows = self._fetchall(
             'SELECT onion, alias, alias_state FROM peers WHERE onion = ?',
             (onion,),
         )
@@ -99,8 +193,8 @@ class PeerRepository:
         Returns:
             List[str]: All saved aliases.
         """
-        rows = self._sql.fetchall(
-            "SELECT alias FROM peers WHERE alias_state = 'saved' ORDER BY alias ASC"
+        rows = self._fetchall(
+            "SELECT alias FROM peers WHERE alias_state = 'saved' ORDER BY alias COLLATE METOR_ALIAS ASC"
         )
         return [str(row[0]) for row in rows]
 
@@ -114,8 +208,8 @@ class PeerRepository:
         Returns:
             List[PeerRow]: Saved peer rows ordered by alias.
         """
-        rows = self._sql.fetchall(
-            "SELECT onion, alias, alias_state FROM peers WHERE alias_state = 'saved' ORDER BY alias ASC"
+        rows = self._fetchall(
+            "SELECT onion, alias, alias_state FROM peers WHERE alias_state = 'saved' ORDER BY alias COLLATE METOR_ALIAS ASC"
         )
         return [self._to_row(row) for row in rows]
 
@@ -129,8 +223,8 @@ class PeerRepository:
         Returns:
             List[PeerRow]: Discovered peer rows ordered by alias.
         """
-        rows = self._sql.fetchall(
-            "SELECT onion, alias, alias_state FROM peers WHERE alias_state = 'discovered' ORDER BY alias ASC"
+        rows = self._fetchall(
+            "SELECT onion, alias, alias_state FROM peers WHERE alias_state = 'discovered' ORDER BY alias COLLATE METOR_ALIAS ASC"
         )
         return [self._to_row(row) for row in rows]
 
@@ -147,7 +241,7 @@ class PeerRepository:
             None
         """
         timestamp: str = datetime.now(timezone.utc).isoformat()
-        self._sql.execute(
+        self._execute(
             'INSERT INTO peers (onion, alias, alias_state, created_at, updated_at) VALUES (?, ?, ?, ?, ?)',
             (
                 onion,
@@ -169,7 +263,7 @@ class PeerRepository:
         Returns:
             None
         """
-        self._sql.execute(
+        self._execute(
             'UPDATE peers SET alias = ?, updated_at = ? WHERE onion = ?',
             (alias, datetime.now(timezone.utc).isoformat(), onion),
         )
@@ -185,7 +279,7 @@ class PeerRepository:
         Returns:
             None
         """
-        self._sql.execute(
+        self._execute(
             'UPDATE peers SET alias_state = ?, updated_at = ? WHERE onion = ?',
             (
                 'saved' if is_saved else 'discovered',
@@ -206,7 +300,7 @@ class PeerRepository:
         Returns:
             None
         """
-        self._sql.execute(
+        self._execute(
             'UPDATE peers SET alias = ?, alias_state = ?, updated_at = ? WHERE onion = ?',
             (
                 alias,
@@ -226,7 +320,7 @@ class PeerRepository:
         Returns:
             None
         """
-        with self._sql.transaction() as cursor:
+        with self._transaction() as cursor:
             cursor.execute('SELECT onion FROM peers WHERE alias = ?', (alias,))
             row = cursor.fetchone()
             if isinstance(row, tuple) and isinstance(row[0], str):
@@ -243,7 +337,7 @@ class PeerRepository:
         Returns:
             None
         """
-        with self._sql.transaction() as cursor:
+        with self._transaction() as cursor:
             self._sql.metadata.prune_pins(cursor, {onion})
             cursor.execute('DELETE FROM peers WHERE onion = ?', (onion,))
 
@@ -257,14 +351,14 @@ class PeerRepository:
         Returns:
             bool: True when the peer still has stored references.
         """
-        history_rows = self._sql.fetchall(
+        history_rows = self._fetchall(
             'SELECT 1 FROM history_ledger WHERE peer_onion = ? LIMIT 1',
             (onion,),
         )
         if history_rows:
             return True
 
-        message_rows = self._sql.fetchall(
+        message_rows = self._fetchall(
             'SELECT 1 FROM message_receipts WHERE peer_onion = ? LIMIT 1',
             (onion,),
         )
@@ -315,7 +409,7 @@ class PeerRepository:
               {condition}
         """
 
-        with self._sql.transaction() as cursor:
+        with self._transaction() as cursor:
             rows = cast(
                 List[Tuple[SqlParam, ...]],
                 cursor.execute(select_query, params).fetchall(),

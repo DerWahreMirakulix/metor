@@ -218,10 +218,10 @@ class CommandDispatcher:
                     AddContactCommand(alias=self._session.focused_alias)
                 )
             elif len(parts) == 3:
-                self._ipc.send_command(AddContactCommand(alias=parts[2].lower()))
+                self._ipc.send_command(AddContactCommand(alias=parts[2]))
             elif len(parts) == 4:
                 self._ipc.send_command(
-                    AddContactCommand(alias=parts[2].lower(), onion=parts[3])
+                    AddContactCommand(alias=parts[2], onion=parts[3])
                 )
             else:
                 self._print_system(Help.show_command_help(cmd).strip())
@@ -231,14 +231,14 @@ class CommandDispatcher:
                     RemoveContactCommand(alias=self._session.focused_alias)
                 )
             elif len(parts) == 3:
-                self._ipc.send_command(RemoveContactCommand(alias=parts[2].lower()))
+                self._ipc.send_command(RemoveContactCommand(alias=parts[2]))
             else:
                 self._print_system(Help.show_command_help(cmd).strip())
         elif subcmd == 'rename':
             if len(parts) == 3 and self._session.focused_alias:
-                old_alias, new_alias = self._session.focused_alias, parts[2].lower()
+                old_alias, new_alias = self._session.focused_alias, parts[2]
             elif len(parts) == 4:
-                old_alias, new_alias = parts[2].lower(), parts[3].lower()
+                old_alias, new_alias = parts[2], parts[3]
             else:
                 self._print_system(Help.show_command_help(cmd).strip())
                 return

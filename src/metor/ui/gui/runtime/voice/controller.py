@@ -244,7 +244,6 @@ class VoiceController:
         )
         assert client is not None and owner is not None and audio is not None
         self.accepted_bytes = 0
-        state.status = 'Starting recording…'
         self.worker = CaptureWorker(
             client, owner, binding, audio, controller.mailbox, controller.playback.cache
         )
@@ -310,7 +309,6 @@ class VoiceController:
         operation = update.operation.split(':', 1)[0]
         if operation == 'voice-start':
             self.press.accepted(binding)
-            self.controller.state.status = 'Recording…'
         elif operation == 'voice-progress' and isinstance(
             event, VoiceChunkAcceptedEvent
         ):

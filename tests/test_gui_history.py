@@ -1,6 +1,7 @@
 """Real encrypted Core history paging, metadata boundaries and uncertain GUI clears."""
 
 import unittest
+import threading
 from unittest.mock import Mock, patch
 
 import test_gui_producers as support
@@ -231,6 +232,66 @@ class GuiHistoryTests(unittest.TestCase):
         self.assertIsNone(gui.history.page)
         self.assertTrue(gui.history.needed)
 
+    def test_history_response_before_actual_clear_cannot_release_unknown_barrier(
+        self,
+    ) -> None:
+        """A delayed pre-clear page cannot restore rows or confirm the lost clear acknowledgement."""
+        h = self.harness()
+        self.populate(h, 2)
+        gui = GuiController(
+            FrontendLaunchContext('voice-owned', Mock()), simulator=True
+        )
+        self.addCleanup(gui.close)
+        gui.client = h.client
+        gui.state.capabilities = frozenset(h.client.init_event.capabilities)
+        gui.state.covered = False
+        gui.state.route = Route('V18')
+        old_page = h.client.request(GetHistoryCommand(page_size=2), HistoryDataEvent)
+        gui.history.page = old_page
+        original = h.client.request
+        release, started = threading.Event(), threading.Event()
+        self.addCleanup(release.set)
+        reads, clears = [], []
+
+        def held(command: object, expected: object) -> IpcEvent | None:
+            """Holds only delivery of the original read and hides the real clear acknowledgement."""
+            result = original(command, expected)
+            if isinstance(command, GetHistoryCommand):
+                reads.append(command)
+                if len(reads) == 1:
+                    started.set()
+                    if not release.wait(Constants.DEFAULT_IPC_TIMEOUT):
+                        raise TimeoutError(
+                            'Held pre-clear history read was not released'
+                        )
+            if isinstance(command, ClearHistoryCommand):
+                clears.append(command)
+                return None
+            return result
+
+        with patch.object(h.client, 'request', side_effect=held):
+            gui.history.poll()
+            self.assertTrue(started.wait(Constants.DEFAULT_IPC_TIMEOUT))
+            reader = gui._worker
+            assert reader is not None
+            self.assertTrue(gui.history.clear())
+            assert gui._worker is not None
+            gui._worker.join(Constants.DEFAULT_IPC_TIMEOUT)
+            self.assertFalse(gui._worker.is_alive())
+            gui.poll()
+            self.assertTrue(gui.history.pending)
+            release.set()
+            reader.join(Constants.DEFAULT_IPC_TIMEOUT)
+            self.assertFalse(reader.is_alive())
+            gui.poll()
+            self.assertIs(gui.history.page, old_page)
+            self.assertTrue(gui.history.pending)
+            self.settle(gui)
+        self.assertEqual(len(clears), 1)
+        self.assertGreaterEqual(len(reads), 2)
+        self.assertEqual(gui.history.page.entries, [])
+        self.assertFalse(gui.history.pending)
+
     def test_invalid_paging_is_rejected_before_sql(self) -> None:
         """Rejects Boolean, oversized and legacy-mixed paging requests.
 
@@ -266,5 +327,8 @@ class GuiHistoryTests(unittest.TestCase):
                 gui._worker.join(5)
                 self.assertFalse(gui._worker.is_alive())
             gui.poll()
-            if not gui.state.busy and not gui.history.needed:
+            if not gui.state.busy and not gui.history.needed and not gui.history._read:
                 break
+        self.assertFalse(gui.state.busy)
+        self.assertFalse(gui.history.needed)
+        self.assertEqual(gui.history._read, '')

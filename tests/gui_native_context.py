@@ -32,6 +32,7 @@ from metor.core.api import (
     CallInfo,
     CallState,
     CallStateEvent,
+    ContactEntry,
     NotificationPrivacy,
     Delivery,
     LiveContextEntry,
@@ -184,6 +185,52 @@ class GestureHarness(App):
             self.action._pointer_identity,
             self.action.state,
         )
+        self.plain_calls: list[bool] = []
+        self.plain = ContextAction(
+            'Send',
+            lambda: self.plain_calls.append(True),
+            size_hint=(None, None),
+            width=dp(240),
+            pos=(dp(40), dp(280)),
+        )
+        self.panel.add_widget(self.plain)
+        Clock.schedule_once(self.plain_reattach, 0.1)
+
+    def plain_reattach(self, _elapsed: float) -> None:
+        """A new context-free press survives reattachment while an older release stays cancelled."""
+
+        def touch(identity: str) -> MouseMotionEvent:
+            """Build one normalized pointer for the concrete context-free action."""
+            pointer = MouseMotionEvent(
+                'mouse',
+                identity,
+                (
+                    self.plain.center_x / Window.width,
+                    self.plain.center_y / Window.height,
+                    'left',
+                ),
+                is_touch=True,
+            )
+            pointer.scale_for_screen(Window.width, Window.height)
+            return pointer
+
+        interrupted = touch('plain-interrupted')
+        EventLoop.post_dispatch_input('begin', interrupted)
+        self.panel.remove_widget(self.plain)
+        self.panel.add_widget(self.plain)
+        fresh = touch('plain-fresh')
+        EventLoop.post_dispatch_input('begin', fresh)
+        EventLoop.post_dispatch_input('end', interrupted)
+        assert not self.plain_calls
+        EventLoop.post_dispatch_input('end', fresh)
+        assert self.plain_calls == [True]
+        self.panel.remove_widget(self.plain)
+        self.panel.add_widget(self.plain)
+        after_acceptance = touch('plain-after-acceptance')
+        EventLoop.post_dispatch_input('begin', after_acceptance)
+        EventLoop.post_dispatch_input('end', after_acceptance)
+        assert self.plain_calls == [True, True]
+        self.panel.remove_widget(self.plain)
         self.action.focus = False
         self.field.focus = True
         Clock.schedule_once(self.pointer_feedback, 0.2)
@@ -305,14 +352,12 @@ class GestureHarness(App):
             self.gui.security._policy,
             notifications_locked=NotificationPrivacy.ANONYMIZE,
         )
-        self.phone_overlay = CallOverlay(self.gui, lambda: None)
+        phone_refresh = Clock.create_trigger(
+            lambda _elapsed: self.phone_overlay.render(), -1
+        )
+        self.phone_overlay = CallOverlay(self.gui, lambda: phone_refresh())
         self.panel.add_widget(self.phone_overlay)
         self.phone_overlay.render()
-        self.mute = next(
-            widget
-            for widget in self.phone_overlay.walk()
-            if isinstance(widget, Action) and widget.label.text == 'Mute'
-        )
         assert not any(
             getattr(widget, 'text', '') == 'Private Alias'
             for widget in self.phone_overlay.walk()
@@ -321,6 +366,13 @@ class GestureHarness(App):
 
     def mute_phone(self, _elapsed: float) -> None:
         """Dispatches reduced locked Call controls without unlocking private chat."""
+        self.phone_overlay.render()
+        self.mute = next(
+            widget
+            for widget in self.phone_overlay.walk()
+            if isinstance(widget, Action) and widget.label.text == 'Mute'
+        )
+        assert self.mute.width >= dp(48)
         touch = MouseMotionEvent(
             'mouse',
             'phone-mute',
@@ -333,6 +385,14 @@ class GestureHarness(App):
         )
         touch.scale_for_screen(Window.width, Window.height)
         EventLoop.post_dispatch_input('begin', touch)
+        assert self.mute in touch.ud, (
+            self.mute.center,
+            self.mute.size,
+            [
+                (type(key).__name__, getattr(key, 'accessible_name', ''))
+                for key in touch.ud
+            ],
+        )
         EventLoop.post_dispatch_input('end', touch)
         assert self.gui.submit.call_count == 2
         assert self.gui.calls._operation[1] == 'phone'
@@ -343,6 +403,7 @@ class GestureHarness(App):
             '',
             profile_instance_id='instance',
             epoch='epoch',
+            contacts=[ContactEntry('Renamed Call Alias', 'private-peer')],
             live_contexts=[
                 LiveContextEntry(
                     'Peer',
@@ -353,6 +414,38 @@ class GestureHarness(App):
                 )
             ],
         )
+        self.phone_overlay.render()
+        assert any(
+            getattr(widget, 'text', '') == 'Renamed Call Alias'
+            for widget in self.phone_overlay.walk()
+        )
+        self.gui.state.snapshot.contacts = [
+            ContactEntry('Second Call Alias', 'private-peer')
+        ]
+        self.phone_overlay.render()
+        assert any(
+            getattr(widget, 'text', '') == 'Second Call Alias'
+            for widget in self.phone_overlay.walk()
+        )
+        assert not any(
+            getattr(widget, 'text', '') == 'Renamed Call Alias'
+            for widget in self.phone_overlay.walk()
+        )
+        self.gui.state.covered = True
+        self.gui.security._policy = replace(
+            self.gui.security._policy,
+            notifications_locked=NotificationPrivacy.SHOW_ALL,
+        )
+        self.phone_overlay.render()
+        assert any(
+            getattr(widget, 'text', '') == 'Private Alias'
+            for widget in self.phone_overlay.walk()
+        )
+        assert not any(
+            getattr(widget, 'text', '') == 'Second Call Alias'
+            for widget in self.phone_overlay.walk()
+        )
+        self.gui.state.covered = False
         self.gui.state.route = Route('V09', 'peer', Delivery.LIVE)
         self.review_binding = CaptureBinding(
             'instance',
@@ -434,6 +527,7 @@ def main() -> None:
                 'hold_500ms': 'pass',
                 'travel_over_8_units': 'pass',
                 'detached_target_cancellation': 'pass',
+                'context_free_reattach_and_stale_release': 'pass',
                 'reattached_first_click': 'pass',
                 'pointer_preserves_typing_focus': 'pass',
                 'nested_more_owns_press': 'pass',
@@ -441,6 +535,8 @@ def main() -> None:
                 'ended_invitations_hidden': 'pass',
                 'locked_phone_mute_reachable': 'pass',
                 'locked_phone_identity_anonymous': 'pass',
+                'uncovered_call_alias_tracks_contact_renames': 'pass',
+                'covered_call_alias_uses_core_privacy_projection': 'pass',
                 'call_and_unsent_review_coexist': 'pass',
                 'review_focus_survives_call_and_resize': 'pass',
                 'message_media_stays_inert_during_call': 'pass',

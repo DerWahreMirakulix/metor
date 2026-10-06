@@ -136,11 +136,8 @@ class InputDock:
         self.app.controller.security.activity()
         if value == 'backspace':
             field.do_backspace()
-        elif value == 'enter':
-            if field.multiline:
-                field.insert_text('\n')
-            else:
-                field.dispatch('on_text_validate')
+        elif value in {'enter', 'shift-enter'}:
+            field.enter(shift=value == 'shift-enter')
         else:
             field.insert_text(value)
         Clock.schedule_once(self._reveal, 0)

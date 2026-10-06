@@ -222,7 +222,7 @@ class VoiceCard(BoxLayout):
         self.title.text = (
             'Audio unavailable'
             if self.play.disabled or state == 'unavailable'
-            else 'Set up audio to play'
+            else 'Play voice message'
             if playback.audio is None
             else 'Buffering…'
             if state == 'buffering'

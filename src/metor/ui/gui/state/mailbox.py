@@ -27,6 +27,8 @@ class Update:
     profile_catalog: FrontendProfileCatalog | None = None
     profile_result: FrontendProfileOperationResult | None = None
     background: bool = False
+    worker_token: int | None = None
+    read_epoch: int | None = None
 
 
 class Mailbox:

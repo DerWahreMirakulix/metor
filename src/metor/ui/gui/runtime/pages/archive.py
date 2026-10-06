@@ -1,15 +1,20 @@
 """Single-page DROP archive navigation through the public bounded request contract."""
 
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from metor.core.api import (
     Delivery,
     GetMessagesCommand,
     MessageDirectionCode,
+    MessageStatusCode,
     MessagesDataEvent,
+    TextContent,
 )
 from metor.ui.gui.constants import GuiLimits
 from metor.ui.gui.state.mailbox import Update
+
+from ..transcript import advanced_status
 
 if TYPE_CHECKING:
     from ..controller import GuiController
@@ -122,17 +127,82 @@ class ArchivePages:
             return False
         if update.operation != self._operation:
             return True
+        if not self.controller.read_is_current(update):
+            self.needed = True
+            return True
         event, state = update.event, self.controller.state
         if state.covered or state.route.delivery is not Delivery.DROP:
             return True
         if isinstance(event, MessagesDataEvent) and event.onion == state.route.peer:
             if event.page_available:
-                self.controller.messages = event
+                self.controller.messages = self._release_confirmed_text(event)
             else:
                 state.status = 'This history page is unavailable. Return to latest messages to refresh.'
         else:
             state.status = 'History could not be loaded. Retry from latest messages.'
         return True
+
+    def _release_confirmed_text(self, event: MessagesDataEvent) -> MessagesDataEvent:
+        """Hands exact published outgoing text presentation back to its Core archive.
+
+        Args:
+            event: Current available page for the already verified exact peer.
+        Returns:
+            MessagesDataEvent: Archive rows retaining any newer positive receipt evidence.
+        """
+        transcript = self.controller.transcript
+        previous = self.controller.messages
+        known_status = (
+            {
+                (entry.direction, entry.msg_id): entry.status
+                for entry in previous.messages
+                if entry.msg_id and entry.delivery is Delivery.DROP
+            }
+            if previous is not None and previous.onion == event.onion
+            else {}
+        )
+        entries = []
+        for entry in event.messages:
+            prior_status = (
+                known_status.get((entry.direction, entry.msg_id))
+                if entry.msg_id
+                else None
+            )
+            if entry.delivery is Delivery.DROP and prior_status is not None:
+                entry = replace(
+                    entry, status=advanced_status(prior_status, entry.status)
+                )
+            if (
+                event.onion is not None
+                and entry.msg_id
+                and entry.delivery is Delivery.DROP
+                and entry.direction is MessageDirectionCode.OUT
+                and entry.status is not MessageStatusCode.DRAFT
+                and isinstance(entry.content, TextContent)
+            ):
+                key = (
+                    event.onion,
+                    Delivery.DROP,
+                    MessageDirectionCode.OUT,
+                    entry.msg_id,
+                )
+                cached = transcript.items.get(key)
+                if (
+                    cached is not None
+                    and cached.text is not None
+                    and cached.status is not MessageStatusCode.DRAFT
+                ):
+                    entry = replace(
+                        entry, status=advanced_status(cached.status, entry.status)
+                    )
+                    transcript.discard(
+                        event.onion,
+                        Delivery.DROP,
+                        entry.msg_id,
+                        MessageDirectionCode.OUT,
+                    )
+            entries.append(entry)
+        return replace(event, messages=entries)
 
     def poll(self) -> None:
         """Retries deferred admission without automatically stepping through the archive.

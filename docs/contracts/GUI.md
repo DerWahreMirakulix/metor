@@ -83,6 +83,18 @@ for PIN, password and no-local-secret methods, including the touch keyboard.
 Its result records that Core and physical audio hardware are absent; it proves
 layout and hit targets rather than call transport or acoustic continuation.
 
+The conversation fixture
+`python tests/gui_native_conversation.py --result RESULT.json` checks actual
+Kivy frame geometry and synthetic pointer/keyboard interactions at 360×640 with
+1.5× text scaling; `--width 1180 --height 760` covers the wide layout. It checks
+first-frame message placement, feedback expiry and focus revocation, repeated
+Send, Enter/Shift+Enter, header actions, closed audio dialogs and Back navigation.
+`python tests/gui_native_text_input.py --result RESULT.json` also exercises the
+local keyboard and preserves credential-field behavior. These fixtures use
+injected SDK results and no Core or audio streams. An offscreen SDL run proves
+these widget interactions only; it does not replace the installed native-window
+smoke, physical input, or acoustic acceptance.
+
 On Windows, add `--windows-launch` to check both installed entry-point
 executables, the graphical launcher without standard streams, the temporary
 locked `--start-daemon` path through native UI Automation, the original
@@ -229,6 +241,25 @@ Those actions require explicit controls and typed Core commands. The GUI does
 not infer online presence from a cached connection or change delivery semantics
 because a view changed.
 
+DROP and LIVE tabs within a peer replace the current projection in navigation
+history. Back returns to the view that opened that conversation, regardless of
+tab switches. The conversation header keeps one persistent status and the
+explicit Start/Cancel/End Live, Call, and More actions in the same order and
+location at narrow and wide widths. Short timelines align at the top from the
+first layout; overflowing timelines follow the latest edge only while the user
+has chosen to follow it.
+
+Action results appear once in a dismissible overlay and expire after six
+seconds without moving the timeline or composer. Navigation and privacy covers
+revoke them. Ongoing connection, recording, sending, and unknown-result states
+belong to their corresponding controls, rather than repeated global banners or
+Notification Center entries. Background reads do not disable foreground actions;
+confirmed mutations invalidate older read projections before those can overwrite
+the result. Exact action reconciliation precedes general reads, whose admission
+rotates fairly under continuous state events. Message-only changes request fresh
+data without rejecting in-flight reads or regressing confirmed delivery receipts;
+contact changes and mutations still invalidate the affected projections.
+
 Core owns message IDs, peer identities, delivery, receipts, unread and pending
 counts, recovery, fallback, and authorization. A local message identity includes
 profile instance, peer, direction, and `msg_id`; aliases are mutable labels.
@@ -244,6 +275,11 @@ disposable on GUI exit, restart, profile switch, hard lock, and purge. Core
 pending or unseen content is never discarded because a GUI cache evicts it.
 Peer-linked pins and preferences use the protected public profile boundary,
 not a plaintext address or content side store.
+
+Enter sends the focused message draft; Shift+Enter inserts a newline. Both the
+physical and local keyboard follow this rule. A pending send remains tied to
+its original message identity and cannot be repeated; an unknown outcome is
+checked through read-only reconciliation without resending the message.
 
 Confirmed DROP sends refresh the open archive without requiring navigation or
 a prior LIVE connection. Explicit successful Send as Drop opens that peer's DROP
@@ -261,6 +297,11 @@ and the user's current intent. It cannot execute a URL or command, duplicate a
 saved identity, or start a LIVE chat without an explicit Start Live intent.
 Address regeneration is a confirmed profile action and does not imply that old
 contacts or conversations move automatically.
+
+Confirmed contact changes update every open label in the same GUI turn, without
+waiting for another snapshot. Display names retain the user's capitalization;
+lookup and duplicate detection compare Unicode case-folded names. The canonical
+peer identity is independent of that display name.
 
 Notification Center entries are profile-scoped, bounded, and volatile. They
 carry permitted kind, action reference, count, timestamp, and source identity,
@@ -320,11 +361,17 @@ Transport loss ends the call; reconnecting a chat never reopens or accepts it.
 
 No microphone or camera starts on boot, navigation, reattach, or unlock.
 Permissions are requested at explicit use. Missing optional media capability
-disables dependent controls while text remains available.
+leaves text usable and offers setup through the deliberate media controls;
+media execution stays unavailable until its requirements are satisfied.
 
-The composer offers Set up audio until a headset route has been selected.
-Playing a supported Voice message with no output configured opens the same
-explicit device selection. Selecting a route never starts capture or playback;
+Missing audio is explained only after a deliberate record, play, or call action,
+in a closed dialog with **Go to audio settings**. Settings → Device → Audio
+settings opens the same closed configuration dialog. Microphone and headphone
+selection each open a separate device chooser and return to configuration;
+closing the dialog removes the chooser completely. The composer has no permanent
+setup banner, and call readiness does not create action feedback or notifications.
+Playing a supported Voice message with no output configured uses that recovery
+dialog. Selecting a route never starts capture or playback;
 the user initiates the next recording or Play action.
 
 ## Privacy and lifecycle
@@ -389,7 +436,7 @@ configuration declares touch input; no keyboard button occupies the field.
 Focus order follows visible reading order;
 selection alone does not start communication. A focused PTT control may own
 Space down/up, but text fields and global shortcuts cannot capture that press.
-The text composer uses Enter for newline and Ctrl+Enter for explicit Send.
+The text composer uses Enter for explicit Send and Shift+Enter for a newline.
 Incoming call UI does not steal an active typing or PTT owner. Modal focus
 returns to a safe invoker; Escape/Back closes a reversible overlay before
 navigating and cannot dismiss a privacy cover or accepted destructive work.

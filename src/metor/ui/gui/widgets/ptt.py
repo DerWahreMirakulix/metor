@@ -15,18 +15,26 @@ from .controls import Action
 class PttAction(Action):
     """A labelled microphone target; a held source never becomes an ordinary click."""
 
-    def __init__(self, controller: GuiController, refresh: Callable[[], None]) -> None:
+    def __init__(
+        self,
+        controller: GuiController,
+        refresh: Callable[[], None],
+        unavailable: Callable[[], None] | None = None,
+    ) -> None:
         """Binds native input to the current public-service controller.
 
         Args:
             controller: GUI coordinator retaining native input ownership.
             refresh: Coalesced repaint request.
+            unavailable: Explicit local setup help when a released press lacks audio.
         Returns:
             None
         """
         super().__init__('Hold to talk', lambda: None, size_hint_x=None, width=dp(148))
         self.controller = controller
         self.refresh = refresh
+        self.unavailable = unavailable
+        self._missing_audio = False
         self._touch_identity: str | None = None
         self._key_identity: str | None = None
         self.bind(focus=self._focus_changed, parent=self._parent_changed)
@@ -66,9 +74,11 @@ class PttAction(Action):
         handled = bool(super().on_touch_down(touch))
         if handled:
             self._touch_identity = str(touch.uid)
-            self.controller.inputs.down(
-                PressSource.POINTER, self._touch_identity, self.controller.voice
-            )
+            self._missing_audio = self._needs_audio()
+            if not self._missing_audio:
+                self.controller.inputs.down(
+                    PressSource.POINTER, self._touch_identity, self.controller.voice
+                )
             self.refresh()
         return handled
 
@@ -82,9 +92,13 @@ class PttAction(Action):
         """
         handled = bool(super().on_touch_up(touch))
         identity = str(touch.uid)
-        if identity == self._touch_identity:
+        if identity == self._touch_identity and handled:
             self.controller.inputs.up(PressSource.POINTER, identity)
             self._touch_identity = None
+            missing_audio = self._missing_audio
+            self._missing_audio = False
+            if missing_audio and not self.disabled and self.collide_point(*touch.pos):
+                self._show_help()
             self.refresh()
         return handled
 
@@ -104,12 +118,16 @@ class PttAction(Action):
         if self.focus and keycode[1] == 'enter':
             return True
         if self.focus and keycode[1] == 'spacebar':
+            if self.disabled:
+                return True
             identity = str(keycode[0])
             if self.controller.inputs.fresh_key(identity):
                 self._key_identity = identity
-                self.controller.inputs.down(
-                    PressSource.KEYBOARD, identity, self.controller.voice
-                )
+                self._missing_audio = self._needs_audio()
+                if not self._missing_audio:
+                    self.controller.inputs.down(
+                        PressSource.KEYBOARD, identity, self.controller.voice
+                    )
                 self.state = 'down'
                 self.refresh()
             return True
@@ -128,9 +146,24 @@ class PttAction(Action):
             self.controller.inputs.up(PressSource.KEYBOARD, self._key_identity)
             self._key_identity = None
             self.state = 'normal'
+            if self._missing_audio:
+                self._show_help()
             self.refresh()
             return True
         return bool(super().keyboard_on_key_up(window, keycode))
+
+    def _needs_audio(self) -> bool:
+        """Keeps an unavailable media action intentional without admitting a capture."""
+        voice = self.controller.voice
+        return self.unavailable is not None and (
+            voice.audio is None or not voice.headset_confirmed or voice.audio.failed
+        )
+
+    def _show_help(self) -> None:
+        """Opens help only after release and never reconstructs the attempted press."""
+        self._missing_audio = False
+        if self.unavailable is not None and not self.controller.state.covered:
+            self.unavailable()
 
     def _focus_changed(self, _widget: object, focused: bool) -> None:
         """Stops a focused-key recording when its control loses keyboard focus.
@@ -142,7 +175,12 @@ class PttAction(Action):
             None
         """
         if not focused and self._key_identity is not None:
-            self.controller.voice.depart()
+            if self._missing_audio:
+                self._key_identity = None
+                self._missing_audio = False
+                self.state = 'normal'
+            else:
+                self.controller.voice.depart()
 
     def _parent_changed(self, _widget: object, parent: object) -> None:
         """Treats removal of a held target as input-context departure.
@@ -156,4 +194,7 @@ class PttAction(Action):
         if parent is None and (
             self._touch_identity is not None or self._key_identity is not None
         ):
-            self.controller.voice.depart()
+            if self._missing_audio:
+                self._missing_audio = False
+            else:
+                self.controller.voice.depart()

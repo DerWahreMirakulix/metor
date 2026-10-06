@@ -52,6 +52,17 @@ class SqlCipherCursor(Protocol):
 class SqlCipherConnection(Protocol):
     """Protocol describing the connection features used by the SQL manager."""
 
+    def create_collation(self, name: str, callback: Callable[[str, str], int]) -> None:
+        """Registers a connection-local comparison without altering stored labels.
+
+        Args:
+            name: SQL comparison identifier.
+            callback: Comparison returning a negative, zero, or positive integer.
+        Returns:
+            None
+        """
+        ...
+
     def __enter__(self) -> 'SqlCipherConnection':
         """Enters the transactional context manager.
 

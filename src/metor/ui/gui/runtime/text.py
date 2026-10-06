@@ -2,11 +2,13 @@
 
 import secrets
 import json
+import time
 from dataclasses import asdict, replace
 from typing import TYPE_CHECKING
 
 from metor.core.api import (
     Delivery,
+    EventType,
     AckEvent,
     ReadReceiptEvent,
     DropQueuedEvent,
@@ -16,6 +18,7 @@ from metor.core.api import (
     MessageStatusCode,
     SendMessageCommand,
     TextAcceptedEvent,
+    TextRejectedEvent,
     TextContent,
 )
 from metor.ui.gui.state.mailbox import Update
@@ -42,7 +45,37 @@ class TextController:
         self.controller = controller
         self.operations: dict[str, tuple[str, Delivery, str]] = {}
         self._checks: set[str] = set()
+        self._check_at: dict[str, float] = {}
         self.reservations: dict[str, tuple[TranscriptItem, int]] = {}
+
+    def pending(self, peer: str, delivery: Delivery) -> bool:
+        """Reports only this composer's admitted or unresolved send intent.
+
+        Args:
+            peer: Exact canonical composer peer.
+            delivery: Composer's DROP or LIVE projection.
+        Returns:
+            bool: Whether sending this draft again would duplicate an intent.
+        """
+        return any(p == peer and d is delivery for p, d, _ in self.operations.values())
+
+    def pending_status(self, peer: str, delivery: Delivery) -> str:
+        """Provides persistent draft-local feedback for its exact pending operation.
+
+        Args:
+            peer: Exact canonical composer peer.
+            delivery: Composer's DROP or LIVE projection.
+        Returns:
+            str: Sending or reconciliation label, or empty when no send is pending.
+        """
+        for action, (target, mode, _text) in self.operations.items():
+            if target == peer and mode is delivery:
+                return (
+                    'Checking send result…'
+                    if action in self.controller._unknown_actions
+                    else 'Sending…'
+                )
+        return ''
 
     def send(self, peer: str, delivery: Delivery) -> None:
         """Captures one message ID and text intent, rejecting duplicate activation.
@@ -58,9 +91,10 @@ class TextController:
             controller.state.status = 'Finish recording before typing a message'
             return
         value = controller.state.drafts.get((peer, delivery), '')
-        if not value.strip() or any(
-            p == peer and d == delivery for p, d, _ in self.operations.values()
-        ):
+        if not value.strip():
+            return
+        if self.pending(peer, delivery):
+            controller.state.status = 'This message is already being checked or sent'
             return
         if (
             delivery is Delivery.LIVE
@@ -77,28 +111,27 @@ class TextController:
             return
         identity = secrets.token_hex(GuiLimits.MESSAGE_ID_BYTES)
         action = 'A11:' + identity
-        if delivery is Delivery.LIVE:
-            item = TranscriptItem(
-                peer,
-                delivery,
-                MessageDirectionCode.OUT,
-                identity,
-                text=value,
-                status=MessageStatusCode.PENDING,
-                finalized=True,
-                order=controller.transcript.next_order(),
+        item = TranscriptItem(
+            peer,
+            delivery,
+            MessageDirectionCode.OUT,
+            identity,
+            text=value,
+            status=MessageStatusCode.PENDING,
+            finalized=True,
+            order=controller.transcript.next_order(),
+        )
+        size = (
+            len(json.dumps(asdict(item)).encode('utf-8'))
+            + GuiLimits.TEXT_HANDOFF_ITEM_BYTES
+        )
+        free_items, free_bytes = controller.transcript.capacity()
+        if free_items <= 0 or size > free_bytes:
+            controller.state.status = (
+                'Conversation view is full. This draft has not been sent.'
             )
-            size = (
-                len(json.dumps(asdict(item)).encode('utf-8'))
-                + GuiLimits.TEXT_HANDOFF_ITEM_BYTES
-            )
-            free_items, free_bytes = controller.transcript.capacity()
-            if free_items <= 0 or size > free_bytes:
-                controller.state.status = (
-                    'Conversation view is full. This draft has not been sent.'
-                )
-                return
-            self.reservations[action] = item, size
+            return
+        self.reservations[action] = item, size
         command = SendMessageCommand(
             peer,
             delivery,
@@ -112,9 +145,10 @@ class TextController:
             DropQueuedEvent if delivery is Delivery.DROP else TextAcceptedEvent,
         ):
             self.operations[action] = (peer, delivery, value)
-            controller.state.status = 'Queueing…'
         else:
             self.reservations.pop(action, None)
+            if not controller.state.covered:
+                controller.state.status = 'This message has not been sent. Try again when the current action finishes.'
 
     def install(self, update: Update) -> bool:
         """Applies only correctly qualified acceptance or definite rejection.
@@ -170,70 +204,94 @@ class TextController:
             )
         state = self.controller.state
         prior_status = state.status
+        rejected = (
+            not reconciled
+            and event is not None
+            and (
+                (
+                    isinstance(event, TextRejectedEvent)
+                    and event.onion == peer
+                    and event.msg_id == action.removeprefix('A11:')
+                )
+                or event.event_type
+                in {
+                    EventType.INVALID_TARGET,
+                    EventType.PEER_NOT_FOUND,
+                    EventType.DROPS_DISABLED,
+                    EventType.CANNOT_DROP_SELF,
+                    EventType.CLIENT_ACCESS_RESTRICTED,
+                }
+            )
+        )
         if accepted:
             accepted_status = (
                 event.status
                 if isinstance(event, MessageOutcomeEvent) and event.status
                 else MessageStatusCode.PENDING
             )
-            if delivery is Delivery.LIVE:
-                reservation = self.reservations.pop(action, None)
-                item = (
-                    reservation[0]
-                    if reservation is not None
-                    else TranscriptItem(
-                        peer,
-                        delivery,
-                        MessageDirectionCode.OUT,
-                        action.removeprefix('A11:'),
-                        text=text,
-                        finalized=True,
-                        status=MessageStatusCode.PENDING,
-                    )
+            reservation = self.reservations.pop(action, None)
+            item = (
+                reservation[0]
+                if reservation is not None
+                else TranscriptItem(
+                    peer,
+                    delivery,
+                    MessageDirectionCode.OUT,
+                    action.removeprefix('A11:'),
+                    text=text,
+                    finalized=True,
+                    status=MessageStatusCode.PENDING,
                 )
-                item = replace(
-                    item, status=advanced_status(item.status, accepted_status)
-                )
-                if not self.controller.transcript.admit(item):
-                    if reservation is not None:
-                        self.reservations[action] = reservation
-                    self._checks.add(action)
-                    self.controller._unknown_actions.add(action)
-                    state.status = 'Message accepted. Conversation view is full.'
-                    return True
-                accepted_status = item.status
+            )
+            item = replace(item, status=advanced_status(item.status, accepted_status))
+            if not self.controller.transcript.admit(item):
+                if reservation is not None:
+                    self.reservations[action] = reservation
+                self._checks.add(action)
+                self.controller._unknown_actions.add(action)
+                state.status = 'Message accepted. Conversation view is full.'
+                return True
             if state.drafts.get((peer, delivery)) == text:
                 state.drafts.pop((peer, delivery), None)
             del self.operations[action]
             self.reservations.pop(action, None)
             self._checks.discard(action)
+            self._check_at.pop(action, None)
             self.controller._unknown_actions.discard(action)
-            if accepted_status is MessageStatusCode.READ:
-                state.status = 'Read'
-            elif accepted_status is MessageStatusCode.DELIVERED:
-                state.status = 'Delivered'
-            else:
-                state.status = (
-                    'Queued'
-                    if isinstance(event, DropQueuedEvent)
-                    or getattr(event, 'delivery', None) is Delivery.DROP
-                    else 'Pending'
-                )
+            state.status = (
+                'Queued'
+                if isinstance(event, DropQueuedEvent)
+                or getattr(event, 'delivery', None) is Delivery.DROP
+                else 'Message accepted'
+            )
+            if (
+                delivery is Delivery.DROP
+                and not state.covered
+                and state.route.view == 'V08'
+                and state.route.peer == peer
+                and state.route.delivery is Delivery.DROP
+                and self.controller.archive.before is not None
+            ):
+                self.controller.archive.reset()
             self.controller.refresh_state()
-        elif (
-            event is not None
-            and not reconciled
-            and not isinstance(event, TextAcceptedEvent)
-        ):
+        elif rejected:
             del self.operations[action]
             self.reservations.pop(action, None)
             self._checks.discard(action)
+            self._check_at.pop(action, None)
             self.controller._unknown_actions.discard(action)
+            state.status = (
+                'Drops are disabled. Your draft is still here.'
+                if event is not None and event.event_type is EventType.DROPS_DISABLED
+                else 'Message was rejected. Your draft is still here.'
+            )
         else:
             self.controller._unknown_actions.add(action)
             state.status = 'Checking result… This message cannot be sent again until its result is known.'
-            if not reconciled:
-                self._checks.add(action)
+            self._checks.add(action)
+            self._check_at[action] = (
+                time.monotonic() + GuiLimits.TEXT_OUTCOME_SECONDS if reconciled else 0.0
+            )
         if state.covered and state.route.view == 'V05':
             state.status = prior_status
         return True
@@ -254,7 +312,13 @@ class TextController:
             or 'message_outcome' not in controller.state.capabilities
         ):
             return
-        action = next(iter(self._checks))
+        now = time.monotonic()
+        action = next(
+            (key for key in self._checks if self._check_at.get(key, 0.0) <= now),
+            None,
+        )
+        if action is None:
+            return
         peer, _delivery, _text = self.operations[action]
         if controller.submit(
             'text-check:' + action,
@@ -262,6 +326,7 @@ class TextController:
                 GetMessageOutcomeCommand(peer, action.removeprefix('A11:')),
                 MessageOutcomeEvent,
             ),
+            background=True,
         ):
             self._checks.remove(action)
 
@@ -276,3 +341,4 @@ class TextController:
         self.operations.clear()
         self.reservations.clear()
         self._checks.clear()
+        self._check_at.clear()

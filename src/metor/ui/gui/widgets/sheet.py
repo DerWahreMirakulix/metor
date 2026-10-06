@@ -38,6 +38,8 @@ class ActionSheet(ModalView):
         primary_tone: str = 'danger',
         footer: Label | None = None,
         revision: Callable[[], object] | None = None,
+        snapshot_updates: bool = True,
+        wrap_title: bool = False,
     ) -> None:
         """Creates current-state content with an explicit Close and persistent action area.
 
@@ -51,6 +53,8 @@ class ActionSheet(ModalView):
             primary_tone: Semantic primary label tone; confirmations default to danger.
             footer: Optional persistent scope/help text above the fixed actions.
             revision: Optional bounded local eligibility key for contextual actions.
+            snapshot_updates: False for local configuration independent of Core snapshots.
+            wrap_title: Measures multi-line audio headings instead of shortening them.
         Returns:
             None
         """
@@ -63,6 +67,8 @@ class ActionSheet(ModalView):
         self.heading, self.primary = title, primary
         self.compact_menu = compact_menu
         self.rebuild_on_snapshot = rebuild_on_snapshot
+        self.snapshot_updates = snapshot_updates
+        self.wrap_title = wrap_title
         self.primary_tone = primary_tone
         self.footer = footer
         self._eligibility_revision = revision
@@ -92,15 +98,18 @@ class ActionSheet(ModalView):
         """
         self.body.clear_widgets()
         header = BoxLayout(size_hint_y=None, height='48dp', spacing='12dp')
-        header.add_widget(
-            Label(
-                self.heading() if callable(self.heading) else self.heading,
-                role='title',
-                wrap=False,
-            )
-        )
-        header.add_widget(IconAction('x', 'Close', self.dismiss))
         self.header = header
+        title = Label(
+            self.heading() if callable(self.heading) else self.heading,
+            role='title',
+            wrap=self.wrap_title,
+        )
+        if self.wrap_title:
+            title.bind(height=self._title_height)
+        header.add_widget(title)
+        header.add_widget(
+            IconAction('x', 'Close', self.dismiss, pos_hint={'center_y': 0.5})
+        )
         self.invitation_indicator = IconAction(
             'bell', 'Incoming Live', self._open_invitation, tone='live', badge=True
         )
@@ -126,6 +135,18 @@ class ActionSheet(ModalView):
                 Action(self.primary[0], self.primary[1], tone=self.primary_tone)
             )
         self.body.add_widget(self.actions)
+        self._resize()
+
+    def _title_height(self, _widget: object, height: float) -> None:
+        """Keeps a wrapped heading fully visible beside its fixed close target.
+
+        Args:
+            _widget: Measured native heading.
+            height: Rendered title height at the current width and text scale.
+        Returns:
+            None.
+        """
+        self.header.height = max(dp(48), height)
         self._resize()
 
     def _resize(self, *_args: object) -> None:
@@ -156,7 +177,8 @@ class ActionSheet(ModalView):
         self.actions.orientation = 'vertical' if stacked else 'horizontal'
         self.actions.height = dp(108 if stacked else 48)
         desired_height = (
-            dp(48 + 48 + 32)
+            self.header.height
+            + dp(48 + 32)
             + self.column.minimum_height
             + self.actions.height
             + (self.footer.height + dp(16) if self.footer is not None else 0)
@@ -266,7 +288,8 @@ class ActionSheet(ModalView):
         if state.covered or state.generation != sheet._generation:
             sheet.dismiss(animation=False)
         elif (
-            sheet._snapshot != id(state.snapshot)
+            sheet.snapshot_updates
+            and sheet._snapshot != id(state.snapshot)
             or sheet._busy != state.busy
             or (
                 sheet._eligibility_revision is not None

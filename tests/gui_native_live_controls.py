@@ -69,7 +69,7 @@ def exercise_live_controls(app: MetorApp) -> None:
                 )
             ]
             peer.update()
-            assert peer.end.label.text == 'Cancel'
+            assert peer.end.accessible_name == 'Cancel Live'
             assert peer.end.parent is not None
             assert peer.connect.parent is None
             review = controller.voice.reviews.get(peer.route.peer or '')

@@ -13,7 +13,7 @@ from metor.ui.gui.state import Route
 from metor.ui.gui.widgets import Action, Label, SettingRow
 
 # Local Package Imports
-from ..audio import audio_routes_body
+from ..audio import show_audio_routes
 from ..actions import clear_drops
 from .preferences import call_preferences
 from .descriptors import core_settings_group
@@ -102,7 +102,9 @@ def settings_body(controller: GuiController, refresh: Callable[[], None]) -> Box
         )
     core_settings_group(controller, body, 'Device')
     device_settings_group(controller, body, refresh)
-    body.add_widget(audio_routes_body(controller, refresh))
+    body.add_widget(
+        Action('Audio settings', partial(show_audio_routes, controller, refresh))
+    )
     body.add_widget(
         Label('Metor application lock', role='support', tone='textSecondary')
     )

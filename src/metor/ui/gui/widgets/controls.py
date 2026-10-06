@@ -1,12 +1,13 @@
 """Measured plain text, rounded controls and focus feedback without reflow."""
 
 from collections.abc import Callable
-from typing import ClassVar, Protocol, cast
+from typing import ClassVar, Literal, Protocol, cast
 
 from kivy.core.window import Window
 from kivy.graphics import Canvas, Color, Line, RoundedRectangle
 from kivy.input.motionevent import MotionEvent
 from kivy.metrics import dp
+from kivy.properties import BooleanProperty
 from kivy.uix.behaviors import ButtonBehavior, FocusBehavior
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label as KivyLabel
@@ -394,6 +395,7 @@ class TextField(TextInput):
     """Native text editing with clipboard export disabled for selected text."""
 
     keyboard_owner: ClassVar[KeyboardOwner | None] = None
+    submit_on_enter = BooleanProperty(False)
 
     def __init__(self, **kwargs: object) -> None:
         """Builds an editable field whose device keyboard follows focus.
@@ -414,7 +416,64 @@ class TextField(TextInput):
         self._font_coverage()
         self.local_keyboard_visible = False
         self.input_purpose = 'password' if self.password else 'text'
+        self._enter_down = False
         self.bind(focus=self._keyboard_focus)
+
+    def enter(self, *, shift: bool = False) -> None:
+        """Applies the field's explicit Enter policy for physical and local input.
+
+        Args:
+            shift: Whether Shift+Enter requests a multiline line break.
+        Returns:
+            None
+        """
+        if self.disabled or self.readonly:
+            return
+        if self.multiline and (shift or not self.submit_on_enter):
+            self.insert_text('\n')
+        else:
+            self.dispatch('on_text_validate')
+
+    def keyboard_on_key_down(
+        self, window: object, keycode: tuple[int, str], text: str, modifiers: list[str]
+    ) -> Literal[True] | None:
+        """Keeps composer Enter local to its focus owner and suppresses held repeats.
+
+        Args:
+            window: Native keyboard owner.
+            keycode: Native key identity.
+            text: Native text value.
+            modifiers: Held modifier keys.
+        Returns:
+            Literal[True] | None: True for handled input, otherwise no native result.
+        """
+        if self.submit_on_enter and keycode[1] in {'enter', 'numpadenter'}:
+            if self.focus and not self.disabled and not self.readonly:
+                if 'shift' in modifiers:
+                    self.enter(shift=True)
+                elif not self._enter_down:
+                    self._enter_down = True
+                    self.enter()
+            return True
+        return (
+            True
+            if super().keyboard_on_key_down(window, keycode, text, modifiers) is True
+            else None
+        )
+
+    def keyboard_on_key_up(self, window: object, keycode: tuple[int, str]) -> None:
+        """Releases the exact Enter owner without changing composer focus.
+
+        Args:
+            window: Native keyboard owner.
+            keycode: Released native key identity.
+        Returns:
+            None: Matches the native text input's release callback contract.
+        """
+        if self.submit_on_enter and keycode[1] in {'enter', 'numpadenter'}:
+            self._enter_down = False
+            return
+        super().keyboard_on_key_up(window, keycode)
 
     def _font_coverage(self, *_args: object) -> None:
         """Keeps accepted Unicode editable while masked credentials use a fixed font.
@@ -440,6 +499,8 @@ class TextField(TextInput):
                 self.keyboard_owner.focused(self)
             else:
                 self.keyboard_owner.unfocused(self)
+        if not focused:
+            self._enter_down = False
 
     def copy(self, data: str = '') -> None:
         """Keeps selected profile-linked text out of the host clipboard.

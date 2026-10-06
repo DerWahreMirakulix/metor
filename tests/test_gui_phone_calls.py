@@ -173,6 +173,47 @@ class PhonePresentationTests(unittest.TestCase):
         self.assertEqual(self.calls.current.call_id, 'new')
         self.assertTrue(self.calls.visible)
 
+    def test_duplicate_call_metadata_does_not_reopen_dismissed_controls(self) -> None:
+        """Repeated lifecycle events and refreshes preserve a deliberate dismissal."""
+        for phase in (CallState.INCOMING, CallState.ACTIVE, CallState.ENDED):
+            with self.subTest(phase=phase):
+                current = CallInfo('same', 'bob', 'Bob', phase, owned=True)
+                self.calls.observe(CallStateEvent(current))
+                self.calls.visible = False
+                revision = self.calls.revision
+                self.calls.observe(CallStateEvent(replace(current)))
+                self.calls.install(
+                    Update(0, 'call-snapshot', CallsStateEvent([replace(current)]))
+                )
+                self.assertFalse(self.calls.visible)
+                self.assertEqual(self.calls.revision, revision)
+
+    def test_missing_audio_does_not_create_an_idle_call_overlay_or_request(
+        self,
+    ) -> None:
+        """Audio setup remains an explicit view-level modal without a phantom phone call."""
+        self.gui.voice.headset_confirmed = False
+        before = self.gui.state.feedback.revision
+        self.assertFalse(self.calls.start('bob'))
+        self.assertIsNone(self.calls.current)
+        self.assertFalse(self.calls.visible)
+        self.assertFalse(self.calls.media_active)
+        self.assertEqual(self.operations, [])
+        self.assertEqual(self.gui.state.feedback.revision, before)
+        self.gui.client.start_call.assert_not_called()
+
+    def test_call_specific_failure_is_visible_without_duplicate_app_feedback(
+        self,
+    ) -> None:
+        """An explicit unsupported phone action reports only in its own Call controls."""
+        self.gui.state.capabilities = frozenset()
+        before = self.gui.state.feedback.revision
+        self.assertFalse(self.calls.start('bob'))
+        self.assertTrue(self.calls.visible)
+        self.assertEqual(self.calls.status, 'Calls are unavailable')
+        self.assertEqual(self.gui.state.feedback.revision, before)
+        self.assertEqual(self.operations, [])
+
     def test_unknown_send_does_not_repeat_or_open_audio(self) -> None:
         """A timeout leads to status reconciliation rather than automatic re-calling."""
         self.assertTrue(self.calls.start('bob'))

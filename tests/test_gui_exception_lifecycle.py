@@ -184,7 +184,7 @@ class GuiExceptionLifecycleTests(unittest.TestCase):
             controller.poll()
             self.assertIn('Profile opening failed', controller.state.status)
             self.assertIn('Metor GUI worker [work]: Exception.', output.getvalue())
-            self.assertIn('runtime/controller.py:', output.getvalue())
+            self.assertIn('runtime/operations.py:', output.getvalue())
             self.assertNotIn(sentinel, output.getvalue())
         finally:
             controller.close()

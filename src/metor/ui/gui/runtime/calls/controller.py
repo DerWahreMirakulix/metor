@@ -37,7 +37,6 @@ class CallActions:
         self.visible = False
         self.revision = 0
         self.status = ''
-        self.pending_peer: str | None = None
         self._operation: tuple[str, str] | None = None
         self._serial = 0
         self._snapshot_at = 0.0
@@ -88,28 +87,32 @@ class CallActions:
     def start(self, peer: str) -> bool:
         """Explicitly requests telephone audio without granting or switching LIVE chat."""
         controller = self.controller
+        if controller.state.covered:
+            return False
         if (
             controller.simulator
-            or controller.state.covered
             or controller.client is None
             or 'calls' not in controller.state.capabilities
         ):
-            controller.state.status = 'Calls are unavailable'
+            self.status = 'Calls are unavailable'
+            self.visible = True
+            self.revision += 1
             return False
         if self._checking_id is not None:
-            controller.state.status = 'Checking call status…'
+            self.status = 'Checking call status…'
+            self.visible = True
+            self.revision += 1
             return False
         if self.current is not None and self.current.state is not CallState.ENDED:
             self.visible = True
             self.revision += 1
             return False
         if not self.ready:
-            self.pending_peer = peer
-            self.visible = True
+            self.visible = False
             self.status = 'Choose and confirm a headset before calling'
             self.revision += 1
             return False
-        self.pending_peer = None
+        self.current = None
         controller.voice.depart()
         controller.playback.stop()
         client = controller.client
@@ -189,6 +192,8 @@ class CallActions:
         ):
             return
         prior = self.current
+        if source == prior:
+            return
         if (
             prior is not None
             and prior.call_id == source.call_id
@@ -219,7 +224,6 @@ class CallActions:
             return
         self.current = source
         self.visible = True
-        self.pending_peer = None
         self.status = ''
         if source.state is not CallState.ACTIVE and self.worker is not None:
             self.worker.stop()
@@ -287,7 +291,6 @@ class CallActions:
                 CallReason.TIMEOUT: 'Call request expired',
                 CallReason.NOT_OWNER: 'This client does not own the call',
             }.get(update.event.reason, 'Call action was not permitted')
-            self.controller.state.status = self.status
             self.revision += 1
         else:
             if update.event is None:
@@ -297,7 +300,6 @@ class CallActions:
                 if update.event is None
                 else 'Call action was not permitted'
             )
-            self.controller.state.status = self.status
             self._snapshot_at = 0.0
             self.revision += 1
         return True
@@ -379,7 +381,6 @@ class CallActions:
             ).start()
         self.current = None
         self.visible = False
-        self.pending_peer = None
         self._checking_id = None
         self._operation = None
         self._snapshot_pending = False

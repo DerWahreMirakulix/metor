@@ -285,13 +285,13 @@ class LiveActions:
                 controller.state.status = 'Could not confirm the Live action. Refreshing current state; no automatic retry.'
             return True
         self.pending = None
-        status = 'Live action could not be completed'
+        status: str | None = 'Live action could not be completed'
         if (
             mutation.kind == 'start'
             and isinstance(event, ConnectionConnectingEvent)
             and event.onion == mutation.peer
         ):
-            status = 'Connecting chat…'
+            status = None
         elif (
             mutation.kind == 'end'
             and isinstance(event, LiveControlCompletedEvent)
@@ -307,7 +307,7 @@ class LiveActions:
             and isinstance(event, RetunnelInitiatedEvent)
             and event.onion == mutation.peer
         ):
-            status = 'Changing Live route…'
+            status = None
         elif (
             mutation.kind == 'fallback'
             and isinstance(event, FallbackSuccessEvent)
@@ -344,7 +344,7 @@ class LiveActions:
                 MessageOperationReason.INVALID_SELECTION: 'The selection is no longer available',
             }.get(event.reason, 'Live action could not be completed')
         controller.refresh_state()
-        if not controller.state.covered:
+        if not controller.state.covered and status is not None:
             controller.state.status = status
         return True
 

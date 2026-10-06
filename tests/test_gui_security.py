@@ -4,7 +4,9 @@ import atexit
 import json
 import socket
 import subprocess
+import threading
 import time
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -16,6 +18,8 @@ from metor.client import FrontendLaunchContext, MetorClient, build_session_auth_
 from metor.core.api import (
     ClientUnlockMethod,
     Delivery,
+    GetMessageOutcomeCommand,
+    MessageOutcomeEvent,
     SendMessageCommand,
     GetGuiPreferencesCommand,
     GuiPreferenceFailure,
@@ -115,20 +119,27 @@ class GuiSecurityIntegrationTests(unittest.TestCase):
         self.assertIn('protected_gui_preferences', client.init_event.capabilities)
         return client
 
-    def settle(self, phase: str = 'security-operation') -> float:
-        """Drains serial SDK work and reports one bounded phase duration.
+    def settle(
+        self,
+        phase: str = 'security-operation',
+        *,
+        completed: Callable[[], bool] | None = None,
+    ) -> float:
+        """Waits for a bounded foreground phase or its exact asynchronous outcome.
 
         Args:
             phase (str): Non-secret operation label used only on assertion failure.
+            completed: Optional exact action predicate, including background reconciliation.
 
         Returns:
             float: Total worker and mailbox settlement duration in seconds.
         """
         started_at = time.monotonic()
-        for _ in range(4):
+        deadline = started_at + _SECURITY_WORKER_TIMEOUT_SEC
+        while time.monotonic() < deadline:
             worker = self.controller._worker
             if worker is not None:
-                worker.join(_SECURITY_WORKER_TIMEOUT_SEC)
+                worker.join(max(0.0, deadline - time.monotonic()))
                 self.assertFalse(
                     worker.is_alive(),
                     {
@@ -139,7 +150,7 @@ class GuiSecurityIntegrationTests(unittest.TestCase):
                     },
                 )
             self.controller.poll()
-            if not self.controller.state.busy:
+            if completed() if completed is not None else not self.controller.state.busy:
                 return time.monotonic() - started_at
         self.fail('Security work did not settle')
 
@@ -294,6 +305,11 @@ class GuiSecurityIntegrationTests(unittest.TestCase):
         self.controller.state.set_draft(peer, Delivery.LIVE, 'one logical send')
         request = self.client.request
         sent: list[str] = []
+        queries: list[str] = []
+        receipts: list[MessageOutcomeEvent] = []
+        receipt_started = threading.Event()
+        receipt_release = threading.Event()
+        self.addCleanup(receipt_release.set)
 
         def lose_acceptance(
             command: IpcCommand, expected: type[IpcEvent]
@@ -306,16 +322,51 @@ class GuiSecurityIntegrationTests(unittest.TestCase):
             Returns:
                 IpcEvent | None: Original result or injected lost acceptance.
             """
+            if isinstance(command, GetMessageOutcomeCommand):
+                queries.append(command.msg_id)
+                receipt_started.set()
+                if not receipt_release.wait(_SECURITY_WORKER_TIMEOUT_SEC):
+                    raise TimeoutError('Text receipt test gate was not released')
             result = request(command, expected)
             if isinstance(command, SendMessageCommand):
                 sent.append(command.msg_id)
                 return None
+            if isinstance(result, MessageOutcomeEvent):
+                receipts.append(result)
             return result
 
         with patch.object(self.client, 'request', side_effect=lose_acceptance):
             self.controller.send_text(peer, Delivery.LIVE)
             self.settle()
+            self.assertTrue(receipt_started.wait(_SECURITY_WORKER_TIMEOUT_SEC))
+            self.assertEqual(len(sent), 1)
+            action = 'A11:' + sent[0]
+            self.assertFalse(self.controller.state.busy)
+            self.assertEqual(
+                self.controller.state.drafts[(peer, Delivery.LIVE)], 'one logical send'
+            )
+            self.assertIn(action, self.controller.text.operations)
+            self.assertIn(action, self.controller._unknown_actions)
+            self.assertEqual(
+                self.controller.text.pending_status(peer, Delivery.LIVE),
+                'Checking send result…',
+            )
+            self.controller.send_text(peer, Delivery.LIVE)
+            self.assertEqual(len(sent), 1)
+            receipt_release.set()
+            self.settle(
+                'text-receipt-reconciliation',
+                completed=lambda: (
+                    not self.controller.text.pending(peer, Delivery.LIVE)
+                    and action not in self.controller._unknown_actions
+                    and (peer, Delivery.LIVE) not in self.controller.state.drafts
+                ),
+            )
         self.assertEqual(len(sent), 1)
+        self.assertEqual(queries, sent)
+        self.assertEqual([receipt.msg_id for receipt in receipts], sent)
+        self.assertEqual([receipt.onion for receipt in receipts], [peer])
+        self.assertTrue(all(receipt.status is not None for receipt in receipts))
         self.assertNotIn((peer, Delivery.LIVE), self.controller.state.drafts)
         self.assertEqual(self.controller.text.operations, {})
         self.assertEqual(self.controller._unknown_actions, set())

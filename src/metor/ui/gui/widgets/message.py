@@ -60,6 +60,7 @@ class MessageBubble(BoxLayout):
         self._metadata.pos_hint = {'center_y': 0.5}
         self._bubble.add_widget(self._body)
         footer = BoxLayout(size_hint_y=None, spacing=dp(8))
+        self._footer = footer
         footer.add_widget(self._metadata)
         if context is not None:
             footer.add_widget(
@@ -90,6 +91,7 @@ class MessageBubble(BoxLayout):
         self._natural_width: float = dp(Geometry.BUBBLE_MIN)
         self._measure_content(text, metadata)
         self.bind(width=self._width)
+        self._width()
 
     def set_content(self, text: str, metadata: str) -> None:
         """Updates an existing chronological item without moving or recreating it.
@@ -140,6 +142,13 @@ class MessageBubble(BoxLayout):
         self._bubble.width = min(
             maximum, max(dp(Geometry.BUBBLE_MIN), self._natural_width)
         )
+        inner_width = max(0, self._bubble.width - dp(32))
+        self._body.width = inner_width
+        self._metadata.width = max(0, inner_width - self._context_width)
+        self._body.texture_update()
+        self._metadata.texture_update()
+        self._bubble.do_layout()
+        self._footer.do_layout()
 
     def _height(self, _widget: object, height: float) -> None:
         """Keeps timeline spacing outside the measured bubble.

@@ -72,6 +72,12 @@ class AudioRoutes:
         Returns:
             bool: Whether the current supported route was configured.
         """
+        controller = self.voice.controller
+        if controller.state.covered:
+            return False
+        if controller.calls.active or controller.calls.media_active:
+            controller.state.status = 'End the call before changing audio devices'
+            return False
         inputs = {item.index for item in self.endpoints if item.input_available}
         outputs = {item.index for item in self.endpoints if item.output_available}
         if self.input not in inputs or self.output not in outputs:

@@ -27,7 +27,7 @@ from metor.ui.gui.widgets.voice import VoiceCard
 
 # Local Package Imports
 from ..actions import message_menu
-from ..audio import show_audio_routes
+from ..audio import show_audio_unavailable
 
 
 @dataclass(frozen=True)
@@ -181,13 +181,16 @@ class Timeline(BoxLayout):
         self._edge = True
         self._new_count = 0
         self._rows: list[TimelineRow] = []
-        self.scroll = ScrollView(do_scroll_x=False)
+        self.scroll = ScrollView(do_scroll_x=False, always_overscroll=False, scroll_y=0)
         self.column = BoxLayout(
             orientation='vertical', spacing=dp(12), size_hint_y=None
         )
         self.column.bind(minimum_height=self.column.setter('height'))
         self.scroll.add_widget(self.column)
         self.scroll.bind(scroll_y=self._scroll_changed)
+        self._layout_trigger = Clock.create_trigger(self._settle, -1)
+        self.column.bind(height=self._layout_changed)
+        self.scroll.bind(height=self._layout_changed)
         self.add_widget(self.scroll)
         self.navigation = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(8))
         self.older = Action('Older', self._older)
@@ -308,6 +311,15 @@ class Timeline(BoxLayout):
         """
         if self._edge:
             self.scroll.scroll_y = 0
+        self.scroll.update_from_scroll()
+
+    def _layout_changed(self, *_args: object) -> None:
+        """Settles geometry before drawing while retaining the user's reading position.
+
+        Args:
+            _args: Measured content or viewport height event.
+        """
+        self._layout_trigger()
 
     def _menu(self, key: tuple[MessageDirectionCode, str]) -> None:
         """Opens actions for an immutable direction-qualified timeline item.
@@ -387,7 +399,10 @@ class Timeline(BoxLayout):
                         or row.direction is MessageDirectionCode.OUT
                         else None,
                         configure_audio=partial(
-                            show_audio_routes, self.controller, self.refresh
+                            show_audio_unavailable,
+                            self.controller,
+                            self.refresh,
+                            purpose='playback',
                         ),
                     )
                 else:
@@ -420,14 +435,14 @@ class Timeline(BoxLayout):
                     self.column.remove_widget(widget)
                 self.column.add_widget(widget, index=index)
             self._visible = visible
-            Clock.schedule_once(self._settle, 0)
+            self._layout_trigger()
         if not selected:
             self.empty.text = (
                 'No Drops yet'
                 if self.route.delivery is Delivery.DROP
                 else 'Live conversation'
                 if active
-                else 'No Live connection'
+                else 'Start Live to chat here'
             )
             if self.empty.parent is None:
                 self.column.add_widget(self.empty)

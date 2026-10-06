@@ -35,12 +35,21 @@ def contact_form(
     }[form.intent]
     body.add_widget(Label('Contact address or QR data', role='support'))
     raw = TextField(
-        text=form.raw, readonly=form.fixed, size_hint_y=None, height=dp(104)
+        text=form.raw,
+        readonly=form.fixed or form.pending or form.unknown,
+        size_hint_y=None,
+        height=dp(104),
     )
     raw.use_bubble = raw.use_handles = False
     body.add_widget(raw)
     body.add_widget(Label('Local alias', role='support'))
-    alias = TextField(text=form.alias, multiline=False, size_hint_y=None, height=dp(52))
+    alias = TextField(
+        text=form.alias,
+        readonly=form.pending or form.unknown,
+        multiline=False,
+        size_hint_y=None,
+        height=dp(52),
+    )
     body.add_widget(alias)
 
     def edit(field: str, widget: TextField, value: str) -> None:
@@ -85,7 +94,7 @@ def contact_form(
             submit,
             surface='drop' if form.intent != 'live' else 'live',
             tone='onAccent',
-            disabled=controller.state.busy or form.unknown,
+            disabled=controller.state.busy or form.pending or form.unknown,
         )
     )
     if form.unknown:
@@ -93,7 +102,7 @@ def contact_form(
             Action(
                 'Recheck result',
                 partial(submit, True),
-                disabled=controller.state.busy,
+                disabled=form.pending,
             )
         )
     if not form.fixed:

@@ -1,6 +1,7 @@
 """Delivered-own-LIVE resend through real protected Core IPC and finite volatile sources."""
 
 import base64
+import threading
 from dataclasses import replace
 import unittest
 from unittest.mock import Mock, patch
@@ -12,6 +13,7 @@ from metor.core.api import (
     Delivery,
     MessageDirectionCode,
     MessageStatusCode,
+    MessageOutcomeEvent,
     RuntimeSnapshotEvent,
 )
 from metor.data import MessageDirection
@@ -20,6 +22,8 @@ from metor.ui.gui.constants import GuiLimits
 from metor.ui.gui.platform.audio import PcmVoice
 from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.runtime.resend.source import available_source
+from metor.ui.gui.runtime.resend.source import ResendSource
+from metor.ui.gui.runtime.resend.worker import ResendWorker
 from metor.ui.gui.runtime.transcript import TranscriptItem
 from metor.ui.gui.state.media import PlaybackTarget
 
@@ -262,6 +266,62 @@ class ResendSourceTests(unittest.TestCase):
             'peer', Delivery.LIVE, MessageDirectionCode.OUT, 'source'
         )
         self.cache = self.gui.playback.cache
+
+    def test_receipt_check_owns_pending_without_blocking_unrelated_foreground_controls(
+        self,
+    ) -> None:
+        """One exact background check has its own phase until the qualified outcome is installed."""
+        client = Mock()
+        release, started = threading.Event(), threading.Event()
+        self.addCleanup(release.set)
+        worker = ResendWorker(
+            client,
+            ResendSource(self.target, text='original'),
+            'new-copy',
+            None,
+            self.cache,
+        )
+        actions = self.gui.resend
+        actions.current = worker
+        actions.state = 'unknown'
+        actions.status = 'Unconfirmed'
+        self.gui.state.capabilities = frozenset({'message_outcome'})
+        self.gui.state.status = 'Unrelated feedback'
+
+        def query(_command: object, _expected: object) -> MessageOutcomeEvent:
+            """Holds the outcome so local admission and pending state can be inspected."""
+            started.set()
+            if not release.wait(_GUI_OPERATION_TIMEOUT_SEC):
+                raise TimeoutError('Resend receipt check was not released')
+            return MessageOutcomeEvent(
+                'peer',
+                'new-copy',
+                delivery=Delivery.DROP,
+                status=MessageStatusCode.PENDING,
+            )
+
+        client.request.side_effect = query
+        revision = actions.revision
+        self.assertTrue(actions.check())
+        self.assertTrue(started.wait(_GUI_OPERATION_TIMEOUT_SEC))
+        reader = self.gui._worker
+        assert reader is not None
+        self.assertTrue(actions.pending)
+        self.assertEqual(actions.state, 'checking')
+        self.assertEqual(actions.status, 'Checking new Drop result…')
+        self.assertGreater(actions.revision, revision)
+        self.assertFalse(self.gui.state.busy)
+        self.assertEqual(self.gui.state.status, 'Unrelated feedback')
+        self.assertFalse(actions.check())
+        self.assertFalse(actions.discard())
+        release.set()
+        reader.join(_GUI_OPERATION_TIMEOUT_SEC)
+        self.assertFalse(reader.is_alive())
+        self.gui.poll()
+        client.request.assert_called_once()
+        self.assertFalse(actions.pending)
+        self.assertEqual(actions.state, 'queued')
+        self.assertIsNone(actions.current)
 
     def test_only_complete_own_delivered_source_is_eligible(self) -> None:
         """Received, pending, partial, evicted, locked and simulated sources cannot be resent.

@@ -1,7 +1,9 @@
 """Contact intent and stale-alias safety through real encrypted Core IPC."""
 
 import base64
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
+import threading
 import unittest
 from unittest.mock import Mock, patch
 
@@ -13,6 +15,7 @@ from metor.core.api import (
     ContactEntry,
     Delivery,
     IpcEvent,
+    IpcCommand,
     RemoveContactCommand,
     RenameContactCommand,
     PeerNotFoundEvent,
@@ -20,6 +23,15 @@ from metor.core.api import (
     LiveContextEntry,
     ContactAddedEvent,
     AliasInUseEvent,
+    AddContactCommand,
+    AliasRenamedEvent,
+    ContactsDataEvent,
+    GetContactsListCommand,
+    DropConversationSummaryEntry,
+    PendingConnectionEntry,
+    PendingConnectionReasonCode,
+    ConnectionOrigin,
+    RenameSuccessEvent,
 )
 from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.state import Route
@@ -59,6 +71,161 @@ class ContactCoreTests(unittest.TestCase):
         self.assertEqual(self.h.contacts.get_onion_by_alias('alice'), replacement)
         self.assertEqual(self.h.contacts.get_onion_by_alias('anna'), original)
         self.assertIsNone(self.h.contacts.get_onion_by_alias('wrong'))
+
+    def test_public_display_case_and_unicode_alias_uniqueness(self) -> None:
+        """Encrypted IPC preserves spelling while equivalent aliases cannot retarget a peer."""
+        original, replacement = address(14), address(15)
+        added = self.h.client.request(
+            AddContactCommand('  Straße  ', original), IpcEvent
+        )
+        self.assertIsInstance(added, ContactAddedEvent)
+        self.assertEqual(added.alias, 'Straße')
+        duplicate = self.h.client.request(
+            AddContactCommand('STRASSE', replacement), IpcEvent
+        )
+        self.assertIsInstance(duplicate, AliasInUseEvent)
+        renamed = self.h.client.request(
+            RenameContactCommand('strasse', 'STRAßE', original), IpcEvent
+        )
+        self.assertIsInstance(renamed, AliasRenamedEvent)
+        self.assertEqual((renamed.old_alias, renamed.new_alias), ('Straße', 'STRAßE'))
+        self.assertEqual(self.h.contacts.get_onion_by_alias('strasse'), original)
+        contacts = self.h.client.request(GetContactsListCommand(), ContactsDataEvent)
+        self.assertEqual(
+            [(item.alias, item.onion) for item in contacts.saved],
+            [('STRAßE', original)],
+        )
+        removed = self.h.client.request(
+            RemoveContactCommand('STRASSE', original), IpcEvent
+        )
+        self.assertEqual(removed.alias, 'STRAßE')
+        self.assertIsNone(self.h.contacts.get_alias_by_onion(original))
+
+    def test_save_is_visible_on_return_before_any_snapshot_refresh(self) -> None:
+        """Core's positive save result supplies the returned contact row on the same GUI poll."""
+        peer = address(16)
+        gui = GuiController(
+            FrontendLaunchContext(
+                'voice-owned',
+                Mock(
+                    profile_state=lambda: FrontendProfileState(
+                        'voice-owned', True, False, False
+                    )
+                ),
+            )
+        )
+        self.addCleanup(gui.close)
+        gui.client = self.h.client
+        gui.state.snapshot = self.h.client.runtime_snapshot()
+        gui.state.covered = False
+        gui.state.route = Route('V12')
+        gui.refresh_state = Mock()
+        gui.contacts.begin('save')
+        form = gui.contacts.form
+        form.raw, form.alias = peer, 'McAlice'
+        self.assertTrue(gui.contacts.save())
+        self.assertEqual(gui.contacts.book.rows(), [])
+        gui._worker.join(5)
+        gui.poll()
+        self.assertEqual(gui.state.route.view, 'V12')
+        self.assertEqual(
+            [(item.onion, item.alias) for item in gui.contacts.book.rows()],
+            [(peer, 'McAlice')],
+        )
+        self.assertEqual(gui.contacts.alias(peer), 'McAlice')
+
+    def test_legacy_equivalent_aliases_do_not_resolve_an_arbitrary_peer(self) -> None:
+        """Existing Unicode collisions remain exact-addressable and block new equivalent labels."""
+        first, second, third = address(17), address(18), address(19)
+        self.h.contacts._sql.peers.insert(first, 'straße', True)
+        self.h.contacts._sql.peers.insert(second, 'strasse', True)
+        self.assertEqual(self.h.contacts.get_onion_by_alias('straße'), first)
+        self.assertEqual(self.h.contacts.get_onion_by_alias('strasse'), second)
+        self.assertIsNone(self.h.contacts.get_onion_by_alias('STRASSE'))
+        duplicate = self.h.client.request(AddContactCommand('STRASSE', third), IpcEvent)
+        self.assertIsInstance(duplicate, AliasInUseEvent)
+        stale = self.h.client.request(
+            RenameContactCommand('STRASSE', 'Wrong', first), IpcEvent
+        )
+        self.assertIsInstance(stale, AliasNotFoundEvent)
+        self.assertEqual(self.h.contacts.get_alias_by_onion(first), 'straße')
+
+    def test_save_discovered_alias_preserves_requested_case(self) -> None:
+        """Saving the peer under its existing label can promote it without a false collision."""
+        peer = address(20)
+        original = self.h.contacts.ensure_alias_for_onion(peer)
+        self.assertTrue(self.h.contacts.rename_contact(original, 'McPeer').success)
+        event = self.h.client.request(AddContactCommand('MCPEER', peer), IpcEvent)
+        self.assertIsInstance(event, ContactAddedEvent)
+        self.assertEqual(event.alias, 'MCPEER')
+        self.assertEqual(self.h.contacts.get_alias_by_onion(peer), 'MCPEER')
+
+    def test_parallel_authenticated_clients_keep_one_alias_owner(self) -> None:
+        """Concurrent real IPC additions and renames share the same case-insensitive namespace."""
+        peers = address(21), address(22)
+
+        def pair(commands: tuple[IpcCommand, IpcCommand]) -> list[IpcEvent]:
+            """Starts two actual independently authenticated requests at the same barrier."""
+            start = threading.Barrier(2)
+
+            def request(index: int) -> IpcEvent:
+                """Preserves each SDK client's independent request and response correlation."""
+                start.wait(5)
+                client = self.h.client if index == 0 else self.h.other
+                return client.request(commands[index], IpcEvent)
+
+            with ThreadPoolExecutor(max_workers=2) as workers:
+                futures = [workers.submit(request, index) for index in range(2)]
+                return [future.result(5) for future in futures]
+
+        added = pair(
+            (
+                AddContactCommand('Straße', peers[0]),
+                AddContactCommand('STRASSE', peers[1]),
+            )
+        )
+        self.assertEqual(
+            sum(isinstance(event, ContactAddedEvent) for event in added), 1
+        )
+        self.assertEqual(sum(isinstance(event, AliasInUseEvent) for event in added), 1)
+        owner = self.h.contacts.get_onion_by_alias('strasse')
+        self.assertIn(owner, peers)
+        labels = [
+            item
+            for item in self.h.contacts.get_contacts_data().saved
+            if item.alias.casefold() == 'strasse'
+        ]
+        self.assertEqual([item.onion for item in labels], [owner])
+
+        peers = address(23), address(24)
+        self.assertIsInstance(
+            self.h.client.request(AddContactCommand('First', peers[0]), IpcEvent),
+            ContactAddedEvent,
+        )
+        self.assertIsInstance(
+            self.h.other.request(AddContactCommand('Second', peers[1]), IpcEvent),
+            ContactAddedEvent,
+        )
+        renamed = pair(
+            (
+                RenameContactCommand('First', 'Ümit', peers[0]),
+                RenameContactCommand('Second', 'üMIT', peers[1]),
+            )
+        )
+        self.assertEqual(
+            sum(isinstance(event, AliasRenamedEvent) for event in renamed), 1
+        )
+        self.assertEqual(
+            sum(isinstance(event, AliasInUseEvent) for event in renamed), 1
+        )
+        owner = self.h.contacts.get_onion_by_alias('ÜMIT')
+        self.assertIn(owner, peers)
+        labels = [
+            item
+            for item in self.h.contacts.get_contacts_data().saved
+            if item.alias.casefold() == 'ümit'
+        ]
+        self.assertEqual([item.onion for item in labels], [owner])
 
     def test_public_save_completes_original_drop_intent(self) -> None:
         """A real public save opens the correct DROP only after Core acknowledges it."""
@@ -181,6 +348,104 @@ class ContactIntentTests(unittest.TestCase):
             'fixture', address(1), contacts=[]
         )
         self.gui.command = Mock(return_value=True)
+
+    def test_case_only_rename_updates_all_current_labels_after_confirmation(
+        self,
+    ) -> None:
+        """Labels change together only after a successful result, preserving immutable identity."""
+        peer = address(2)
+        snapshot = self.gui.state.snapshot
+        snapshot.contacts = [ContactEntry('alice', peer)]
+        snapshot.conversations = [DropConversationSummaryEntry('alice', peer)]
+        snapshot.live_contexts = [LiveContextEntry('alice', peer, True, 'connected')]
+        snapshot.pending = [
+            PendingConnectionEntry(
+                'alice',
+                peer,
+                ConnectionOrigin.INCOMING,
+                PendingConnectionReasonCode.USER_ACCEPT,
+            )
+        ]
+        self.gui.state.capabilities = frozenset({'contact_identity_guard'})
+        self.gui.contacts.begin('rename', peer)
+        form = self.gui.contacts.form
+        form.alias = 'Alice'
+        self.assertTrue(self.gui.contacts.save())
+        self.assertEqual(self.gui.contacts.alias(peer), 'alice')
+        self.assertTrue(form.pending)
+        self.assertFalse(self.gui.contacts.save())
+        self.gui.contacts.install(
+            Update(
+                0,
+                'contact:save:' + str(form.serial),
+                AliasRenamedEvent('alice', 'Alice', peer),
+            )
+        )
+        snapshot = self.gui.state.snapshot
+        self.assertEqual(self.gui.state.route.view, 'V12')
+        self.assertEqual(self.gui.contacts.alias(peer), 'Alice')
+        self.assertEqual(
+            [
+                entry.alias
+                for entry in snapshot.contacts
+                + snapshot.conversations
+                + snapshot.live_contexts
+                + snapshot.pending
+            ],
+            ['Alice'] * 4,
+        )
+
+    def test_uncertain_save_readback_keeps_submitted_display_case(self) -> None:
+        """Readback resolves the original request rather than lowercasing or replaying a save."""
+        peer = address(2)
+        self.gui.contacts.begin('save')
+        form = self.gui.contacts.form
+        form.raw, form.alias = peer, 'McAlice'
+        self.assertTrue(self.gui.contacts.save())
+        self.gui.contacts.install(Update(0, 'contact:save:' + str(form.serial)))
+        self.assertTrue(form.unknown)
+        self.assertEqual(self.gui.contacts.book.rows(), [])
+        self.gui.contacts.install(
+            Update(
+                0,
+                'contact:check:' + str(form.serial),
+                ContactsDataEvent([ContactEntry('McAlice', peer)], [], 'fixture'),
+            )
+        )
+        self.assertFalse(form.unknown)
+        self.assertEqual(self.gui.state.route.view, 'V12')
+        self.assertEqual(self.gui.contacts.alias(peer), 'McAlice')
+        self.gui.command.assert_called_once()
+
+    def test_old_contact_readback_cannot_replace_a_newer_confirmed_label(self) -> None:
+        """A read started before another client's rename neither rolls back labels nor confirms a stale form."""
+        peer = address(2)
+        self.gui.contacts.begin('save')
+        form = self.gui.contacts.form
+        form.raw, form.alias = peer, 'McAlice'
+        self.assertTrue(self.gui.contacts.save())
+        self.gui.contacts.install(Update(0, 'contact:save:' + str(form.serial)))
+        self.gui.state.snapshot.contacts = [ContactEntry('McAlice', peer)]
+        form.pending = True
+        self.gui.mailbox.put(
+            Update(0, 'event', RenameSuccessEvent('McAlice', 'Updated', peer))
+        )
+        self.gui.mailbox.put(
+            Update(
+                0,
+                'contact:check:' + str(form.serial),
+                ContactsDataEvent([ContactEntry('McAlice', peer)], [], 'fixture'),
+                background=True,
+                read_epoch=0,
+            )
+        )
+        self.gui.poll()
+        self.assertEqual(self.gui.contacts.alias(peer), 'Updated')
+        self.assertEqual(self.gui.state.route.view, 'V13')
+        self.assertTrue(form.unknown)
+        self.assertFalse(form.pending)
+        self.assertTrue(self.gui.contacts._check_needed)
+        self.gui.command.assert_called_once()
 
     def test_save_only_rejection_unknown_and_self_validation(self) -> None:
         """Failed, unknown or self contact input cannot become a call or lose its form."""

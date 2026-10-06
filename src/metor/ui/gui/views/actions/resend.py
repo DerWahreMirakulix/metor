@@ -31,7 +31,8 @@ def resend_controls(
             return
         body.add_widget(Label(actions.status, role='support'))
         if actions.pending:
-            body.add_widget(Action('Stop copying', actions.cancel))
+            if actions.state == 'copying':
+                body.add_widget(Action('Stop copying', actions.cancel))
         else:
             body.add_widget(
                 Action(

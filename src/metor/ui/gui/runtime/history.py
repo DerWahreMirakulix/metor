@@ -165,6 +165,10 @@ class ActivityHistory:
         if self.controller.state.covered:
             self.cover()
             return True
+        if not self.controller.read_is_current(update):
+            self.needed = True
+            self.revision += 1
+            return True
         event = update.event
         expected = HistoryRawDataEvent if self.raw else HistoryDataEvent
         if (
@@ -221,5 +225,7 @@ class ActivityHistory:
         command = (GetRawHistoryCommand if self.raw else GetHistoryCommand)(
             page_size=GuiLimits.PAGE_ITEMS, before_id=self._requested_anchors[-1]
         )
-        if controller.submit(operation, lambda: client.request(command, IpcEvent)):
+        if controller.submit(
+            operation, lambda: client.request(command, IpcEvent), background=True
+        ):
             self._read, self.needed = operation, False

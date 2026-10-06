@@ -179,6 +179,17 @@ class LocalKeyboard(Panel):
         self.pin = False
         self._build()
 
+    def _enter(self) -> None:
+        """Sends Enter or one explicit Shift+Enter without retaining modifier state.
+
+        Returns:
+            None
+        """
+        self.edit('shift-enter' if self.shift and not self.caps else 'enter')
+        if self.shift and not self.caps:
+            self.shift = False
+            self._build()
+
     def _build(self) -> None:
         """Measures character tiles while preserving 48-unit special-key targets.
 
@@ -265,10 +276,10 @@ class LocalKeyboard(Panel):
                 width=dp(48),
             )
         )
-        done = KeyboardKey(
-            '↵', partial(self.edit, 'enter'), size_hint_x=None, width=dp(48)
+        done = KeyboardKey('↵', self._enter, size_hint_x=None, width=dp(48))
+        done.accessible_name = (
+            'New line' if self.shift and not self.caps else 'Enter or Done'
         )
-        done.accessible_name = 'Enter or Done'
         bottom.add_widget(done)
         self.rows.add_widget(bottom)
         self.caption.text = 'Caps on' if self.caps else self.layout.upper()
