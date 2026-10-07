@@ -122,7 +122,7 @@ class IpcRequestSession:
             if not wait_for_response:
                 if send_failed:
                     return IpcRequestResult(
-                        message='Failed to communicate with the daemon.'
+                        message='Failed to communicate with the daemon.', failed=True
                     )
                 return IpcRequestResult(message='Command executed successfully.')
 
@@ -153,12 +153,14 @@ class IpcRequestSession:
                             message=auth_result.terminal_message,
                             insert_leading_blank_line=auth_prompt_used,
                             auth_incomplete=auth_result.auth_incomplete,
+                            failed=True,
                         )
                     if auth_result.terminal_event is not None:
                         return IpcRequestResult(
                             event=auth_result.terminal_event,
                             insert_leading_blank_line=auth_prompt_used,
                             auth_incomplete=auth_result.auth_incomplete,
+                            failed=True,
                         )
                     if auth_result.resend_original_command:
                         self._send_socket_command(sock, cmd)
@@ -177,10 +179,16 @@ class IpcRequestSession:
 
             if send_failed:
                 return IpcRequestResult(
-                    message='Failed to communicate with the daemon.'
+                    message='Failed to communicate with the daemon.', failed=True
                 )
 
-        return IpcRequestResult(message='Command executed successfully.')
+        return IpcRequestResult(
+            message=(
+                'The daemon closed the connection before confirming this command. '
+                'Its outcome is unknown; check its status before retrying.'
+            ),
+            failed=True,
+        )
 
     def execute(self, port: int, cmd: IpcCommand, wait_for_response: bool) -> str:
         """

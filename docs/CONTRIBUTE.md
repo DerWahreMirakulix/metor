@@ -136,6 +136,19 @@ behavior. The native rendering and synthetic stream fixtures are explicit CI
 commands outside unittest discovery; they require a working graphical display
 and are not silently skipped.
 
+The complete suite also includes actual CLI subprocess and POSIX Terminal PTY
+tests against disposable encrypted Core runtimes. They verify command outcomes,
+argument rejection, authentication, input editing, asynchronous rendering and
+process/terminal cleanup. The shared fixture routes signed production peer
+traffic over loopback TCP instead of starting Tor. These tests do not require a
+display or audio hardware; POSIX PTY cases are explicitly skipped on Windows.
+The Linux native-window gate additionally runs
+[`gui_native_core.py`](../tests/gui_native_core.py) at compact and desktop sizes,
+with XTest mouse/keyboard events and the actual GUI/SDK/Core path. See the
+[GUI contract](contracts/GUI.md#installation-and-startup) for invocation and
+capability limits. No injected request result or offscreen rendering is counted
+as this Core-backed window gate.
+
 The optional native Tor acceptance additionally requires an installed Tor
 binary and a network on which it can complete bootstrap. It is not a
 deterministic PR gate. After building the platform bundles, run

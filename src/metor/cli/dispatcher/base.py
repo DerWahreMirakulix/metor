@@ -165,27 +165,27 @@ class CliDispatcher(ProfilesDispatchMixin, MessagesDispatchMixin, HistoryDispatc
                 self._emit(self._proxy.unlock_daemon())
 
         elif cmd == 'settings':
-            if sub == 'set' and len(self._extra) >= 2:
+            if sub == 'set' and len(self._extra) == 2:
                 self._emit(
                     self._proxy.handle_settings_set(self._extra[0], self._extra[1])
                 )
-            elif sub == 'get' and len(self._extra) >= 1:
+            elif sub == 'get' and len(self._extra) == 1:
                 self._emit(self._proxy.handle_settings_get(self._extra[0]))
-            elif sub == 'list' or (sub is None and not self._extra):
+            elif sub in ('list', None) and not self._extra:
                 self._emit(self._proxy.handle_settings_list())
             else:
                 self._print_usage(cmd)
 
         elif cmd == 'config':
-            if sub == 'set' and len(self._extra) >= 2:
+            if sub == 'set' and len(self._extra) == 2:
                 self._emit(
                     self._proxy.handle_config_set(self._extra[0], self._extra[1])
                 )
-            elif sub == 'get' and len(self._extra) >= 1:
+            elif sub == 'get' and len(self._extra) == 1:
                 self._emit(self._proxy.handle_config_get(self._extra[0]))
-            elif sub == 'list' or (sub is None and not self._extra):
+            elif sub in ('list', None) and not self._extra:
                 self._emit(self._proxy.handle_config_list())
-            elif sub == 'sync':
+            elif sub == 'sync' and not self._extra:
                 self._emit(self._proxy.handle_config_sync())
             else:
                 self._print_usage(cmd)
@@ -238,7 +238,10 @@ class CliDispatcher(ProfilesDispatchMixin, MessagesDispatchMixin, HistoryDispatc
                 self._emit(self._proxy.send_drop(sub, ' '.join(self._extra)))
 
         elif cmd == 'inbox':
-            self._emit(self._proxy.handle_inbox(sub))
+            if self._extra:
+                self._print_usage(cmd)
+            else:
+                self._emit(self._proxy.handle_inbox(sub))
 
         elif cmd == 'messages':
             self._dispatch_messages(sub)
@@ -258,14 +261,14 @@ class CliDispatcher(ProfilesDispatchMixin, MessagesDispatchMixin, HistoryDispatc
                 self._emit(self._proxy.handle_transport(peer))
 
         elif cmd == 'address':
-            if sub in (None, 'show', 'generate'):
+            if sub in (None, 'show', 'generate') and not self._extra:
                 self._emit(self._proxy.get_address(generate=(sub == 'generate')))
             else:
                 self._print_usage(cmd)
 
         elif cmd == 'contacts':
             if sub == 'add':
-                if len(self._extra) < 1:
+                if len(self._extra) not in (1, 2):
                     self._print_usage(cmd)
                 else:
                     onion: Optional[str] = (
@@ -273,20 +276,20 @@ class CliDispatcher(ProfilesDispatchMixin, MessagesDispatchMixin, HistoryDispatc
                     )
                     self._emit(self._proxy.contacts_add(self._extra[0], onion))
             elif sub in ('rm', 'remove'):
-                if len(self._extra) < 1:
+                if len(self._extra) != 1:
                     self._print_usage(cmd)
                 else:
                     self._emit(self._proxy.contacts_rm(self._extra[0]))
             elif sub == 'rename':
-                if len(self._extra) < 2:
+                if len(self._extra) != 2:
                     self._print_usage(cmd)
                 else:
                     self._emit(
                         self._proxy.contacts_rename(self._extra[0], self._extra[1])
                     )
-            elif sub == 'clear':
+            elif sub == 'clear' and not self._extra:
                 self._emit(self._proxy.contacts_clear())
-            elif sub in ('list', None):
+            elif sub in ('list', None) and not self._extra:
                 self._emit(self._proxy.contacts_list())
             else:
                 self._print_usage(cmd)

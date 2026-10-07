@@ -27,6 +27,7 @@ from metor.core.api import (
 )
 from metor.shared import escape_terminal_text
 from metor.ui.terminal import Theme
+from metor.ui.terminal.help import Help as TerminalHelp
 from metor.ui.terminal.chat.models import ChatLine, ChatMessageType
 from metor.ui.terminal.chat.presenter import ChatPresenter
 from metor.ui.terminal.chat.event.content import handle_content_event
@@ -197,14 +198,58 @@ class TerminalRenderingSecurityTests(unittest.TestCase):
         self.assertIn(Theme.GREEN, rendered_contacts)
         self.assertIn(Theme.CYAN, rendered_transport)
 
-    def test_renderer_owned_cursor_sequences_remain_intact(self) -> None:
+    def test_draft_controls_are_visible_and_wrap_cursor_use_same_encoding(self) -> None:
+        """Clipboard controls cannot execute during drafting or shift cursor geometry."""
+        raw = 'Grüße\nA\x1b]0;title\x07\x9b2J\tB'
         display = Display('$ ', lambda _line: None)
+        columns = 20
+        encoded = escape_terminal_text(raw)
+        expected_rows = sum(
+            max(1, (2 + len(line) + columns - 1) // columns)
+            for line in encoded.split('\n')
+        )
+        self.assertEqual(
+            display.get_input_visual_lines(raw, '$ ', columns), expected_rows
+        )
         output = io.StringIO()
-
+        cursor_index = raw.index('B')
         with patch('metor.ui.terminal.chat.renderer.display.sys.stdout', output):
-            display.clear_screen()
+            display.redraw_input_area(
+                '$ ', raw, list(raw), cursor_index, expected_rows, columns
+            )
+        rendered = output.getvalue()
+        self.assertIn(encoded.replace('\n', '\n  '), rendered)
+        self.assertNotIn('\x1b]0;title\x07', rendered)
+        self.assertNotIn('\x9b2J', rendered)
+        self.assertNotIn('\t', rendered)
+        cursor_line = escape_terminal_text(raw[:cursor_index]).split('\n')[-1]
+        column = (2 + len(cursor_line)) % columns
+        self.assertTrue(rendered.endswith(f'\r\x1b[{column}C\x1b[?25h'))
+        self.assertEqual(raw, 'Grüße\nA\x1b]0;title\x07\x9b2J\tB')
 
-        self.assertEqual(output.getvalue(), '\x1b[?25h\x1b[2J\x1b[H')
+    def test_renderer_owned_cursor_sequences_remain_intact(self) -> None:
+        """Only the POSIX decoder receives paste delimiters; cursor controls stay intact."""
+        for platform in ('posix', 'nt'):
+            with self.subTest(platform=platform):
+                display = Display('$ ', lambda _line: None)
+                output = io.StringIO()
+                with (
+                    patch('metor.ui.terminal.chat.renderer.display.os.name', platform),
+                    patch('metor.ui.terminal.chat.renderer.display.sys.stdout', output),
+                ):
+                    display.clear_screen()
+                    display.enable_bracketed_paste()
+                    display.enable_bracketed_paste()
+                    display.restore_cursor()
+                    help_text = TerminalHelp.show_chat_help()
+                expected = '\x1b[?25h\x1b[2J\x1b[H'
+                if platform == 'posix':
+                    expected += '\x1b[?2004h\x1b[?2004l'
+                    self.assertIn('Ctrl-N or Alt-Enter inserts a newline.', help_text)
+                else:
+                    self.assertIn('Ctrl-N inserts a newline.', help_text)
+                    self.assertNotIn('Alt-Enter', help_text)
+                self.assertEqual(output.getvalue(), expected + '\x1b[?25h')
 
 
 if __name__ == '__main__':

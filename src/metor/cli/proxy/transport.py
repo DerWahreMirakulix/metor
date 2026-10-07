@@ -76,6 +76,7 @@ class CliProxyTransport:
         prefix_remote: Callable[[str], str],
         format_event: Callable[..., str],
         send_socket_command: Callable[[socket.socket, IpcCommand], None],
+        mark_error: Optional[Callable[[], None]] = None,
     ) -> None:
         """
         Initializes the request transport helper.
@@ -87,6 +88,8 @@ class CliProxyTransport:
             prefix_remote (Callable[[str], str]): Remote-prefix renderer callback.
             format_event (Callable[..., str]): IPC event renderer callback.
             send_socket_command (Callable[[socket.socket, IpcCommand], None]): Socket serializer callback.
+            mark_error (Optional[Callable[[], None]]): Nonzero-exit callback for
+                transport failures and incomplete authentication.
 
         Returns:
             None
@@ -97,6 +100,19 @@ class CliProxyTransport:
         self._prefix_remote = prefix_remote
         self._format_event = format_event
         self._send_socket_command = send_socket_command
+        self._mark_error = mark_error
+
+    def _track_result(self, result: IpcRequestResult) -> IpcRequestResult:
+        """Propagate unsuccessful exchanges without inspecting rendered text.
+
+        Args:
+            result: Structured command exchange outcome.
+        Returns:
+            IpcRequestResult: The unchanged outcome for caller reconciliation.
+        """
+        if (result.failed or result.auth_incomplete) and self._mark_error is not None:
+            self._mark_error()
+        return result
 
     def _should_prompt_headless_password(self, cmd: IpcCommand) -> bool:
         """
@@ -153,6 +169,19 @@ class CliProxyTransport:
         Returns:
             IpcRequestResult: The typed raw response payload.
         """
+        return self._track_result(self._request_ipc_result(cmd, wait_for_response))
+
+    def _request_ipc_result(
+        self, cmd: IpcCommand, wait_for_response: bool
+    ) -> IpcRequestResult:
+        """Resolve the endpoint or bounded offline Core for one exchange.
+
+        Args:
+            cmd: The outbound typed command.
+            wait_for_response: Whether a correlated confirmation is required.
+        Returns:
+            IpcRequestResult: Typed result before process-status propagation.
+        """
         try:
             port: Optional[int] = self._pm.get_daemon_port()
 
@@ -163,7 +192,8 @@ class CliProxyTransport:
                             f'Cannot reach remote Daemon on port '
                             f'{Theme.YELLOW}{self._pm.get_static_port()}{Theme.RESET}. '
                             'Did you forget the SSH tunnel?'
-                        )
+                        ),
+                        failed=True,
                     )
 
                 password: Optional[str] = None
@@ -176,6 +206,7 @@ class CliProxyTransport:
                             message='Aborted.',
                             insert_leading_blank_line=True,
                             auth_incomplete=True,
+                            failed=True,
                         )
 
                 headless_result: str | IpcRequestResult = run_with_headless_daemon(
@@ -200,14 +231,18 @@ class CliProxyTransport:
                         prompted_for_password or result.insert_leading_blank_line
                     ),
                     auth_incomplete=result.auth_incomplete,
+                    failed=result.failed,
                 )
 
             return self.send_to_port_result(port, cmd, wait_for_response)
         except PromptAbortedError:
-            return IpcRequestResult(message='Aborted.', auth_incomplete=True)
+            return IpcRequestResult(
+                message='Aborted.', auth_incomplete=True, failed=True
+            )
         except ValueError as exc:
             return IpcRequestResult(
                 message=format_safe_local_runtime_error(exc),
+                failed=True,
             )
 
     def request_ipc_event(self, cmd: IpcCommand) -> Optional[IpcEvent]:
@@ -220,30 +255,7 @@ class CliProxyTransport:
         Returns:
             Optional[IpcEvent]: The terminal typed event, if one was received.
         """
-        try:
-            port: Optional[int] = self._pm.get_daemon_port()
-
-            if not port:
-                if self._is_remote:
-                    return None
-
-                password: Optional[str] = None
-                if self._should_prompt_headless_password(cmd):
-                    password = self._prompt_password()
-                    if password is None:
-                        return None
-
-                return run_with_headless_daemon(
-                    self._pm,
-                    password,
-                    lambda resolved_port: self.send_to_port_event(resolved_port, cmd),
-                )
-
-            return self.send_to_port_event(port, cmd)
-        except PromptAbortedError:
-            return None
-        except ValueError:
-            return None
+        return self.request_ipc_result(cmd, wait_for_response=True).event
 
     def request_local_headless(
         self,
@@ -272,8 +284,12 @@ class CliProxyTransport:
                 ),
             )
         except PromptAbortedError:
+            if self._mark_error is not None:
+                self._mark_error()
             return 'Aborted.'
         except ValueError as exc:
+            if self._mark_error is not None:
+                self._mark_error()
             return escape_terminal_text(str(exc))
 
     def send_to_port(
@@ -296,10 +312,8 @@ class CliProxyTransport:
         Returns:
             str: The formatted terminal output.
         """
-        result: IpcRequestResult = self.send_to_port_result(
-            port,
-            cmd,
-            wait_for_response,
+        result: IpcRequestResult = self._track_result(
+            self.send_to_port_result(port, cmd, wait_for_response)
         )
         rendered: str
         if result.event is not None:
@@ -348,9 +362,11 @@ class CliProxyTransport:
             )
             return session.execute_result(port, cmd, wait_for_response)
         except PromptAbortedError:
-            return IpcRequestResult(message='Aborted.', auth_incomplete=True)
+            return IpcRequestResult(
+                message='Aborted.', auth_incomplete=True, failed=True
+            )
         except ValueError as exc:
-            return IpcRequestResult(message=escape_terminal_text(str(exc)))
+            return IpcRequestResult(message=escape_terminal_text(str(exc)), failed=True)
         except Exception:
             if self._is_remote:
                 return IpcRequestResult(
@@ -358,9 +374,12 @@ class CliProxyTransport:
                         f'Cannot reach remote Daemon on port '
                         f'{Theme.YELLOW}{self._pm.get_static_port()}{Theme.RESET}. '
                         'Did you forget the SSH tunnel?'
-                    )
+                    ),
+                    failed=True,
                 )
-            return IpcRequestResult(message='Failed to communicate with the daemon.')
+            return IpcRequestResult(
+                message='Failed to communicate with the daemon.', failed=True
+            )
 
     def send_to_port_event(self, port: int, cmd: IpcCommand) -> Optional[IpcEvent]:
         """
@@ -373,15 +392,6 @@ class CliProxyTransport:
         Returns:
             Optional[IpcEvent]: The terminal event, if one was received.
         """
-        session = IpcRequestSession(
-            self._pm,
-            async_event_types=CLI_ASYNC_EVENT_TYPES,
-            format_event=lambda event: self._format_event(
-                event,
-                prefix_remote=True,
-            ),
-            format_message=self._prefix_remote,
-            prompt_password=self._prompt_password,
-            send_socket_command=self._send_socket_command,
-        )
-        return session.execute_event(port, cmd)
+        return self._track_result(
+            self.send_to_port_result(port, cmd, wait_for_response=True)
+        ).event

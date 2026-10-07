@@ -8,6 +8,9 @@ from typing import Optional, List
 
 from metor.ui.terminal.constants import Constants
 
+# Local Package Imports
+from metor.ui.terminal.chat.renderer.keys import KeyStream
+
 try:
     import msvcrt
 except ImportError:
@@ -40,6 +43,7 @@ class InputHandler:
         self.line_chars: List[str] = []
         self.cursor_index: int = 0
         self._pending_tokens: List[str] = []
+        self._key_stream = KeyStream()
 
         self._init_terminal()
 
@@ -88,8 +92,18 @@ class InputHandler:
                 """
                 tcsetattr(fd, tcsa_drain, old_term_settings)
 
+            atexit.register(_reset_terminal)
             try:
                 setcbreak(fd)
+                # Preserve CR identity until the streaming decoder normalizes CRLF.
+                # Line-discipline translation would turn pasted CRLF into two LFs.
+                edit_settings = tcgetattr(fd)
+                edit_settings[0] &= ~(
+                    getattr(termios, 'ICRNL')
+                    | getattr(termios, 'INLCR')
+                    | getattr(termios, 'IGNCR')
+                )
+                tcsetattr(fd, tcsa_drain, edit_settings)
             except (getattr(termios, 'error'), OSError) as exc:
                 print(
                     f'Error: interactive chat requires a TTY (setcbreak failed: {exc}). '
@@ -97,7 +111,6 @@ class InputHandler:
                     file=sys.stderr,
                 )
                 sys.exit(1)
-            atexit.register(_reset_terminal)
 
     def get_char(self) -> Optional[str]:
         """
@@ -105,6 +118,9 @@ class InputHandler:
 
         Args:
             None
+
+        Raises:
+            EOFError: The terminal input stream was closed.
 
         Returns:
             Optional[str]: The raw character, a parsed SPECIAL tag, or None if empty.
@@ -140,104 +156,14 @@ class InputHandler:
             if not ready:
                 return None
 
-            data: str = os.read(sys.stdin.fileno(), Constants.TCP_BUFFER_SIZE).decode(
-                'utf-8', errors='ignore'
-            )
+            data = os.read(sys.stdin.fileno(), Constants.TCP_BUFFER_SIZE)
             if not data:
-                return None
+                raise EOFError
 
-            self._pending_tokens.extend(self._tokenize_posix_input(data))
+            self._pending_tokens.extend(self._key_stream.feed(data))
             if self._pending_tokens:
                 return self._pending_tokens.pop(0)
             return None
-
-    def _tokenize_posix_input(self, data: str) -> List[str]:
-        """
-        Splits raw POSIX terminal bytes into semantic key or paste tokens.
-
-        Args:
-            data (str): The decoded terminal input chunk.
-
-        Returns:
-            List[str]: Parsed tokens in processing order.
-        """
-        tokens: List[str] = []
-        index: int = 0
-        newline_chars: tuple[str, str] = (
-            '\r',
-            '\n',
-        )
-        control_chars: tuple[str, ...] = (
-            '\x1b',
-            '\r',
-            '\n',
-            '\x0e',
-        )
-
-        while index < len(data):
-            if data.startswith('\x1b[200~', index):
-                end_index: int = data.find('\x1b[201~', index + len('\x1b[200~'))
-                if end_index != -1:
-                    pasted_text: str = data[index + len('\x1b[200~') : end_index]
-                    if pasted_text:
-                        tokens.append(f'PASTE:{pasted_text}')
-                    index = end_index + len('\x1b[201~')
-                    continue
-
-            if data.startswith('\x1b[A', index):
-                tokens.append('SPECIAL:UP')
-                index += len('\x1b[A')
-                continue
-            if data.startswith('\x1b[B', index):
-                tokens.append('SPECIAL:DOWN')
-                index += len('\x1b[B')
-                continue
-            if data.startswith('\x1b[C', index):
-                tokens.append('SPECIAL:RIGHT')
-                index += len('\x1b[C')
-                continue
-            if data.startswith('\x1b[D', index):
-                tokens.append('SPECIAL:LEFT')
-                index += len('\x1b[D')
-                continue
-            if data.startswith('\x1b\r', index) or data.startswith('\x1b\n', index):
-                tokens.append('SPECIAL:NEWLINE')
-                index += len('\x1b\r')
-                continue
-
-            char: str = data[index]
-            if char == '\x0e':
-                tokens.append('SPECIAL:NEWLINE')
-                index += 1
-                continue
-
-            if char in newline_chars:
-                tokens.append('\n')
-                if index + 1 < len(data) and data[index + 1] in newline_chars:
-                    index += 2
-                else:
-                    index += 1
-                continue
-
-            if char == '\x1b':
-                tokens.append('ESC')
-                index += 1
-                continue
-
-            text_start: int = index
-            while index < len(data) and data[index] not in control_chars:
-                index += 1
-
-            text_chunk: str = data[text_start:index]
-            if not text_chunk:
-                continue
-
-            if len(text_chunk) == 1:
-                tokens.append(text_chunk)
-            else:
-                tokens.append(f'PASTE:{text_chunk}')
-
-        return tokens
 
     def process_key(self, ch: str) -> Optional[str]:
         """
@@ -282,6 +208,13 @@ class InputHandler:
             elif key == 'RIGHT':
                 if self.cursor_index < len(self.line_chars):
                     self.cursor_index += 1
+            elif key == 'HOME':
+                self.cursor_index = 0
+            elif key == 'END':
+                self.cursor_index = len(self.line_chars)
+            elif key == 'DELETE':
+                if self.cursor_index < len(self.line_chars):
+                    del self.line_chars[self.cursor_index]
             elif key == 'NEWLINE':
                 self.line_chars.insert(self.cursor_index, '\n')
                 self.cursor_index += 1
@@ -296,6 +229,13 @@ class InputHandler:
             self.cursor_index = 0
             return line
 
+        elif ch == '\x04':
+            if not self.line_chars:
+                raise EOFError
+            if self.cursor_index < len(self.line_chars):
+                del self.line_chars[self.cursor_index]
+        elif ch == '\x03':
+            raise KeyboardInterrupt
         elif ch in ('\b', '\x7f'):
             if self.cursor_index > 0:
                 del self.line_chars[self.cursor_index - 1]

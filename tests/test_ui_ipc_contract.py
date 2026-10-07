@@ -1856,7 +1856,8 @@ class UiIpcContractTests(unittest.TestCase):
             result = session.execute_result(4312, cmd, wait_for_response=True)
 
         self.assertIsNone(result.event)
-        self.assertEqual(result.message, 'Command executed successfully.')
+        self.assertTrue(result.failed)
+        self.assertIn('outcome is unknown', result.message or '')
 
 
 if __name__ == '__main__':

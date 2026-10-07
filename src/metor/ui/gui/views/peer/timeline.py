@@ -28,6 +28,7 @@ from metor.ui.gui.widgets.voice import VoiceCard
 # Local Package Imports
 from ..actions import message_menu
 from ..audio import show_audio_unavailable
+from ...time import message_metadata
 
 
 @dataclass(frozen=True)
@@ -43,6 +44,7 @@ class TimelineRow:
     size: int = 0
     finalized: bool = True
     status: MessageStatusCode = MessageStatusCode.UNREAD
+    timestamp: str = ''
 
     @property
     def key(self) -> tuple[MessageDirectionCode, str]:
@@ -77,10 +79,11 @@ def projection(controller: GuiController, route: Route) -> list[TimelineRow]:
                 item.msg_id,
                 order,
                 item.content.text if isinstance(item.content, TextContent) else None,
-                item.timestamp + ' · ' + item.status.value.capitalize(),
+                message_metadata(item.timestamp, item.status.value.capitalize()),
                 voice.codec if voice else None,
                 voice.size_bytes if voice else 0,
                 status=item.status,
+                timestamp=item.timestamp,
             )
             rows[row.key] = row
     for entry in controller.transcript.items.values():
@@ -88,27 +91,26 @@ def projection(controller: GuiController, route: Route) -> list[TimelineRow]:
             continue
         if route.delivery is Delivery.DROP and controller.archive.before is not None:
             continue
+        prior = rows.get((entry.direction, entry.msg_id))
+        timestamp = entry.timestamp or (prior.timestamp if prior else '')
+        status = (
+            'Recording interrupted'
+            if entry.interrupted
+            else entry.status.value.capitalize()
+        )
         row = TimelineRow(
             entry.direction,
             entry.msg_id,
             entry.order,
             entry.text,
-            'Recording interrupted'
-            if entry.interrupted
-            else entry.status.value.capitalize(),
+            message_metadata(timestamp, status),
             entry.codec,
             entry.size_bytes,
             entry.finalized,
             entry.status,
+            timestamp,
         )
-        prior = rows.get(row.key)
-        rows[row.key] = (
-            replace(
-                row, order=prior.order, metadata=entry.timestamp + ' · ' + row.metadata
-            )
-            if prior
-            else row
-        )
+        rows[row.key] = replace(row, order=prior.order) if prior else row
     inventory = controller.inventory.page
     if inventory is not None and controller.archive.before is None:
         for retained in inventory.messages:

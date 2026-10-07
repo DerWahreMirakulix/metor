@@ -1,7 +1,5 @@
 """Activity and technical history as metadata-only, explicitly paged native rows."""
 
-from datetime import datetime
-
 from kivy.metrics import dp, sp
 from kivy.uix.boxlayout import BoxLayout
 
@@ -11,6 +9,9 @@ from metor.ui.gui.state import Route
 from metor.ui.gui.theme import TYPE
 from metor.ui.gui.widgets import Action, Label
 from metor.ui.gui.widgets.sheet import ActionSheet
+
+# Local Package Imports
+from ..time import display_timestamp
 
 
 def confirm_history_clear(controller: GuiController) -> None:
@@ -137,14 +138,10 @@ def history_body(controller: GuiController, body: BoxLayout) -> None:
                 identity_label.size_hint = (1, None)
                 identity_label.height = sp(TYPE['support'][1])
                 row.add_widget(identity_label)
-            try:
-                timestamp = (
-                    datetime.fromisoformat(entry.timestamp)
-                    .astimezone()
-                    .strftime('%Y-%m-%d %H:%M')
-                )
-            except ValueError:
-                timestamp = 'Time unavailable'
+            timestamp = (
+                display_timestamp(entry.timestamp, include_date=True)
+                or 'Time unavailable'
+            )
             row.add_widget(Label(timestamp, role='support', tone='textSecondary'))
             details = [entry.family.value, entry.actor.value]
             if entry.detail_code is not None:

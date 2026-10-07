@@ -431,7 +431,7 @@ class Chat:
                 else:
                     self._send_chat_message(user_input)
 
-        except KeyboardInterrupt:
+        except (KeyboardInterrupt, EOFError):
             self._renderer.clear_input_area()
         finally:
             self._shutdown()

@@ -7,6 +7,7 @@ from metor.data import ProfileManager, ProfileSecurityMode
 from metor.cli.help import Help
 from metor.cli.handlers import CommandHandlers
 from metor.cli.proxy import CliProxy
+from metor.cli.prompt import PromptAbortedError, prompt_hidden
 
 
 class _ProfilesDispatcherProtocol(Protocol):
@@ -59,7 +60,7 @@ class ProfilesDispatchMixin:
             None
         """
         if sub == 'add':
-            if len(self._extra) < 1:
+            if len(self._extra) != 1:
                 self._print_usage('profiles')
                 return
 
@@ -72,15 +73,20 @@ class ProfilesDispatchMixin:
             if security_mode is ProfileSecurityMode.ENCRYPTED and not getattr(
                 self._args, 'remote', False
             ):
-                import getpass
-
-                master_password = getpass.getpass('Enter new master password: ')
-                confirm_password = getpass.getpass('Confirm master password: ')
+                try:
+                    master_password = prompt_hidden('Enter new master password: ')
+                    confirm_password = prompt_hidden('Confirm master password: ')
+                except PromptAbortedError:
+                    print('Profile creation aborted.')
+                    self._exit_code = 1
+                    return
                 if not master_password:
                     print('Error: master password must not be empty.')
+                    self._exit_code = 1
                     return
                 if master_password != confirm_password:
                     print('Error: passwords do not match. Profile not created.')
+                    self._exit_code = 1
                     return
             self._emit(
                 self._proxy.add_profile(
@@ -146,7 +152,7 @@ class ProfilesDispatchMixin:
             return
 
         if sub == 'rename':
-            if len(self._extra) < 2:
+            if len(self._extra) != 2:
                 self._print_usage('profiles')
                 return
 
@@ -154,7 +160,7 @@ class ProfilesDispatchMixin:
             return
 
         if sub == 'set-default':
-            if len(self._extra) < 1:
+            if len(self._extra) != 1:
                 self._print_usage('profiles')
                 return
 
@@ -162,15 +168,17 @@ class ProfilesDispatchMixin:
             return
 
         if sub == 'clear':
-            if len(self._extra) < 1:
+            if len(self._extra) != 1:
                 self._print_usage('profiles')
                 return
 
             target_proxy = CliProxy(ProfileManager(self._extra[0]))
             self._emit(target_proxy.clear_profile_db())
+            if target_proxy.consume_error_flag():
+                self._exit_code = 1
             return
 
-        if sub in ('list', None):
+        if sub in ('list', None) and not self._extra:
             self._emit(self._proxy.list_profiles(self._pm.profile_name))
             return
 

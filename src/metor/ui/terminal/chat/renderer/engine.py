@@ -621,6 +621,7 @@ class Renderer:
             Optional[str]: The fully read user input string or None if aborted.
         """
         with self._display.print_lock:
+            self._display.enable_bracketed_paste()
             self._input.line_chars = []
             self._input.cursor_index = 0
             self._input.current_input = ''

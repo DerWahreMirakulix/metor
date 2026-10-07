@@ -109,7 +109,7 @@ jobs:
         shell: bash
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends xvfb xauth libegl1 libegl-mesa0 libgl1-mesa-dri
+          sudo apt-get install --no-install-recommends xvfb xauth libxtst6 libegl1 libegl-mesa0 libgl1-mesa-dri
           python -c "import ctypes; ctypes.CDLL('libEGL.so.1')"
       - name: Validate installed consumers and native GUI on Linux
         if: runner.os == 'Linux'
@@ -138,6 +138,8 @@ jobs:
           xvfb-run -a --server-args='-screen 0 1280x1024x24' python tests/gui_native_capture.py --view setting_keyboard --width 360 --height 640 --font-scale 1.5 --output "${RUNNER_TEMP}/setting-keyboard.png" > "${RUNNER_TEMP}/setting-keyboard.log" 2>&1
           xvfb-run -a --server-args='-screen 0 1280x1024x24' python tests/gui_native_capture.py --view qr --width 1180 --height 760 --font-scale 1.5 --output "${RUNNER_TEMP}/qr-wide.png" > "${RUNNER_TEMP}/qr-wide.log" 2>&1
           xvfb-run -a --server-args='-screen 0 1280x1024x24' python tests/gui_native_dpi.py --output "${RUNNER_TEMP}/dpi-reflow.png" > "${RUNNER_TEMP}/dpi-reflow.log" 2>&1
+          xvfb-run -a --server-args='-screen 0 1280x1024x24' python tests/gui_native_core.py --width 360 --height 640 --font-scale 1.5 --revision "$GITHUB_SHA" --result "${RUNNER_TEMP}/gui-core-compact.json" --images "${RUNNER_TEMP}/gui-core-compact-images" > "${RUNNER_TEMP}/gui-core-compact.log" 2>&1
+          xvfb-run -a --server-args='-screen 0 1280x1024x24' python tests/gui_native_core.py --width 1180 --height 760 --font-scale 1.5 --revision "$GITHUB_SHA" --result "${RUNNER_TEMP}/gui-core-wide.json" --images "${RUNNER_TEMP}/gui-core-wide-images" > "${RUNNER_TEMP}/gui-core-wide.log" 2>&1
           python tests/gui_stream_pressure.py --result "${RUNNER_TEMP}/stream-pressure.json" > "${RUNNER_TEMP}/stream-pressure.log" 2>&1
       - name: Upload bounded GUI and stream evidence
         if: always() && runner.os == 'Linux'
@@ -153,6 +155,8 @@ jobs:
             ${{ runner.temp }}/setting-keyboard.log
             ${{ runner.temp }}/qr-wide.log
             ${{ runner.temp }}/dpi-reflow.log
+            ${{ runner.temp }}/gui-core-compact*
+            ${{ runner.temp }}/gui-core-wide*
             ${{ runner.temp }}/stream-pressure.json
             ${{ runner.temp }}/stream-pressure.log
           if-no-files-found: warn

@@ -3,6 +3,7 @@ Terminal-owned interactive chat command definitions and help rendering.
 """
 
 from dataclasses import dataclass, field
+import os
 from typing import Dict, List, Optional
 
 # Local Package Imports
@@ -265,11 +266,14 @@ class Help:
         ind: str = ' ' * intend * start
         sub_ind: str = ' ' * intend * (start + 1)
         sub_sub_ind: str = ' ' * intend * (start + 2)
+        newline_keys: str = 'Ctrl-N or Alt-Enter' if os.name == 'posix' else 'Ctrl-N'
 
         out: str = (
             f'{ind}{Theme.PURPLE}Chat Mode:{Theme.RESET}\n\n'
             f'{ind}* The [alias] can be omitted if you are currently focused on a peer.\n'
-            f'{ind}* Any other text entered is sent to the focused peer.\n\n'
+            f'{ind}* Any other text entered is sent to the focused peer.\n'
+            f'{ind}* Enter sends; {newline_keys} inserts a newline.\n'
+            f'{ind}* Ctrl-C exits; Ctrl-D exits an empty prompt.\n\n'
         )
 
         for cat in cls.CHAT_CATEGORIES:

@@ -3,9 +3,15 @@ Module containing centralized UI prompt helpers.
 Normalizes interactive prompt aborts so Ctrl-C and EOF do not leak raw stack traces.
 """
 
+from contextlib import contextmanager
 from dataclasses import dataclass
 import getpass
+import os
 import sys
+from typing import Iterator
+
+if os.name == 'posix':
+    import termios
 
 
 class PromptAbortedError(Exception):
@@ -64,6 +70,32 @@ def _emit_prompt_abort_newline() -> None:
     sys.stderr.flush()
 
 
+@contextmanager
+def _canonical_prompt_input() -> Iterator[None]:
+    """Make EOF work in a hidden prompt even when chat editing already uses cbreak.
+
+    getpass owns echo suppression and credential collection. This context owns
+    only line discipline, restoring the exact prior terminal state afterward.
+    """
+    if os.name != 'posix' or not sys.stdin.isatty():
+        yield
+        return
+    fd = sys.stdin.fileno()
+    get_attributes = getattr(termios, 'tcgetattr')
+    set_attributes = getattr(termios, 'tcsetattr')
+    immediate = getattr(termios, 'TCSANOW')
+    previous = get_attributes(fd)
+    canonical = list(previous)
+    canonical[0] &= ~(getattr(termios, 'INLCR') | getattr(termios, 'IGNCR'))
+    canonical[0] |= getattr(termios, 'ICRNL')
+    canonical[3] |= getattr(termios, 'ICANON')
+    set_attributes(fd, immediate, canonical)
+    try:
+        yield
+    finally:
+        set_attributes(fd, immediate, previous)
+
+
 def prompt_hidden(prompt: str) -> str:
     """
     Requests a hidden terminal input value such as a password.
@@ -78,7 +110,8 @@ def prompt_hidden(prompt: str) -> str:
         str: The entered text, which may be empty.
     """
     try:
-        return getpass.getpass(prompt)
+        with _canonical_prompt_input():
+            return getpass.getpass(prompt)
     except (EOFError, KeyboardInterrupt) as exc:
         _emit_prompt_abort_newline()
         raise PromptAbortedError() from exc

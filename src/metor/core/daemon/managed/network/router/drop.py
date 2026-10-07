@@ -112,7 +112,7 @@ class DropMessageRouter:
         timestamp: Optional[str],
         transport: str,
     ) -> bool:
-        """Commits and publishes one validated DROP under the state barrier.
+        """Installs the authenticated peer before committing its first DROP receipt.
 
         Args:
             conn (socket.socket): The conn input.
@@ -125,6 +125,9 @@ class DropMessageRouter:
         Returns:
             bool: Whether the documented condition holds.
         """
+        alias: Optional[str] = self._cm.ensure_alias_for_onion(onion)
+        if alias is None:
+            return False
         unread_drop_limit: int = self._config.get_int(SettingKey.MAX_UNSEEN_DROP_MSGS)
         outcome = self._mm.store_inbound_drop_text(
             onion, msg_id, content, timestamp, unread_drop_limit
@@ -146,7 +149,6 @@ class DropMessageRouter:
         self._hm.log_event(
             HistoryEvent.RECEIVED, onion, actor=HistoryActor.REMOTE, transport=transport
         )
-        alias: Optional[str] = self._cm.ensure_alias_for_onion(onion)
         if alias:
             if self._has_clients_callback():
                 self._broadcast(

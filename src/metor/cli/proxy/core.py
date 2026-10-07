@@ -80,6 +80,7 @@ class CliProxy:
                 )
             ),
             send_socket_command=self._send_socket_command,
+            mark_error=self._mark_error,
         )
         self._settings: CliProxySettingsActions = CliProxySettingsActions(
             self._pm,
@@ -239,9 +240,11 @@ class CliProxy:
             try:
                 actual_password = self._prompt_password()
             except PromptAbortedError:
+                self._mark_error()
                 return self._prefix_remote('Aborted.')
 
         if not actual_password:
+            self._mark_error()
             return self._prefix_remote('Aborted.')
         return self._request_ipc(UnlockCommand(password=actual_password))
 
@@ -408,6 +411,7 @@ class CliProxy:
             return err
 
         if not self.is_remote and not self._pm.is_daemon_running():
+            self._mark_error()
             return 'The daemon must be running to send drops.'
 
         return self._request_ipc(

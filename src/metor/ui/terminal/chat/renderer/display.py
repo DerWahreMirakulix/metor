@@ -2,11 +2,15 @@
 Module managing the terminal display buffer and repainting logic.
 """
 
+import os
 import sys
 import re
 import threading
 from typing import Callable, List, Optional
 
+from metor.shared import escape_terminal_text
+
+# Local Package Imports
 from metor.ui.terminal.chat.models import ChatLine
 from metor.ui.terminal.chat.presenter import ChatPresenter
 
@@ -16,6 +20,8 @@ class Display:
 
     _CURSOR_HIDE: str = '\033[?25l'
     _CURSOR_SHOW: str = '\033[?25h'
+    _PASTE_ENABLE: str = '\033[?2004h'
+    _PASTE_DISABLE: str = '\033[?2004l'
     _CLEAR_INPUT_AREA: str = '\r\033[J'
     _CLEAR_SCREEN: str = '\033[2J\033[H'
 
@@ -38,6 +44,7 @@ class Display:
         self._alias_resolver: Callable[[ChatLine], Optional[str]] = alias_resolver
         self.all_msgs: List[ChatLine] = []
         self.print_lock: threading.Lock = threading.Lock()
+        self._paste_enabled = False
 
         self._ansi_escape: re.Pattern[str] = re.compile(
             r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])'
@@ -85,7 +92,7 @@ class Display:
         Returns:
             int: The number of vertical lines used.
         """
-        lines: List[str] = current_input.split('\n')
+        lines: List[str] = escape_terminal_text(current_input).split('\n')
         count: int = 0
         for line in lines:
             offset: int = len(prompt)
@@ -115,6 +122,13 @@ class Display:
             buffer.append(f'\033[{last_visual_lines - 1}A')
         buffer.append(self._CLEAR_INPUT_AREA)
 
+    def enable_bracketed_paste(self) -> None:
+        """Enable clipboard delimiters only for the POSIX streaming input decoder."""
+        if os.name == 'posix' and not self._paste_enabled:
+            self._paste_enabled = True
+            sys.stdout.write(self._PASTE_ENABLE)
+            sys.stdout.flush()
+
     def restore_cursor(self) -> None:
         """
         Restores terminal cursor visibility immediately.
@@ -125,6 +139,9 @@ class Display:
         Returns:
             None
         """
+        if self._paste_enabled:
+            self._paste_enabled = False
+            sys.stdout.write(self._PASTE_DISABLE)
         sys.stdout.write(self._CURSOR_SHOW)
         sys.stdout.flush()
 
@@ -195,10 +212,12 @@ class Display:
 
         buffer.append(prompt)
         padding: str = ' ' * len(prompt)
-        display_input: str = current_input.replace('\n', '\n' + padding)
+        display_input: str = escape_terminal_text(current_input).replace(
+            '\n', '\n' + padding
+        )
         buffer.append(display_input)
 
-        text_to_cursor: str = ''.join(line_chars[:cursor_index])
+        text_to_cursor: str = escape_terminal_text(''.join(line_chars[:cursor_index]))
         cursor_lines: int = 0
         lines: List[str] = text_to_cursor.split('\n')
 

@@ -256,6 +256,18 @@ class ActionSheet(ModalView):
         ):
             self.cancel.focus = True
 
+    def dismiss(self, *args: object, **kwargs: object) -> None:
+        """Closes immediately so the next visible control can receive input.
+
+        Args:
+            args: Native dismissal callback arguments.
+            kwargs: Native options; closing never retains a fading input surface.
+        Returns:
+            None.
+        """
+        kwargs['animation'] = False
+        super().dismiss(*args, **kwargs)
+
     def _dismissed(self, *_args: object) -> None:
         """Releases old labels and the global modal reference immediately.
 

@@ -282,7 +282,13 @@ Inside the running Terminal UI, you have access to the following slash commands:
 | `/contacts add <alias> [onion]` | Saves a temporary RAM peer permanently to disk.                      |
 | `/contacts rm <onion\|alias>`   | Removes a saved contact or demotes an active peer gracefully.        |
 | `/contacts rename <old> <new>`  | Renames a saved or discovered peer.                                  |
-| `/exit`                         | Closes the UI (the daemon remains active in the background).         |
+| `/exit`                         | Closes the UI and releases its daemon participation.                 |
+
+Enter sends the current input. Ctrl-N inserts a newline, and arrow keys edit the
+draft. POSIX terminals also support Alt-Enter for a newline, Home, End and Delete,
+and bracketed paste with embedded newlines without sending. Ctrl-C exits, and
+Ctrl-D exits an empty prompt. Incoming messages and contact changes preserve the
+current draft.
 
 ### 3. One-shot CLI Commands
 
@@ -297,6 +303,11 @@ You don't need to enter the Chat UI to use Metor. It can act as an asynchronous 
 | `metor history show [onion\|alias] [--raw]` | Shows projected history or, with `--raw`, the raw transport ledger.          |
 | `metor messages show <onion\|alias>`        | Prints the chat history with a contact directly to the console.              |
 | `metor transport [onion\|alias]`            | Prints the transport state (session/tunnel, focus count, pending live).      |
+
+Authentication and transport failures, rejected arguments and failed profile
+password creation return a nonzero exit status. Unexpected extra arguments are rejected
+before mutation. If the daemon disconnects before confirming a command, the CLI
+reports an unknown outcome; check its status before retrying.
 
 ### 4. Profile Management & Remote Setup
 

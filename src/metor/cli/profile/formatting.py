@@ -33,6 +33,11 @@ def _format_profile_result_by_code(
         return 'A remote profile requires a static port (--port <int>).'
     if operation_code is ProfileOperationCode.PASSWORDLESS_REMOTE_NOT_ALLOWED:
         return 'Remote profiles cannot be created without password protection.'
+    if operation_code is ProfileOperationCode.PLAINTEXT_PROFILES_DISABLED:
+        return (
+            'Plaintext profiles are disabled. Create an encrypted profile or '
+            'explicitly enable daemon.allow_plaintext_profiles in settings.'
+        )
     if operation_code is ProfileOperationCode.PROFILE_EXISTS:
         return f"Profile '{params['profile']}' already exists."
     if operation_code is ProfileOperationCode.PROFILE_CREATED:
@@ -73,6 +78,12 @@ def _format_profile_result_by_code(
         return f"Cannot rename profile '{params['old_profile']}' while its daemon is running!"
     if operation_code is ProfileOperationCode.PROFILE_RENAMED:
         return f"Profile '{params['old_profile']}' successfully renamed to '{params['new_profile']}'."
+    if operation_code is ProfileOperationCode.RENAMED_DEFAULT_UNCONFIRMED:
+        return (
+            f"Profile '{params['old_profile']}' was renamed to "
+            f"'{params['new_profile']}', but the default profile could not be "
+            'confirmed. Check the profile list and set the default explicitly.'
+        )
     if operation_code is ProfileOperationCode.CANNOT_CLEAR_RUNNING_DB:
         return (
             f"Cannot clear database for '{params['profile']}' while daemon is running."

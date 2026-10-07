@@ -95,6 +95,27 @@ injected SDK results and no Core or audio streams. An offscreen SDL run proves
 these widget interactions only; it does not replace the installed native-window
 smoke, physical input, or acoustic acceptance.
 
+The Core-backed conversation fixture runs the actual `MetorApp`, controller and
+SDK against two disposable encrypted Core runtimes. X11 XTest mouse and keyboard
+events enter through SDL; GUI commands, request results and runtime callbacks
+are not replaced. It checks authenticated startup, contact changes, repeated
+DROP sending before LIVE, history, focus, navigation and LIVE delivery:
+
+```sh
+python tests/gui_native_core.py --width 360 --height 640 --font-scale 1.5 \
+  --revision COMMIT_OR_TREE --result gui-core.json --images gui-core-images
+```
+
+Run with an explicit virtual X11 display and the SDL2 window provider; use
+`--width 1180 --height 760` for the desktop layout. `--mode installed` requires
+a fresh wheel-installed interpreter outside the checkout and rejects GUI source
+imports. Results record the loaded source, revision, input events and observed
+timings. The fixture replaces Tor process/SOCKS routing with local TCP while
+retaining peer signatures, framing, persistence and delivery workers. Its OS
+lifecycle source is inert. It opens no audio stream and does not establish
+physical input, native lock/suspend handling, acoustic support or public Tor
+connectivity.
+
 On Windows, add `--windows-launch` to check both installed entry-point
 executables, the graphical launcher without standard streams, the temporary
 locked `--start-daemon` path through native UI Automation, the original
@@ -440,6 +461,8 @@ The text composer uses Enter for explicit Send and Shift+Enter for a newline.
 Incoming call UI does not steal an active typing or PTT owner. Modal focus
 returns to a safe invoker; Escape/Back closes a reversible overlay before
 navigating and cannot dismiss a privacy cover or accepted destructive work.
+Closing an action sheet removes its input surface immediately; an invisible
+closing animation cannot intercept the next foreground action.
 Master navigation returns Back to the active DROP/LIVE overview. Selection
 follows the foreground section; keyboard focus survives a repaint of that same
 route and clears when the route changes.
@@ -482,9 +505,11 @@ certification from typed ports or simulator tests.
 
 The root selector changes the master DROP/LIVE list. A selected peer owns the
 foreground detail pane; root selection alone cannot promote a background peer
-into a media owner. On a compact viewport, Back returns to the originating root
-tab. In a wide viewport, Back clears the detail to a neutral conversation
-prompt. Contacts, Notifications, and Settings replace the foreground detail,
+into a media owner. For a peer opened from the master list, compact Back returns
+to the originating root tab and wide Back clears the detail to a neutral
+conversation prompt. A peer opened from a contact picker returns to that picker;
+switching DROP/LIVE within the peer does not add a navigation step. Contacts,
+Notifications, and Settings replace the foreground detail,
 while authentication, restriction, profile transition, and purge cover the whole
 application. Incoming-call presentation cannot obscure or steal an existing
 PTT owner. Confirmation and authentication sheets show the relevant current
@@ -493,7 +518,10 @@ sheet or reveal an old profile.
 
 Message rows grow with content. Own and incoming direction, DROP/LIVE delivery,
 local acceptance, pending, delivered, read, and failed outcomes remain
-visually distinct without relying on color alone. The text composer, recording
+visually distinct without relying on color alone. Available timeline timestamps
+show local hours and minutes for today's messages and add the calendar date for older
+messages. History always includes the date; canonical message timestamps remain
+unchanged for exports and handoffs. The text composer, recording
 state, DROP Voice review, and playback controls are separate states. Timeline
 scrolling and audio seeking have separate affordances. Status notices align
 with the active content column and do not create extra communication actions.

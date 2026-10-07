@@ -14,3 +14,4 @@ class IpcRequestResult:
     message: Optional[str] = None
     insert_leading_blank_line: bool = False
     auth_incomplete: bool = False
+    failed: bool = False
