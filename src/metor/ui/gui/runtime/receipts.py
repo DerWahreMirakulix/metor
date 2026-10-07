@@ -187,8 +187,12 @@ class ReceiptReconciliation:
                 self.controller.transcript.discard(
                     target.peer, Delivery.DROP, target.msg_id, target.direction
                 )
-                self.controller.archive.reset()
-                self.controller.inventory.reset()
+                page = self.controller.messages
+                route = self.controller.state.route
+                if page is not None and page.onion == target.peer:
+                    self.controller.archive.reset()
+                if route.peer == target.peer and route.delivery is Delivery.DROP:
+                    self.controller.inventory.reset()
         elif event.delivery is Delivery.DROP and event.status in {
             MessageStatusCode.PENDING,
             MessageStatusCode.DELIVERED,

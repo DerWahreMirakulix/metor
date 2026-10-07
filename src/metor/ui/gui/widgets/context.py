@@ -70,14 +70,18 @@ class ContextAction(Action):
         """
         if self.parent is not None and not self.disabled:
             return
+        self.cancel_input()
+
+    def cancel_input(self) -> None:
+        """Revokes contextual holds and grabbed releases without opening a menu."""
         self._cancel_hold()
         if self._pointer_touch is not None:
             self._pointer_touch.ungrab(self)
         self._pointer_touch = None
         self._pointer_identity = None
         self._context_used = True
-        self._keyboard_armed = False
-        self.state = 'normal'
+        self._context_key_code = None
+        super().cancel_input()
 
     def _open_context(self, _elapsed: float = 0.0) -> None:
         """Consumes the primary press before opening one context menu.

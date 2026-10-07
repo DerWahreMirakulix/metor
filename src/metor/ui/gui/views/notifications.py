@@ -42,6 +42,7 @@ def notification_center(
     store.mark_seen()
     panel = BoxLayout(orientation='vertical', spacing=dp(16))
     header = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(12))
+    header.bind(minimum_height=header.setter('height'))
 
     def back() -> None:
         """Cancels selection or returns to the preceding presentation.
@@ -69,18 +70,27 @@ def notification_center(
 
     header.add_widget(
         IconAction(
-            'chevron-left', 'Cancel selection' if store.selecting else 'Back', back
+            'chevron-left',
+            'Cancel selection' if store.selecting else 'Back',
+            back,
+            pos_hint={'center_y': 0.5},
         )
     )
     header.add_widget(
         Label(
             f'{len(store.selected)} selected' if store.selecting else 'Notifications',
-            role='title',
-            wrap=False,
+            role='peer',
+            pos_hint={'center_y': 0.5},
         )
     )
     header.add_widget(
-        IconAction('trash-2', 'Clear notifications', clear, disabled=not store.items)
+        IconAction(
+            'trash-2',
+            'Clear notifications',
+            clear,
+            disabled=not store.items,
+            pos_hint={'center_y': 0.5},
+        )
     )
     panel.add_widget(header)
     scroll = ScrollView(do_scroll_x=False)

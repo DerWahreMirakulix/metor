@@ -10,7 +10,7 @@ from metor.core.api import Delivery
 from metor.ui.gui.constants import Geometry
 from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.state import Route
-from metor.ui.gui.widgets import Action, Label
+from metor.ui.gui.widgets import Action, Label, TextField
 from metor.ui.gui.widgets.symbol import IconAction
 from metor.ui.gui.widgets.sheet import ActionSheet
 
@@ -39,12 +39,15 @@ class PeerView(BoxLayout):
         """
         super().__init__(orientation='vertical', spacing=dp(16))
         self.controller, self.refresh = controller, refresh
+        self._revoked = False
         self.route = controller.state.route
         self.header = BoxLayout(orientation='vertical', size_hint_y=None, spacing=dp(8))
         self.header.bind(minimum_height=self.header.setter('height'))
         title_row = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(12))
-        title_row.add_widget(IconAction('chevron-left', 'Back', self._back))
-        self.name = Label('', role='peer')
+        title_row.add_widget(
+            IconAction('chevron-left', 'Back', self._back, pos_hint={'center_y': 0.5})
+        )
+        self.name = Label('', role='peer', pos_hint={'center_y': 0.5})
         self.name.bind(
             height=lambda _widget, height: setattr(
                 title_row, 'height', max(dp(48), height)
@@ -53,17 +56,26 @@ class PeerView(BoxLayout):
         title_row.add_widget(self.name)
         self.header.add_widget(title_row)
         self.controls = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(12))
-        self.subtitle = Label('', role='caption', tone='textSecondary')
+        self.subtitle = Label(
+            '', role='caption', tone='textSecondary', pos_hint={'center_y': 0.5}
+        )
         self.subtitle.bind(
             height=lambda _widget, height: setattr(
                 self.controls, 'height', max(dp(48), height)
             )
         )
         self.controls.add_widget(self.subtitle)
-        self.live_slot = BoxLayout(size_hint_x=None, width=dp(48))
+        self.live_slot = BoxLayout(
+            size_hint_x=None, width=dp(48), pos_hint={'center_y': 0.5}
+        )
         self.controls.add_widget(self.live_slot)
-        self.call = IconAction('phone', 'Call', self._call)
-        self.more = IconAction('ellipsis', 'Conversation actions', self._menu)
+        self.call = IconAction('phone', 'Call', self._call, pos_hint={'center_y': 0.5})
+        self.more = IconAction(
+            'ellipsis',
+            'Conversation actions',
+            self._menu,
+            pos_hint={'center_y': 0.5},
+        )
         self.controls.add_widget(self.call)
         self.controls.add_widget(self.more)
         self.header.add_widget(self.controls)
@@ -93,7 +105,7 @@ class PeerView(BoxLayout):
         self.add_widget(self.timeline)
         self.retry_recording: Action | None = None
         self._recovery_identity: tuple[int, str] | None = None
-        self.composer = Composer(controller, self.route, refresh)
+        self.composer = Composer(controller, self.route, self._refresh_connection)
         self.bind(width=lambda *_args: self.update())
         self.update()
 
@@ -105,7 +117,36 @@ class PeerView(BoxLayout):
         Returns:
             None
         """
+        if self._revoked:
+            return
+        self.composer.disabled = False
         self.update()
+        self.disabled = False
+
+    def suspend(self) -> None:
+        """Revokes native interaction while retaining this peer projection's widgets."""
+        self.composer.suspend()
+        for widget in self.walk(restrict=True):
+            if isinstance(widget, Action):
+                widget.cancel_input()
+            elif isinstance(widget, TextField):
+                widget.focus = False
+        self.disabled = True
+
+    def revoke(self) -> None:
+        """Synchronously clears discarded native content without a transport command."""
+        if self._revoked:
+            return
+        self._revoked = True
+        self.suspend()
+        self.composer.revoke()
+        for widget in self.walk(restrict=True):
+            if isinstance(widget, Label):
+                widget.text = ''
+            if isinstance(widget, Action):
+                widget.accessible_name = ''
+        self.timeline.revoke()
+        self.clear_widgets()
 
     def _menu(self) -> None:
         """Offers explicit actions on this pane's captured canonical peer.
@@ -170,7 +211,11 @@ class PeerView(BoxLayout):
                 )
             if self.route.delivery is Delivery.LIVE:
                 live_context_actions(
-                    controller, peer, body, lambda: sheet.dismiss(animation=False)
+                    controller,
+                    peer,
+                    body,
+                    lambda: sheet.dismiss(animation=False),
+                    self._refresh_connection,
                 )
 
         sheet = ActionSheet(
@@ -230,7 +275,7 @@ class PeerView(BoxLayout):
             None
         """
         self.controller.live.start(self.route.peer or '')
-        self.refresh()
+        self._refresh_connection()
 
     def _end_live(self, context_generation: int | None, attempt_id: str | None) -> None:
         """Finalizes the local press on its original target before requesting end.
@@ -242,15 +287,18 @@ class PeerView(BoxLayout):
             None
         """
         self.controller.live.end(self.route.peer or '', context_generation, attempt_id)
+        self._refresh_connection()
+
+    def _refresh_connection(self) -> None:
+        """Publishes control feedback synchronously before requesting the wider repaint."""
+        self._update_connection()
         self.refresh()
 
-    def update(self) -> None:
-        """Reconciles public data in place while retaining composer and scroll ownership.
+    def _update_connection(self) -> bool:
+        """Updates only connection controls before the next native frame is presented.
 
-        Args:
-            None
         Returns:
-            None
+            bool: Whether Core reports a connected or recoverable LIVE context.
         """
         controller, state = self.controller, self.controller.state
         peer, snapshot = self.route.peer, state.snapshot
@@ -259,19 +307,14 @@ class PeerView(BoxLayout):
             if snapshot
             else None
         )
-        aliases = (
-            [(item.onion, item.alias) for item in snapshot.contacts]
-            + [(item.onion, item.alias) for item in snapshot.conversations]
-            + [(item.onion, item.alias) for item in snapshot.live_contexts]
-            if snapshot
-            else []
-        )
-        alias = next((name for onion, name in aliases if onion == peer), 'Conversation')
-        self.name.text = alias
+        starting = controller.live.starting(peer or '')
+        failure = controller.live.failure(peer or '')
         active = live is not None and (
             live.session_state == 'connected' or live.recovery_eligible
         )
-        connecting = bool(live and live.outbound_attempt_id and not active)
+        connecting = bool(
+            live and live.outbound_attempt_id and not active and not failure
+        )
         identity = (
             live.context_generation if live and active else None,
             live.outbound_attempt_id if live and connecting else None,
@@ -289,14 +332,16 @@ class PeerView(BoxLayout):
         self.subtitle.text = (
             'Drop conversation'
             if self.route.delivery is Delivery.DROP
+            else failure
+            if failure
             else 'Changing route…'
             if live and live.route_changing
             else 'Reconnecting…'
             if live and live.session_state != 'connected' and live.recovery_eligible
             else 'Connected · Live'
             if active
-            else 'Connecting chat…'
-            if connecting
+            else 'Connecting Live…'
+            if connecting or starting
             else 'Incoming Live request'
             if live and live.session_state == 'pending'
             else 'No Live connection'
@@ -307,6 +352,8 @@ class PeerView(BoxLayout):
             available = (
                 active
                 or connecting
+                or starting
+                or bool(failure)
                 or live is None
                 or live.session_state == 'disconnected'
             )
@@ -332,13 +379,43 @@ class PeerView(BoxLayout):
             or 'qualified_live_control' not in state.capabilities
             or identity == (None, None)
         )
+        self.connect.disabled = (
+            self.connect.disabled
+            or starting
+            or bool(failure)
+            and not controller.live.retry_ready(peer or '')
+        )
         self.connect.label.text = self.connect.accessible_name = (
-            'Reconnect Live' if live else 'Start Live'
+            'Connecting Live…'
+            if starting
+            else 'Retry Live'
+            if failure
+            else 'Reconnect Live'
+            if live
+            else 'Start Live'
         )
         self.call.disabled = state.busy
         if control is not None:
             control.present(compact=self.width < dp(Geometry.COMPACT_MAX))
             self.live_slot.width = control.width
+        return active
+
+    def update(self) -> None:
+        """Reconciles public data in place while retaining composer and scroll ownership."""
+        if self._revoked:
+            return
+        controller, state = self.controller, self.controller.state
+        peer, snapshot = self.route.peer, state.snapshot
+        aliases = (
+            [(item.onion, item.alias) for item in snapshot.contacts]
+            + [(item.onion, item.alias) for item in snapshot.conversations]
+            + [(item.onion, item.alias) for item in snapshot.live_contexts]
+            if snapshot
+            else []
+        )
+        alias = next((name for onion, name in aliases if onion == peer), 'Conversation')
+        self.name.text = alias
+        active = self._update_connection()
         self.timeline.update(active=active)
         draft_owned = bool(
             peer in controller.voice.reviews

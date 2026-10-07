@@ -16,8 +16,6 @@ from metor.core.api import (
     ContactRemovedDowngradedEvent,
     ContactsClearedEvent,
     ContactsDataEvent,
-    ConnectCommand,
-    ConnectionConnectingEvent,
     Delivery,
     GetContactsListCommand,
     IpcCommand,
@@ -75,8 +73,6 @@ class ContactFlow:
         self.book = ContactBook(controller)
         self._serial = 0
         self._continuation: tuple[str, ContactIntent] | None = None
-        self._opening: tuple[str, Route] | None = None
-        self._start_unknown: set[str] = set()
         self._check_needed = False
 
     def alias(self, peer: str) -> str:
@@ -285,6 +281,7 @@ class ContactFlow:
         """
         if not self.controller.state.covered and self._continuation is None:
             self._continuation = peer, intent
+            self.poll()
 
     def remove(self, peer: str) -> bool:
         """Removes/demotes one confirmed peer with a Core identity guard.
@@ -372,23 +369,6 @@ class ContactFlow:
                 self.form.error = 'Contact changed. Review its current details.'
             self.controller.refresh_state()
             return True
-        if update.operation.startswith('contact:start:'):
-            opening, self._opening = self._opening, None
-            if opening is None:
-                return True
-            peer, caller = opening
-            if isinstance(update.event, ConnectionConnectingEvent):
-                if (
-                    not self.controller.state.covered
-                    and self.controller.state.route == caller
-                ):
-                    self.controller.navigate(Route('V09', peer, Delivery.LIVE))
-            else:
-                if update.event is None:
-                    self._start_unknown.add(peer)
-                self.controller.state.status = 'Live request could not be confirmed. Review current Live state before retrying.'
-            self.controller.refresh_state()
-            return True
         if not update.operation.startswith('contact:'):
             return False
         event, form = update.event, self.form
@@ -453,26 +433,12 @@ class ContactFlow:
             self._continuation = None
             return
         peer, intent = pending
-        active = self.active(peer)
+        active = self.active(peer) or controller.live.starting(peer)
         if intent == 'live' and not active:
-            if (
-                peer in self._start_unknown
-                or len(self._start_unknown) >= GuiLimits.TEXT_CONTEXTS
-            ):
-                controller.state.status = (
-                    'A prior Live request is unconfirmed. Review current Live state.'
-                )
+            if not controller.live.start(peer):
                 self._continuation = None
                 return
-            if not controller.command(
-                'contact:start:' + peer, ConnectCommand(peer), IpcEvent
-            ):
-                return
-            self._opening = peer, controller.state.route
-            self._continuation = None
-            return
         self._continuation = None
-        self._start_unknown.discard(peer)
         controller.navigate(
             Route(
                 'V09' if intent == 'live' else 'V08',

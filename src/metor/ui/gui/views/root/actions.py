@@ -106,7 +106,7 @@ def conversation_menu(
 
             body.add_widget(Action('Open Live', open_live))
             live_context_actions(
-                controller, peer, body, lambda: sheet.dismiss(animation=False)
+                controller, peer, body, lambda: sheet.dismiss(animation=False), refresh
             )
         snapshot = controller.state.snapshot
         saved = snapshot is not None and any(

@@ -7,6 +7,7 @@ from metor.core.api import (
     ContactRemovedEvent,
     IpcEvent,
     RenameSuccessEvent,
+    RuntimeStateChangedEvent,
     SwitchSuccessEvent,
 )
 from metor.ui.terminal import StatusTone
@@ -45,6 +46,10 @@ def handle_state_event(handler: EventHandlerProtocol, event: IpcEvent) -> bool:
     Returns:
         bool: True when the event was handled.
     """
+    if isinstance(event, RuntimeStateChangedEvent):
+        # Terminal projects the concrete events below and message/transport
+        # events directly; aggregate snapshot invalidations carry no UI notice.
+        return True
     if isinstance(event, RenameSuccessEvent):
         rename_onion: Optional[str] = event.onion or handler._session.get_peer_onion(
             event.old_alias

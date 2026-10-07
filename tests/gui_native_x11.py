@@ -193,8 +193,14 @@ class NativeX11Input:
         self.x11.XRaiseWindow(self.display, self.window)
         self.x11.XSync(self.display, 0)
 
-    def click(self, widget: Widget) -> None:
-        """Presses and releases a reachable native control across two event-loop frames."""
+    def click(self, widget: Widget, *, allow_disabled: bool = False) -> None:
+        """Presses and releases a reachable native control across two event-loop frames.
+
+        Args:
+            widget: Attached native control with a reachable window rectangle.
+            allow_disabled: Allows deliberate negative-input acceptance checks;
+                it does not enable the control or alter native dispatch.
+        """
         assert self.window is not None
         actual_size = self.size()
         assert actual_size == tuple(Window.system_size), (
@@ -203,7 +209,9 @@ class NativeX11Input:
             Window.system_size,
         )
         left, bottom, width, height = rectangle(widget)
-        assert not widget.disabled and widget.get_root_window() is not None
+        assert (
+            allow_disabled or not widget.disabled
+        ) and widget.get_root_window() is not None
         assert left >= -1 and bottom >= -1 and width > 0 and height > 0
         assert left + width <= Window.width + 1 and bottom + height <= Window.height + 1
         x, y, child = ctypes.c_int(), ctypes.c_int(), ctypes.c_ulong()

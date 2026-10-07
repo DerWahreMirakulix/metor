@@ -37,6 +37,61 @@ class ReviewActions:
         """
         self.voice = voice
         self._checks: set[str] = set()
+        self._feedback_revisions: dict[str, int] = {}
+        self._notices: dict[str, str] = {}
+
+    def notice(self, peer: str) -> str:
+        """Returns persistent feedback for this authorized exact recording review.
+
+        Args:
+            peer: Canonical foreground review peer.
+        Returns:
+            str: Actionable review-local text, or empty under a privacy cover.
+        """
+        state = self.voice.controller.state
+        review = self.voice.reviews.get(peer)
+        if (
+            state.covered
+            or review is None
+            or review.binding.generation != state.generation
+        ):
+            return ''
+        return self._notices.get(review.binding.msg_id, '')
+
+    def _report(self, msg_id: str, text: str, *, notify: bool = True) -> None:
+        """Keeps review feedback local and alerts only after its owner leaves the view."""
+        state = self.voice.controller.state
+        current = {
+            review.binding.msg_id: review
+            for review in self.voice.reviews.values()
+            if review.binding.generation == state.generation
+        }
+        self._notices = {
+            identity: note
+            for identity, note in self._notices.items()
+            if identity in current
+        }
+        review = current.get(msg_id)
+        if review is None:
+            return
+        self._notices[msg_id] = text
+        binding = review.binding
+        route = Route(
+            'V08' if binding.delivery is Delivery.DROP else 'V09',
+            binding.peer,
+            binding.delivery,
+        )
+        if notify and not state.covered and state.route != route:
+            state.status = text
+            self._feedback_revisions[msg_id] = state.feedback.revision
+
+    def _clear_feedback(self, msg_id: str) -> None:
+        """Clears resolved review feedback without dismissing another action's result."""
+        state = self.voice.controller.state
+        self._notices.pop(msg_id, None)
+        revision = self._feedback_revisions.pop(msg_id, None)
+        if revision == state.feedback.revision:
+            state.status = ''
 
     def act(self, peer: str, *, send: bool, delivery: Delivery | None = None) -> bool:
         """Explicitly publishes or cancels an exact owned message review.
@@ -67,12 +122,13 @@ class ReviewActions:
         if selected not in {binding.delivery, Delivery.DROP}:
             return False
         if send and selected is Delivery.LIVE and not self.live_ready(review):
-            controller.state.status = (
-                'Reconnect this Live chat or send the recording as Drop'
+            self._report(
+                binding.msg_id,
+                'Reconnect this Live chat or send the recording as Drop',
             )
             return False
         kind = 'commit' if send else 'cancel'
-        return controller.submit(
+        admitted = controller.submit(
             'review:' + kind + ':' + binding.msg_id,
             lambda: (
                 client.commit_voice(
@@ -86,6 +142,9 @@ class ReviewActions:
                 else client.cancel_voice(peer, binding.msg_id, owner_token=owner)
             ),
         )
+        if admitted:
+            self._clear_feedback(binding.msg_id)
+        return admitted
 
     def live_ready(self, review: VoiceReview) -> bool:
         """Checks the original chat identity without authorizing or opening a transport.
@@ -155,7 +214,9 @@ class ReviewActions:
         if review is None or client is None or controller.state.covered:
             return False
         binding = review.binding
-        return controller.submit(
+        if binding.generation != controller.state.generation:
+            return False
+        admitted = controller.submit(
             'review:check:' + binding.msg_id,
             lambda: client.request(
                 GetMessageOutcomeCommand(
@@ -165,6 +226,10 @@ class ReviewActions:
             ),
             background=True,
         )
+        if admitted:
+            self._clear_feedback(binding.msg_id)
+            self._report(binding.msg_id, 'Checking recording…', notify=False)
+        return admitted
 
     def poll(self) -> None:
         """Schedules one bounded reconciliation after an unconfirmed mutation.
@@ -190,6 +255,8 @@ class ReviewActions:
         """
         if not update.operation.startswith('review:'):
             return False
+        if update.generation != self.voice.controller.state.generation:
+            return True
         _, kind, msg_id = update.operation.split(':', 2)
         review = next(
             (
@@ -199,7 +266,7 @@ class ReviewActions:
             ),
             None,
         )
-        if review is None:
+        if review is None or review.binding.generation != update.generation:
             return True
         peer = review.binding.peer
         event = update.event
@@ -216,7 +283,7 @@ class ReviewActions:
         ):
             if event.status is MessageStatusCode.DRAFT:
                 review.unknown = False
-                self.voice.controller.state.status = 'Recording is still unsent'
+                self._report(msg_id, 'Recording is still unsent', notify=False)
                 return True
             confirmed = event.status in {
                 MessageStatusCode.PENDING,
@@ -229,10 +296,11 @@ class ReviewActions:
             and event.onion == peer
         ):
             review.unknown = False
-            self.voice.controller.state.status = (
+            self._report(
+                msg_id,
                 'Recording remains unsent. Reconnect or explicitly send as Drop.'
                 if review.binding.delivery is Delivery.LIVE
-                else 'Recording remains unsent'
+                else 'Recording remains unsent',
             )
             return True
         if confirmed:
@@ -263,19 +331,9 @@ class ReviewActions:
                 playback.cache.discard(target)
             self.voice.reviews.pop(peer, None)
             self._checks.discard(peer)
-            self.voice.controller.state.status = (
-                'Recording deleted'
-                if isinstance(event, VoiceCancelledEvent)
-                else 'Drop read'
-                if isinstance(event, MessageOutcomeEvent)
-                and event.status is MessageStatusCode.READ
-                else 'Drop delivered'
-                if isinstance(event, MessageOutcomeEvent)
-                and event.status is MessageStatusCode.DELIVERED
-                else 'Live voice message sent'
-                if delivery is Delivery.LIVE
-                else 'Drop queued'
-            )
+            self._clear_feedback(msg_id)
+            if isinstance(event, VoiceCancelledEvent):
+                self.voice.controller.state.status = 'Recording deleted'
             if (
                 delivery is Delivery.DROP
                 and review.binding.delivery is Delivery.LIVE
@@ -287,8 +345,9 @@ class ReviewActions:
             self.voice.controller.refresh_state()
         else:
             review.unknown = True
-            self.voice.controller.state.status = (
-                'Recording outcome is unconfirmed. Recheck before sending again.'
+            self._report(
+                msg_id,
+                'Recording outcome is unconfirmed. Recheck before sending again.',
             )
             if kind != 'check':
                 self._checks.add(peer)

@@ -50,6 +50,7 @@ CLI_ASYNC_EVENT_TYPES: set[EventType] = {
     EventType.RETUNNEL_FAILED,
     EventType.RETUNNEL_INITIATED,
     EventType.RETUNNEL_SUCCESS,
+    EventType.RUNTIME_STATE_CHANGED,
     EventType.SWITCH_SUCCESS,
 }
 

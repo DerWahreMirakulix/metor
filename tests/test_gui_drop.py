@@ -1,24 +1,30 @@
 """Exact local DROP cleanup through GUI coordination and real encrypted Core IPC."""
 
 from dataclasses import replace
+import threading
 import unittest
 from unittest.mock import Mock, patch
 
 import test_gui_producers as support
 from test_gui_contacts import address
 from metor.client import FrontendProfileState
-from metor.client import FrontendLaunchContext
+from metor.client import FrontendLaunchContext, MetorClient, build_session_auth_proof
 from metor.core.api import (
     ContentType,
     Delivery,
     DeleteMessageCommand,
     ClearMessagesCommand,
     GetGuiPreferencesCommand,
+    GetMessagesCommand,
+    GetMessageOutcomeCommand,
     GuiPreferencesEvent,
+    IpcEvent,
     MessageEntry,
+    MessageOutcomeEvent,
     MessageDirectionCode,
     MessageStatusCode,
     MessagesDataEvent,
+    RuntimeStateChangedEvent,
     SetGuiPreferencesCommand,
     TextContent,
     VoiceContent,
@@ -120,6 +126,126 @@ class DropCoreTests(unittest.TestCase):
                 break
         self.assertIsNone(self.gui.drop.pending)
         self.assertFalse(self.gui.receipts.busy)
+
+    def _external_archive_change(self, *, hidden: bool, clear: bool) -> None:
+        """Receives a second client's genuine Core mutation while a GUI read is blocked."""
+        changed = threading.Event()
+
+        def observe(event: IpcEvent) -> None:
+            """Relays actual Core broadcasts through the production GUI mailbox."""
+            self.gui.mailbox.put(Update(self.gui.state.generation, 'event', event))
+            if (
+                isinstance(event, RuntimeStateChangedEvent)
+                and event.scope == 'messages'
+            ):
+                changed.set()
+
+        provider = Mock()
+        provider.get_session_auth_proof.side_effect = lambda challenge, salt: (
+            build_session_auth_proof('test-password', challenge, salt)
+        )
+        observer = MetorClient(
+            self.h.daemon._ipc.port, auth_provider=provider, on_event=observe
+        )
+        self.addCleanup(observer.disconnect)
+        self.assertIsNotNone(observer.bootstrap())
+        self.gui.client = observer
+        self.item('known-drop', MessageDirection.IN, MessageStatus.UNREAD)
+        self.item('pending', MessageDirection.OUT, MessageStatus.PENDING)
+        self.gui.state.route = Route('V08', self.h.onion, Delivery.DROP)
+        self.gui.messages = observer.request(
+            GetMessagesCommand(self.h.onion), MessagesDataEvent
+        )
+        self.gui.transcript.discard(
+            self.h.onion, Delivery.DROP, 'pending', MessageDirectionCode.OUT
+        )
+        if hidden:
+            self.gui.navigate(Route('V09', self.h.onion, Delivery.LIVE))
+        release = threading.Event()
+        self.addCleanup(release.set)
+
+        def held_read() -> None:
+            """Holds the bounded read lane while the external command and GUI event complete."""
+            if not release.wait(5):
+                raise TimeoutError('External-change fixture read was not released')
+
+        self.assertTrue(self.gui.submit('held-read', held_read, background=True))
+        reader = self.gui._worker
+        assert reader is not None
+        command = (
+            ClearMessagesCommand()
+            if clear
+            else DeleteMessageCommand(
+                self.h.onion, 'known-drop', MessageDirectionCode.IN
+            )
+        )
+        self.assertIsNotNone(self.h.other.request(command, IpcEvent))
+        self.assertTrue(changed.wait(5))
+        self.gui.poll()
+        if hidden:
+            self.gui.navigate(Route('V08', self.h.onion, Delivery.DROP))
+            self.assertEqual(
+                [row.msg_id for row in self.gui.messages.messages], ['pending']
+            )
+            self.assertNotIn(
+                (self.h.onion, Delivery.DROP, MessageDirectionCode.IN, 'known-drop'),
+                self.gui.transcript.items,
+            )
+        release.set()
+        reader.join(5)
+        expected_archive = set() if clear else {'pending'}
+        for _ in range(16):
+            self.gui.poll()
+            if self.gui._worker is not None:
+                self.gui._worker.join(5)
+            if (
+                self.gui.messages is not None
+                and {row.msg_id for row in self.gui.messages.messages}
+                == expected_archive
+                and not self.gui.receipts.busy
+                and not self.gui.archive.loading
+                and self.gui.inventory.page is not None
+                and any(
+                    item.msg_id == 'pending'
+                    for item in self.gui.inventory.page.messages
+                )
+            ):
+                break
+        self.assertIsNotNone(self.gui.messages)
+        self.assertEqual(
+            {row.msg_id for row in self.gui.messages.messages}, expected_archive
+        )
+        self.assertIsNotNone(self.gui.inventory.page)
+        self.assertIn(
+            'pending', {item.msg_id for item in self.gui.inventory.page.messages}
+        )
+        self.assertNotIn(
+            (self.h.onion, Delivery.DROP, MessageDirectionCode.IN, 'known-drop'),
+            self.gui.transcript.items,
+        )
+        current = self.h.other.request(
+            GetMessagesCommand(self.h.onion), MessagesDataEvent
+        )
+        self.assertEqual({row.msg_id for row in current.messages}, expected_archive)
+        pending = self.h.other.request(
+            GetMessageOutcomeCommand(self.h.onion, 'pending', MessageDirectionCode.OUT),
+            MessageOutcomeEvent,
+        )
+        self.assertEqual(pending.status, MessageStatusCode.PENDING)
+
+    def test_external_delete_revokes_hidden_drop_before_return_frame(self) -> None:
+        """A GUI in LIVE cannot resurrect another client's deleted archive body on return."""
+        self._external_archive_change(hidden=True, clear=False)
+
+    def test_external_clear_preserves_page_only_pending_drop_on_return(self) -> None:
+        """Unqualified external clear revokes hidden eligible rows while Core pending remains."""
+        self._external_archive_change(hidden=True, clear=True)
+
+    def test_external_delete_reconciles_visible_transcript_without_resurrection(
+        self,
+    ) -> None:
+        """Fresh archive reads and exact receipt proof also remove a visible duplicate body."""
+        self._external_archive_change(hidden=False, clear=False)
 
     def test_first_text_drop_appears_in_open_archive_without_live_connection(
         self,
@@ -461,6 +587,7 @@ class DropArchivePresentationTests(unittest.TestCase):
     def install(self, entries: list[MessageEntry], **fields: object) -> None:
         """Installs one typed page through the actual exact archive owner."""
         event = MessagesDataEvent(entries, 'archive', self.peer, **fields)
+        self.gui.archive._operation = self.operation
         self.assertTrue(
             self.gui.archive.install(
                 Update(self.gui.state.generation, self.operation, event)
@@ -525,6 +652,7 @@ class DropArchivePresentationTests(unittest.TestCase):
             Update(self.gui.state.generation, 'archive:old', event)
         )
         self.gui._operations.invalidate_reads()
+        self.gui.archive._operation = self.operation
         self.gui.archive.install(
             Update(self.gui.state.generation, self.operation, event, read_epoch=0)
         )

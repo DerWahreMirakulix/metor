@@ -263,26 +263,49 @@ separately.
 GUI-specific installation, simulator/device selection, ordinary operation, and
 troubleshooting are consolidated in the [GUI contract](docs/contracts/GUI.md).
 
+Choose the interface that fits the task. The one-shot CLI ships in Base;
+Terminal and GUI are independently installed frontends of the same Core.
+
+| Capability                        | Base CLI                                   | Terminal                                              | GUI                                                 |
+| :-------------------------------- | :----------------------------------------- | :---------------------------------------------------- | :-------------------------------------------------- |
+| Text DROP                         | Send, inbox and history commands           | Interactive send and receive                          | Conversation view                                   |
+| Text LIVE                         | Use an installed interactive frontend      | Connect, accept, chat and end                         | Connect, accept, chat and end                       |
+| Voice messages                    | History metadata; no recording or playback | Incoming notice; no recording or playback             | Record, review, send and play with configured audio |
+| Telephone calls                   | Use a capable frontend                     | Signaling and rejection; no start or audio acceptance | Start, accept and talk with configured duplex audio |
+| Profile and daemon administration | Full command interface                     | Uses CLI setup                                        | Graphical profile setup and settings                |
+
+GUI and Terminal exchange text with each other, and CLI text DROPs arrive in
+either frontend. A DROP needs no LIVE connection. Terminal selects text delivery
+from the peer's LIVE state; the GUI offers explicit DROP and LIVE views. Voice
+stays unread when a text-only interface displays its notice. Accepting a LIVE
+chat never accepts a telephone call. Terminal can reject an incoming call but
+cannot take over a call started or accepted by another frontend: cancel,
+hangup and mute controls require the exact client that owns it. See the
+[shared frontend contract](docs/contracts/FRONTENDS.md) for exact permissions,
+retention and interoperability rules.
+
 Inside the running Terminal UI, you have access to the following slash commands:
 
-| Command                         | Description                                                          |
-| :------------------------------ | :------------------------------------------------------------------- |
-| `/connect <onion\|alias>`       | Establishes a new secure Tor connection to a peer.                   |
-| `/accept [onion\|alias]`        | Accepts an incoming background connection request.                   |
-| `/reject [onion\|alias]`        | Rejects an incoming connection request.                              |
-| `/switch [..\|<onion\|alias>]`  | Switches focus between active chats (use `..` to unfocus).           |
-| `/end [onion\|alias]`           | Terminates the connection to the specified peer.                     |
-| `/fallback [onion\|alias]`      | Forces unacknowledged live messages into the offline drop queue.     |
-| `/sessions`                     | Lists all active and pending sessions.                               |
-| `/retunnel [onion\|alias]`      | Forces a Tor circuit rotation (`NEWNYM`) and reconnects to the peer. |
-| `/inbox [onion\|alias]`         | Shows inbox counts or consumes unread messages for one peer.         |
-| `/transport [onion\|alias]`     | Shows the current transport state (session/tunnel, focus, pending).  |
-| `/clear`                        | Clears the current chat display.                                     |
-| `/contacts list`                | Displays the address book and temporary discovered peers.            |
-| `/contacts add <alias> [onion]` | Saves a temporary RAM peer permanently to disk.                      |
-| `/contacts rm <onion\|alias>`   | Removes a saved contact or demotes an active peer gracefully.        |
-| `/contacts rename <old> <new>`  | Renames a saved or discovered peer.                                  |
-| `/exit`                         | Closes the UI and releases its daemon participation.                 |
+| Command                         | Description                                                           |
+| :------------------------------ | :-------------------------------------------------------------------- |
+| `/connect <onion\|alias>`       | Requests a LIVE text chat with a peer.                                |
+| `/accept [onion\|alias]`        | Accepts an incoming LIVE text-chat request.                           |
+| `/reject [onion\|alias]`        | Rejects an incoming LIVE text-chat request.                           |
+| `/switch [..\|<onion\|alias>]`  | Switches focus between active chats (use `..` to unfocus).            |
+| `/end [onion\|alias]`           | Ends the LIVE text chat; an independently accepted call can continue. |
+| `/fallback [onion\|alias]`      | Forces unacknowledged live messages into the offline drop queue.      |
+| `/sessions`                     | Lists all active and pending sessions.                                |
+| `/retunnel [onion\|alias]`      | Forces a Tor circuit rotation (`NEWNYM`) and reconnects to the peer.  |
+| `/inbox [onion\|alias]`         | Shows inbox counts or consumes unread messages for one peer.          |
+| `/transport [onion\|alias]`     | Shows the current transport state (session/tunnel, focus, pending).   |
+| `/calls`                        | Shows telephone signaling without accepting audio.                    |
+| `/call reject <call-id>`        | Rejects that exact incoming telephone call.                           |
+| `/clear`                        | Clears the current chat display.                                      |
+| `/contacts list`                | Displays the address book and temporary discovered peers.             |
+| `/contacts add <alias> [onion]` | Saves a temporary RAM peer permanently to disk.                       |
+| `/contacts rm <onion\|alias>`   | Removes a saved contact or demotes an active peer gracefully.         |
+| `/contacts rename <old> <new>`  | Renames a saved or discovered peer.                                   |
+| `/exit`                         | Closes the UI and releases its daemon participation.                  |
 
 Enter sends the current input. Ctrl-N inserts a newline, and arrow keys edit the
 draft. POSIX terminals also support Alt-Enter for a newline, Home, End and Delete,

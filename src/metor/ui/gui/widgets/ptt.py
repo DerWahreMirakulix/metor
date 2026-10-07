@@ -55,6 +55,17 @@ class PttAction(Action):
             and not press.stop_requested
         )
 
+    def cancel_input(self) -> None:
+        """Revokes a departed native target without repeating Core-owned media cleanup.
+
+        The navigation or privacy controller must finalize capture before
+        suspending its view. A later key or pointer release cannot reuse it.
+        """
+        self._touch_identity = None
+        self._key_identity = None
+        self._missing_audio = False
+        super().cancel_input()
+
     def on_touch_down(self, touch: MotionEvent) -> bool:
         """Captures one eligible pointer identity and rejects a second pointer owner.
 

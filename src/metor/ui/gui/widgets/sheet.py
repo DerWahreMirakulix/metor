@@ -10,6 +10,8 @@ from kivy.metrics import dp, sp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.modalview import ModalView
 from kivy.uix.scrollview import ScrollView
+from kivy.uix.textinput import TextInput
+from kivy.uix.widget import Widget
 
 from metor.ui.gui.constants import Geometry
 from metor.ui.gui.runtime import GuiController
@@ -40,6 +42,7 @@ class ActionSheet(ModalView):
         revision: Callable[[], object] | None = None,
         snapshot_updates: bool = True,
         wrap_title: bool = False,
+        stable_frame: bool = False,
     ) -> None:
         """Creates current-state content with an explicit Close and persistent action area.
 
@@ -55,6 +58,7 @@ class ActionSheet(ModalView):
             revision: Optional bounded local eligibility key for contextual actions.
             snapshot_updates: False for local configuration independent of Core snapshots.
             wrap_title: Measures multi-line audio headings instead of shortening them.
+            stable_frame: Reserves available height so asynchronous content cannot move dismissal.
         Returns:
             None
         """
@@ -69,6 +73,7 @@ class ActionSheet(ModalView):
         self.rebuild_on_snapshot = rebuild_on_snapshot
         self.snapshot_updates = snapshot_updates
         self.wrap_title = wrap_title
+        self.stable_frame = stable_frame
         self.primary_tone = primary_tone
         self.footer = footer
         self._eligibility_revision = revision
@@ -77,39 +82,23 @@ class ActionSheet(ModalView):
         self._generation = controller.state.generation
         self._snapshot = id(controller.state.snapshot)
         self._busy = controller.state.busy
+        self._disposed = False
         self.body = Panel(orientation='vertical', padding='24dp', spacing='16dp')
         self.add_widget(self.body)
-        self.column = BoxLayout()
-        self.actions = BoxLayout()
-        self.cancel = Action('Cancel' if primary else 'Back', self.dismiss)
-        self._build()
-        self.bind(on_dismiss=self._dismissed)
-        Window.bind(size=self._resize)
-        if self.footer is not None:
-            self.footer.bind(height=self._resize)
-
-    def _build(self) -> None:
-        """Rebuilds current labels after a canonical contact/state change.
-
-        Args:
-            None
-        Returns:
-            None
-        """
-        self.body.clear_widgets()
         header = BoxLayout(size_hint_y=None, height='48dp', spacing='12dp')
         self.header = header
-        title = Label(
+        self.title_label = Label(
             self.heading() if callable(self.heading) else self.heading,
             role='title',
             wrap=self.wrap_title,
         )
         if self.wrap_title:
-            title.bind(height=self._title_height)
-        header.add_widget(title)
-        header.add_widget(
-            IconAction('x', 'Close', self.dismiss, pos_hint={'center_y': 0.5})
+            self.title_label.bind(height=self._title_height)
+        header.add_widget(self.title_label)
+        self.close_action = IconAction(
+            'x', 'Close', self.dismiss, pos_hint={'center_y': 0.5}
         )
+        header.add_widget(self.close_action)
         self.invitation_indicator = IconAction(
             'bell', 'Incoming Live', self._open_invitation, tone='live', badge=True
         )
@@ -122,7 +111,6 @@ class ActionSheet(ModalView):
         self.column.bind(
             minimum_height=self.column.setter('height'), minimum_size=self._resize
         )
-        self.builder(self.column)
         self.scroll.add_widget(self.column)
         self.body.add_widget(self.scroll)
         if self.footer is not None:
@@ -130,12 +118,44 @@ class ActionSheet(ModalView):
         self.actions = BoxLayout(size_hint_y=None, height='48dp', spacing='12dp')
         self.cancel = Action('Cancel' if self.primary else 'Back', self.dismiss)
         self.actions.add_widget(self.cancel)
+        self.primary_action: Action | None = None
         if self.primary:
-            self.actions.add_widget(
-                Action(self.primary[0], self.primary[1], tone=self.primary_tone)
+            self.primary_action = Action(
+                self.primary[0], self.primary[1], tone=self.primary_tone
             )
+            self.actions.add_widget(self.primary_action)
         self.body.add_widget(self.actions)
+        self._build()
+        self.bind(on_dismiss=self._dismissed)
+        Window.bind(size=self._resize)
+        if self.footer is not None:
+            self.footer.bind(height=self._resize)
+
+    def _build(self) -> None:
+        """Refreshes current content while retaining ownership of dismissal gestures."""
+        if self._disposed:
+            return
+        self._revoke_widgets(self.column)
+        self.column.clear_widgets()
+        self.title_label.text = (
+            self.heading() if callable(self.heading) else self.heading
+        )
+        self.builder(self.column)
         self._resize()
+
+    @staticmethod
+    def _revoke_widgets(root: Widget) -> None:
+        """Clears removed private content and cancels held input without activation."""
+        for widget in root.walk(restrict=True):
+            if isinstance(widget, Action):
+                widget.cancel_input()
+                widget.disabled = True
+                widget.accessible_name = ''
+            elif isinstance(widget, TextInput):
+                widget.focus = False
+                widget.disabled = True
+            if isinstance(widget, (Label, TextInput)):
+                widget.text = ''
 
     def _title_height(self, _widget: object, height: float) -> None:
         """Keeps a wrapped heading fully visible beside its fixed close target.
@@ -146,6 +166,8 @@ class ActionSheet(ModalView):
         Returns:
             None.
         """
+        if self._disposed:
+            return
         self.header.height = max(dp(48), height)
         self._resize()
 
@@ -157,6 +179,8 @@ class ActionSheet(ModalView):
         Returns:
             None
         """
+        if self._disposed:
+            return
         self.width = min(dp(320 if self.compact_menu else 480), Window.width - dp(48))
         needed = dp(12 + 4 * 12)
         if self.primary:
@@ -183,9 +207,8 @@ class ActionSheet(ModalView):
             + self.actions.height
             + (self.footer.height + dp(16) if self.footer is not None else 0)
         )
-        self.height = min(
-            Window.height - self._bottom() - dp(Geometry.EDGE), desired_height
-        )
+        available = Window.height - self._bottom() - dp(Geometry.EDGE)
+        self.height = available if self.stable_frame else min(available, desired_height)
         self.scroll.do_scroll_y = self.height < desired_height
         self._align_center()
 
@@ -233,10 +256,12 @@ class ActionSheet(ModalView):
         Returns:
             None
         """
+        if self._disposed:
+            return
         PointerTooltip.clear_all()
         if ActionSheet.current is not None:
             ActionSheet.current.dismiss(animation=False)
-        if not self.controller.state.covered:
+        if not self.controller.state.covered and not self._disposed:
             ActionSheet.current = self
             self.open(animation=False)
             Clock.schedule_once(self._focus_cancel, 0)
@@ -276,9 +301,14 @@ class ActionSheet(ModalView):
         Returns:
             None
         """
+        self._disposed = True
         Window.unbind(size=self._resize)
         if self.footer is not None:
             self.footer.unbind(height=self._resize)
+        self._revoke_widgets(self.body)
+        self._revoke_widgets(self.invitation_indicator)
+        self.heading = ''
+        self.column.clear_widgets()
         self.body.clear_widgets()
         if ActionSheet.current is self:
             ActionSheet.current = None
@@ -313,9 +343,12 @@ class ActionSheet(ModalView):
             sheet._eligibility_key = (
                 sheet._eligibility_revision() if sheet._eligibility_revision else None
             )
+            if sheet.primary_action is not None:
+                sheet.primary_action.cancel_input()
             if sheet.rebuild_on_snapshot:
                 sheet._build()
-                sheet.cancel.focus = True
+                if not sheet.close_action.focus:
+                    sheet.cancel.focus = True
 
     def _update_invitation_indicator(self) -> None:
         """Makes incoming activity reachable above the native modal without stealing focus.

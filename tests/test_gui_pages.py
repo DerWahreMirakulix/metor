@@ -108,10 +108,11 @@ class ArchivePageTests(unittest.TestCase):
         gui.messages = self.page()
         self.assertTrue(gui.archive.older())
         gui.archive.poll()
+        old_operation = gui.archive._operation
+        assert old_operation is not None
         gui._worker.join(5)
         gui.poll()
         self.assertEqual([row.msg_id for row in gui.messages.messages], ['one'])
-        old_operation = gui.archive._operation
         gui.navigate(Route('V12'))
         gui.mailbox.put(Update(gui.state.generation, old_operation, self.page()))
         gui.poll()

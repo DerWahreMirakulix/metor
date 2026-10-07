@@ -8,9 +8,17 @@ from metor.client import FrontendProfileState
 from metor.client import FrontendLaunchContext
 from metor.core.api import (
     ContentType,
+    ConnectedEvent,
+    ConnectionActor,
+    ConnectionAutoAcceptedEvent,
     ConnectionConnectingEvent,
+    ConnectionFailedEvent,
+    ConnectionReasonCode,
+    ConnectionRejectedEvent,
+    ContactEntry,
     Delivery,
     FallbackCommand,
+    LiveContextEntry,
     MessageDirectionCode,
     MessageStatusCode,
     RuntimeSnapshotEvent,
@@ -47,6 +55,242 @@ class LiveStatusPresentationTests(unittest.TestCase):
                 self.assertIsNone(gui.live.pending)
                 self.assertEqual(gui.state.feedback.revision, before)
         self.assertEqual(gui.refresh_state.call_count, 2)
+
+
+class LiveStartPresentationTests(unittest.TestCase):
+    """Explicit starts respond before IPC and keep failures separate from progress."""
+
+    def setUp(self) -> None:
+        """Creates a controlled result boundary with real GUI presentation ownership."""
+        self.gui = GuiController(
+            FrontendLaunchContext('fixture', Mock()), simulator=True
+        )
+        self.gui.state.covered = False
+        self.gui.state.route = Route('V09', 'bob', Delivery.LIVE)
+        self.gui.state.snapshot = RuntimeSnapshotEvent(
+            'fixture', 'self', contacts=[ContactEntry('Bob', 'bob')], revision=4
+        )
+        self.gui.client = Mock()
+        self.gui.submit = Mock(return_value=True)
+        self.gui.refresh_state = Mock()
+
+    def acknowledge(self) -> None:
+        """Installs the correlated admission result without a transport snapshot."""
+        mutation = self.gui.live.pending
+        self.assertIsNotNone(mutation)
+        self.gui.live.install(
+            Update(0, mutation.operation, ConnectionConnectingEvent('Bob', 'bob'))
+        )
+
+    def test_start_is_immediate_and_old_snapshot_cannot_reenable_duplicate(
+        self,
+    ) -> None:
+        """Local request admission bridges the full wait for an authoritative attempt."""
+        before = self.gui.state.feedback.revision
+        self.assertTrue(self.gui.live.start('bob'))
+        self.assertTrue(self.gui.live.starting('bob'))
+        self.assertFalse(self.gui.live.start('bob'))
+        self.acknowledge()
+        self.gui.live.poll()
+        self.assertTrue(self.gui.live.starting('bob'))
+        self.assertFalse(self.gui.live.start('bob'))
+        self.assertEqual(self.gui.submit.call_count, 1)
+        self.assertEqual(self.gui.state.feedback.revision, before)
+        self.gui.state.snapshot = RuntimeSnapshotEvent(
+            'fixture',
+            'self',
+            live_contexts=[
+                LiveContextEntry(
+                    'Bob', 'bob', True, 'connecting', outbound_attempt_id='a'
+                )
+            ],
+        )
+        self.gui.live.poll()
+        self.assertTrue(self.gui.live.starting('bob'))
+        self.assertEqual(self.gui.live.failure('bob'), '')
+
+    def test_failure_before_ack_is_inline_and_survives_ack_until_explicit_retry(
+        self,
+    ) -> None:
+        """Broadcast ordering cannot lose failure or create a duplicate global notice."""
+        self.assertTrue(self.gui.live.start('bob'))
+        before = self.gui.state.feedback.revision
+        self.gui.live.install(Update(0, 'event', ConnectionFailedEvent('Bob', 'bob')))
+        self.acknowledge()
+        self.assertFalse(self.gui.live.starting('bob'))
+        self.assertIn('could not connect', self.gui.live.failure('bob'))
+        self.assertEqual(self.gui.state.feedback.revision, before)
+        self.assertTrue(self.gui.live.start('bob'))
+        self.assertEqual(self.gui.live.failure('bob'), '')
+        self.assertTrue(self.gui.live.starting('bob'))
+        self.assertEqual(self.gui.submit.call_count, 2)
+
+    def test_departed_request_failure_notifies_once_and_scopes_the_contact(
+        self,
+    ) -> None:
+        """The result remains understandable after navigating away from its peer."""
+        self.assertTrue(self.gui.live.start('bob'))
+        self.acknowledge()
+        self.gui.state.route = Route('V17')
+        failed = Update(0, 'event', ConnectionFailedEvent('Bob', 'bob'))
+        self.gui.live.install(failed)
+        revision = self.gui.state.feedback.revision
+        self.assertIn('Bob: Live could not connect', self.gui.state.feedback.text)
+        self.gui.live.install(failed)
+        self.assertEqual(self.gui.state.feedback.revision, revision)
+
+    def test_definite_failure_survives_a_later_missing_request_completion(self) -> None:
+        """A timeout cannot turn already-confirmed rejection back into progress."""
+        self.assertTrue(self.gui.live.start('bob'))
+        mutation = self.gui.live.pending
+        self.gui.live.install(Update(0, 'event', ConnectionRejectedEvent('Bob', 'bob')))
+        self.gui.live.install(Update(0, mutation.operation))
+        self.assertFalse(self.gui.live.starting('bob'))
+        self.assertIn('declined', self.gui.live.failure('bob'))
+        self.assertFalse(self.gui.live.retry_ready('bob'))
+        self.gui.state.snapshot = RuntimeSnapshotEvent('fixture', 'self')
+        self.gui.live.poll()
+        self.assertTrue(self.gui.live.retry_ready('bob'))
+        self.assertIn('declined', self.gui.live.failure('bob'))
+
+    def test_explicit_close_discards_the_previous_connection_failure(self) -> None:
+        """Reopening a deliberately closed local context cannot restore its old error."""
+        self.assertTrue(self.gui.live.start('bob'))
+        self.acknowledge()
+        self.gui.live.install(Update(0, 'event', ConnectionFailedEvent('Bob', 'bob')))
+        self.assertIn('could not connect', self.gui.live.failure('bob'))
+        self.assertTrue(self.gui.live.close_context('bob'))
+        self.assertEqual(self.gui.live.failure('bob'), '')
+        self.assertFalse(self.gui.live.starting('bob'))
+
+    def test_decline_is_distinct_from_local_cancel_and_mutual_connection_tiebreak(
+        self,
+    ) -> None:
+        """Only a genuine remote rejection ends progress with an actionable failure."""
+        self.assertTrue(self.gui.live.start('bob'))
+        self.acknowledge()
+        for event in (
+            ConnectionRejectedEvent('Bob', 'bob', actor=ConnectionActor.LOCAL),
+            ConnectionRejectedEvent(
+                'Bob', 'bob', reason_code=ConnectionReasonCode.MUTUAL_TIEBREAKER_LOSER
+            ),
+        ):
+            self.gui.live.install(Update(0, 'event', event))
+            self.assertTrue(self.gui.live.starting('bob'))
+        self.gui.live.install(Update(0, 'event', ConnectionRejectedEvent('Bob', 'bob')))
+        self.assertIn('declined', self.gui.live.failure('bob'))
+
+    def test_unknown_result_rechecks_before_explicit_retry(self) -> None:
+        """Lost acknowledgment is reconciled without a second Connect command."""
+        self.assertTrue(self.gui.live.start('bob'))
+        mutation = self.gui.live.pending
+        self.gui.live.install(Update(0, mutation.operation))
+        self.assertFalse(self.gui.live.start('bob'))
+        self.gui.live.poll()
+        self.assertTrue(self.gui.live.starting('bob'))
+        self.gui.state.snapshot = RuntimeSnapshotEvent('fixture', 'self')
+        self.gui.live.poll()
+        self.assertFalse(self.gui.live.starting('bob'))
+        self.assertIn('could not be confirmed', self.gui.live.failure('bob'))
+        self.assertEqual(self.gui.submit.call_count, 1)
+        self.assertTrue(self.gui.live.start('bob'))
+
+    def test_failure_retry_waits_for_authoritative_attempt_removal(self) -> None:
+        """A failed broadcast cannot make a stale Cancel identity into a usable Retry."""
+        self.assertTrue(self.gui.live.start('bob'))
+        self.acknowledge()
+        self.gui.state.snapshot = RuntimeSnapshotEvent(
+            'fixture',
+            'self',
+            live_contexts=[
+                LiveContextEntry(
+                    'Bob', 'bob', True, 'connecting', outbound_attempt_id='a'
+                )
+            ],
+        )
+        self.gui.live.install(Update(0, 'event', ConnectionFailedEvent('Bob', 'bob')))
+        self.assertFalse(self.gui.live.retry_ready('bob'))
+        self.gui.state.snapshot = RuntimeSnapshotEvent('fixture', 'self')
+        self.gui.live.poll()
+        self.assertTrue(self.gui.live.retry_ready('bob'))
+
+    def test_racing_incoming_request_can_auto_accept_without_false_failure(
+        self,
+    ) -> None:
+        """Core may fulfill explicit Connect by accepting an already-arrived invitation."""
+        self.assertTrue(self.gui.live.start('bob'))
+        mutation = self.gui.live.pending
+        self.gui.live.install(
+            Update(0, mutation.operation, ConnectionAutoAcceptedEvent('Bob', 'bob'))
+        )
+        self.assertTrue(self.gui.live.starting('bob'))
+        self.assertEqual(self.gui.live.failure('bob'), '')
+        self.assertEqual(self.gui.state.feedback.text, '')
+
+    def test_connected_snapshot_and_event_clear_progress_without_feedback(self) -> None:
+        """Connection success has one canonical status and does not reopen a modal."""
+        for event_first in (False, True):
+            with self.subTest(event_first=event_first):
+                self.gui.state.snapshot = RuntimeSnapshotEvent('fixture', 'self')
+                self.assertTrue(self.gui.live.start('bob'))
+                self.acknowledge()
+                before = self.gui.state.feedback.revision
+                if event_first:
+                    self.gui.live.install(
+                        Update(0, 'event', ConnectedEvent('Bob', 'bob'))
+                    )
+                self.gui.state.snapshot = RuntimeSnapshotEvent(
+                    'fixture',
+                    'self',
+                    live_contexts=[LiveContextEntry('Bob', 'bob', True, 'connected')],
+                )
+                self.gui.live.poll()
+                self.assertFalse(self.gui.live.starting('bob'))
+                self.assertEqual(self.gui.live.failure('bob'), '')
+                self.assertEqual(self.gui.state.feedback.revision, before)
+
+    def test_connected_event_keeps_start_guard_until_a_current_snapshot_arrives(
+        self,
+    ) -> None:
+        """A broadcast preceding its snapshot cannot briefly reenable Start Live."""
+        self.assertTrue(self.gui.live.start('bob'))
+        self.acknowledge()
+        self.gui.live.install(
+            Update(0, 'event', ConnectedEvent('Bob', 'bob', revision=6))
+        )
+        self.gui.live.poll()
+        self.assertTrue(self.gui.live.starting('bob'))
+        self.assertFalse(self.gui.live.retry_ready('bob'))
+        self.assertFalse(self.gui.live.start('bob'))
+        self.gui.state.snapshot = RuntimeSnapshotEvent('fixture', 'self', revision=5)
+        self.gui.live.poll()
+        self.assertTrue(self.gui.live.starting('bob'))
+        self.assertEqual(self.gui.live.failure('bob'), '')
+        self.gui.state.snapshot = RuntimeSnapshotEvent(
+            'fixture',
+            'self',
+            live_contexts=[LiveContextEntry('Bob', 'bob', True, 'connected')],
+            revision=6,
+        )
+        self.gui.live.poll()
+        self.assertFalse(self.gui.live.starting('bob'))
+        self.assertFalse(self.gui.live.retry_ready('bob'))
+        self.assertEqual(self.gui.submit.call_count, 1)
+
+    def test_stale_generation_revision_and_cover_do_not_publish_failure(self) -> None:
+        """A former activation or older state cannot replace current request progress."""
+        self.assertTrue(self.gui.live.start('bob'))
+        self.acknowledge()
+        for update in (
+            Update(-1, 'event', ConnectionFailedEvent('Bob', 'bob')),
+            Update(0, 'event', ConnectionFailedEvent('Bob', 'bob', revision=3)),
+        ):
+            self.gui.live.install(update)
+            self.assertEqual(self.gui.live.failure('bob'), '')
+        self.gui.state.covered = True
+        self.gui.live.install(Update(0, 'event', ConnectionFailedEvent('Bob', 'bob')))
+        self.assertEqual(self.gui.live.failure('bob'), '')
+        self.assertEqual(self.gui.state.feedback.text, '')
 
 
 class LiveCoreTests(unittest.TestCase):
@@ -222,7 +466,7 @@ class LiveCoreTests(unittest.TestCase):
         self.assertEqual(
             self.gui.state.route, Route('V08', self.h.onion, Delivery.DROP)
         )
-        self.assertEqual(self.gui.state.status, '1 queued as Drop', self.observed)
+        self.assertEqual(self.gui.state.feedback.visible(), '', self.observed)
         self.assertEqual(
             [
                 record.msg_id
@@ -233,7 +477,7 @@ class LiveCoreTests(unittest.TestCase):
         self.assertEqual(
             [item.msg_id for item in self.gui.transcript.items.values()], ['second']
         )
-        self.assertEqual(self.gui.state.status, '1 queued as Drop')
+        self.assertEqual(self.gui.state.feedback.visible(), '')
         self.assertTrue(self.gui.live.fallback(self.h.onion))
         self.settle()
         self.assertEqual(self.h.messages.get_pending_live_outbox(self.h.onion), [])

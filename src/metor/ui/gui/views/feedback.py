@@ -5,7 +5,10 @@ from time import monotonic
 
 from kivy.clock import Clock
 from kivy.metrics import dp
+from kivy.uix.anchorlayout import AnchorLayout
 from kivy.uix.floatlayout import FloatLayout
+from kivy.uix.scrollview import ScrollView
+from kivy.uix.widget import Widget
 
 from metor.ui.gui.constants import Geometry, GuiLimits
 from metor.ui.gui.runtime import GuiController
@@ -26,24 +29,61 @@ class FeedbackOverlay(FloatLayout):
         """
         super().__init__()
         self.controller, self.refresh = controller, refresh
-        self.bottom_inset: float = 0
+        self._anchor: Widget | None = None
         self._revision = -1
         self.card = Panel(
             surface='raised',
             orientation='horizontal',
             size_hint=(None, None),
-            padding=dp(12),
+            padding=(dp(12), 0),
             spacing=dp(8),
         )
-        self.message = Label('', role='support')
-        self.card.add_widget(self.message)
+        self.message = Label('', role='support', pos_hint={'center_y': 0.5})
+        self.message_viewport = ScrollView(
+            do_scroll_x=False, always_overscroll=False, scroll_y=1
+        )
+        self.message_host = AnchorLayout(size_hint_y=None, anchor_y='center')
+        self.message_host.add_widget(self.message)
+        self.message_viewport.add_widget(self.message_host)
+        self.card.add_widget(self.message_viewport)
         self.dismiss = IconAction(
-            'x', 'Dismiss message', self._dismiss, surface='raised'
+            'x',
+            'Dismiss message',
+            self._dismiss,
+            surface='raised',
+            pos_hint={'center_y': 0.5},
         )
         self.card.add_widget(self.dismiss)
         self.bind(size=self._layout, pos=self._layout)
         self.message.bind(height=self._layout)
+        self.message.bind(height=self._message_bounds)
+        self.message_viewport.bind(height=self._message_bounds)
         self._expiry = Clock.create_trigger(self._expired, 0)
+
+    def _message_bounds(self, *_args: object) -> None:
+        """Centers short results and permits long text to scroll within the card.
+
+        Args:
+            _args: Native measured text or viewport height change.
+        """
+        self.message_host.height = max(
+            self.message.height, self.message_viewport.height
+        )
+
+    def anchor_to(self, anchor: Widget | None) -> None:
+        """Tracks the foreground content viewport as controls and keyboard resize.
+
+        Args:
+            anchor: Visible content bounds excluding fixed navigation and input.
+        """
+        if anchor is self._anchor:
+            return
+        if self._anchor is not None:
+            self._anchor.unbind(pos=self._layout, size=self._layout)
+        self._anchor = anchor
+        if anchor is not None:
+            anchor.bind(pos=self._layout, size=self._layout)
+        self._layout()
 
     def _dismiss(self) -> None:
         """Dismisses only transient feedback without changing the action outcome."""
@@ -81,21 +121,40 @@ class FeedbackOverlay(FloatLayout):
         Args:
             _args: Native layout or measured text event.
         """
-        self.card.width = max(
-            0, min(dp(Geometry.COMPACT_MAX), self.width - dp(Geometry.EDGE * 2))
+        anchor = self._anchor
+        if anchor is None:
+            return
+        if anchor.height < dp(Geometry.TARGET) or anchor.width <= 0:
+            if self.card.parent is not None:
+                self.dismiss.focus = False
+                self.remove_widget(self.card)
+            return
+        left, bottom = self.to_widget(*anchor.to_window(*anchor.pos))
+        self.card.width = max(0, min(dp(Geometry.COMPACT_MAX), anchor.width))
+        self.card.height = min(
+            anchor.height, max(dp(Geometry.TARGET), self.message.height + dp(16))
         )
-        self.card.height = max(dp(Geometry.TARGET), self.message.height) + dp(24)
         self.card.pos = (
-            self.x + (self.width - self.card.width) / 2,
-            self.y + self.bottom_inset + dp(Geometry.COMPOSER + Geometry.EDGE * 2),
+            left + (anchor.width - self.card.width) / 2,
+            bottom + max(0, min(dp(Geometry.EDGE), anchor.height - self.card.height)),
         )
+        if (
+            self.card.parent is None
+            and self.message.text
+            and self.controller.state.feedback.visible()
+            and not self.controller.state.covered
+            and ActionSheet.current is None
+        ):
+            self.add_widget(self.card)
 
     def render(self) -> None:
         """Revokes covered or expired text and reconciles the latest result in place."""
         state = self.controller.state
         text = (
             state.feedback.visible()
-            if not state.covered and ActionSheet.current is None
+            if not state.covered
+            and ActionSheet.current is None
+            and self._anchor is not None
             else ''
         )
         if state.feedback.revision != self._revision:
@@ -103,6 +162,8 @@ class FeedbackOverlay(FloatLayout):
             if state.feedback.visible():
                 self._schedule_expiry()
         if text:
+            if self.message.text != text:
+                self.message_viewport.scroll_y = 1
             self.message.text = text
             if self.card.parent is None:
                 self.add_widget(self.card)
@@ -115,6 +176,7 @@ class FeedbackOverlay(FloatLayout):
         """Clears native text synchronously before applying a privacy cover."""
         self._expiry.cancel()
         self.controller.state.feedback.clear()
+        self.anchor_to(None)
         self._hide()
 
     def _hide(self) -> None:

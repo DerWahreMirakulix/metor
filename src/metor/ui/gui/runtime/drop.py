@@ -189,10 +189,15 @@ class DropActions:
             mutation.peer, Delivery.DROP, mutation.msg_id, mutation.direction
         )
         route = controller.state.route
-        if route.delivery is Delivery.DROP and (
+        page = controller.messages
+        visible_drop = route.delivery is Delivery.DROP and (
             mutation.peer is None or route.peer == mutation.peer
+        )
+        if visible_drop or (
+            page is not None and (mutation.peer is None or page.onion == mutation.peer)
         ):
             controller.archive.reset()
+        if visible_drop:
             controller.inventory.reset()
 
     def poll(self) -> None:

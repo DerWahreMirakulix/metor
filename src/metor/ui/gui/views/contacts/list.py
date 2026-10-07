@@ -39,11 +39,18 @@ class ContactListView(BoxLayout):
         self._key: object = None
         self._rows: dict[str, Action] = {}
         header = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(12))
-        self.back = IconAction('chevron-left', 'Back', self.go_back)
-        self.title = Label(role='title', wrap=False)
+        header.bind(minimum_height=header.setter('height'))
+        self.back = IconAction(
+            'chevron-left', 'Back', self.go_back, pos_hint={'center_y': 0.5}
+        )
+        self.title = Label(role='peer', pos_hint={'center_y': 0.5})
         header.add_widget(self.back)
         header.add_widget(self.title)
-        header.add_widget(IconAction('ellipsis', 'Contact actions', self.more))
+        header.add_widget(
+            IconAction(
+                'ellipsis', 'Contact actions', self.more, pos_hint={'center_y': 0.5}
+            )
+        )
         self.add_widget(header)
         self.search = TextField(
             multiline=False,

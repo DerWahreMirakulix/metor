@@ -21,7 +21,14 @@ class LiveHeaderAction(IconAction):
         surface: str = 'raised',
     ) -> None:
         """Binds immutable action identity while allowing width-only visual reflow."""
-        super().__init__(symbol, label, callback, tone=tone, surface=surface)
+        super().__init__(
+            symbol,
+            label,
+            callback,
+            tone=tone,
+            surface=surface,
+            pos_hint={'center_y': 0.5},
+        )
         self.label.text = label
         self.label.shorten = False
         self._show_text = False

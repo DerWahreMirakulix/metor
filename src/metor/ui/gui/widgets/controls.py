@@ -146,6 +146,9 @@ class Label(KivyLabel):
 class Action(FocusBehavior, ButtonBehavior, Panel):  # pyright: ignore[reportIncompatibleMethodOverride]
     """Focus-scoped, keyboard-operable labelled action with fixed hit geometry."""
 
+    focus: bool
+    state: str
+
     def __init__(
         self,
         text: str,
@@ -326,6 +329,14 @@ class Action(FocusBehavior, ButtonBehavior, Panel):  # pyright: ignore[reportInc
             self.state = 'down'
             return True
         return bool(super().keyboard_on_key_down(window, keycode, text, modifiers))
+
+    def cancel_input(self) -> None:
+        """Releases local keyboard and pointer state without invoking an action."""
+        self._keyboard_armed = False
+        self.state = 'normal'
+        if self.last_touch is not None:
+            self.last_touch.ungrab(self)
+        self.focus = False
 
     def keyboard_on_key_up(self, window: object, keycode: tuple[int, str]) -> bool:
         """Activates ordinary controls only on focused Space/Enter release.

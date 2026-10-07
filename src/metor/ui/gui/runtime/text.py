@@ -46,7 +46,49 @@ class TextController:
         self.operations: dict[str, tuple[str, Delivery, str]] = {}
         self._checks: set[str] = set()
         self._check_at: dict[str, float] = {}
+        self._feedback_revisions: dict[str, int] = {}
+        self._errors: dict[tuple[str, Delivery], str] = {}
         self.reservations: dict[str, tuple[TranscriptItem, int]] = {}
+
+    def error(self, peer: str, delivery: Delivery) -> str:
+        """Returns persistent actionable feedback for the exact visible composer."""
+        return (
+            ''
+            if self.controller.state.covered
+            else self._errors.get((peer, delivery), '')
+        )
+
+    def clear_error(self, peer: str, delivery: Delivery) -> None:
+        """Clears a previous draft error after editing or confirmed acceptance."""
+        self._errors.pop((peer, delivery), None)
+
+    def report_error(self, peer: str, delivery: Delivery, message: str) -> int | None:
+        """Keeps failures beside the draft and notifies only a departed conversation.
+
+        Returns:
+            int | None: The owned transient-feedback revision, when one was published.
+        """
+        key = peer, delivery
+        if self._errors.get(key) == message:
+            return None
+        if key not in self._errors and len(self._errors) >= GuiLimits.TEXT_CONTEXTS:
+            self._errors.pop(next(iter(self._errors)))
+        self._errors[key] = message
+        state = self.controller.state
+        if not state.covered and not (
+            state.route.view in {'V08', 'V09'}
+            and state.route.peer == peer
+            and state.route.delivery is delivery
+        ):
+            state.status = (
+                self.controller.contacts.alias(peer)
+                + ' · '
+                + delivery.value.upper()
+                + ': '
+                + message
+            )
+            return state.feedback.revision
+        return None
 
     def pending(self, peer: str, delivery: Delivery) -> bool:
         """Reports only this composer's admitted or unresolved send intent.
@@ -88,26 +130,32 @@ class TextController:
         """
         controller = self.controller
         if controller.voice.press.active:
-            controller.state.status = 'Finish recording before typing a message'
+            self.report_error(
+                peer, delivery, 'Finish recording before typing a message'
+            )
             return
         value = controller.state.drafts.get((peer, delivery), '')
         if not value.strip():
             return
         if self.pending(peer, delivery):
-            controller.state.status = 'This message is already being checked or sent'
             return
+        self.clear_error(peer, delivery)
         if (
             delivery is Delivery.LIVE
             and 'local_text_acceptance' not in controller.state.capabilities
         ):
-            controller.state.status = 'This service cannot confirm Live text sends'
+            self.report_error(
+                peer, delivery, 'This service cannot confirm Live text sends'
+            )
             return
         if len(self.operations) >= GuiLimits.TEXT_CONTEXTS or (
             sum(len(item[2].encode('utf-8')) for item in self.operations.values())
             + len(value.encode('utf-8'))
             > GuiLimits.TEXT_BYTES
         ):
-            controller.state.status = 'Finish pending text actions before sending more'
+            self.report_error(
+                peer, delivery, 'Finish pending text actions before sending more'
+            )
             return
         identity = secrets.token_hex(GuiLimits.MESSAGE_ID_BYTES)
         action = 'A11:' + identity
@@ -127,8 +175,10 @@ class TextController:
         )
         free_items, free_bytes = controller.transcript.capacity()
         if free_items <= 0 or size > free_bytes:
-            controller.state.status = (
-                'Conversation view is full. This draft has not been sent.'
+            self.report_error(
+                peer,
+                delivery,
+                'Conversation view is full. This draft has not been sent.',
             )
             return
         self.reservations[action] = item, size
@@ -148,7 +198,11 @@ class TextController:
         else:
             self.reservations.pop(action, None)
             if not controller.state.covered:
-                controller.state.status = 'This message has not been sent. Try again when the current action finishes.'
+                self.report_error(
+                    peer,
+                    delivery,
+                    'This message has not been sent. Try again when the current action finishes.',
+                )
 
     def install(self, update: Update) -> bool:
         """Applies only correctly qualified acceptance or definite rejection.
@@ -249,7 +303,11 @@ class TextController:
                     self.reservations[action] = reservation
                 self._checks.add(action)
                 self.controller._unknown_actions.add(action)
-                state.status = 'Message accepted. Conversation view is full.'
+                revision = self.report_error(
+                    peer, delivery, 'Message accepted. Conversation view is full.'
+                )
+                if revision is not None:
+                    self._feedback_revisions[action] = revision
                 return True
             if state.drafts.get((peer, delivery)) == text:
                 state.drafts.pop((peer, delivery), None)
@@ -258,12 +316,10 @@ class TextController:
             self._checks.discard(action)
             self._check_at.pop(action, None)
             self.controller._unknown_actions.discard(action)
-            state.status = (
-                'Queued'
-                if isinstance(event, DropQueuedEvent)
-                or getattr(event, 'delivery', None) is Delivery.DROP
-                else 'Message accepted'
-            )
+            self.clear_error(peer, delivery)
+            feedback_revision = self._feedback_revisions.pop(action, None)
+            if feedback_revision == state.feedback.revision:
+                state.status = ''
             if (
                 delivery is Delivery.DROP
                 and not state.covered
@@ -279,15 +335,24 @@ class TextController:
             self.reservations.pop(action, None)
             self._checks.discard(action)
             self._check_at.pop(action, None)
+            self._feedback_revisions.pop(action, None)
             self.controller._unknown_actions.discard(action)
-            state.status = (
+            self.report_error(
+                peer,
+                delivery,
                 'Drops are disabled. Your draft is still here.'
                 if event is not None and event.event_type is EventType.DROPS_DISABLED
-                else 'Message was rejected. Your draft is still here.'
+                else 'Message was rejected. Your draft is still here.',
             )
         else:
             self.controller._unknown_actions.add(action)
-            state.status = 'Checking result… This message cannot be sent again until its result is known.'
+            revision = self.report_error(
+                peer,
+                delivery,
+                'Checking send result… Your draft is kept until the result is known.',
+            )
+            if revision is not None:
+                self._feedback_revisions[action] = revision
             self._checks.add(action)
             self._check_at[action] = (
                 time.monotonic() + GuiLimits.TEXT_OUTCOME_SECONDS if reconciled else 0.0
@@ -342,3 +407,5 @@ class TextController:
         self.reservations.clear()
         self._checks.clear()
         self._check_at.clear()
+        self._feedback_revisions.clear()
+        self._errors.clear()

@@ -1,8 +1,10 @@
 """Native X11 GUI acceptance through actual encrypted Core and paired peer IPC.
 
 The actual MetorApp, event loop, public host, SDK, handlers and persistence run
-unchanged. Only Tor process/SOCKS routing is replaced by explicit loopback peers;
-XTest supplies synthetic OS input. No physical audio stream is opened.
+unchanged. Tor process/SOCKS routing uses explicit loopback peers. A bounded
+scheduling barrier delays one real Core operation until the first native draw;
+the original operation then resumes. XTest supplies synthetic OS input and a
+real Terminal child exchanges DROP text. No physical audio stream is opened.
 """
 
 # ruff: noqa: E402
@@ -34,13 +36,18 @@ from kivy.uix.scrollview import ScrollView
 from kivy.uix.widget import Widget
 
 from frontend_e2e_runtime import EncryptedFrontendRuntime
+from frontend_gui_terminal import GuiTerminalPeer
+from gui_native_audio_scan import NativeAudioProbe
 from gui_native_route import verify_gui_module_origin
+from gui_native_ux import GEOMETRY_TOLERANCE, NativeUxProbe
 from gui_native_x11 import NativeX11Input, rectangle
 from metor.client import FrontendLaunchContext, MetorClient
 from metor.core.api import (
     AcceptCommand,
     AddContactCommand,
     ConnectedEvent,
+    ConnectionRejectedEvent,
+    ConfigUpdatedEvent,
     ContactAddedEvent,
     Delivery,
     DropQueuedEvent,
@@ -51,10 +58,12 @@ from metor.core.api import (
     MessageStatusCode,
     MessagesDataEvent,
     RuntimeSnapshotEvent,
+    RejectCommand,
     VoiceChunkAcceptedEvent,
     VoiceFinalizedEvent,
     VoiceContent,
     SendMessageCommand,
+    SetConfigCommand,
     TextContent,
     TextAcceptedEvent,
 )
@@ -87,6 +96,9 @@ DROP_TEXTS = (
 LIVE_TEXT = 'Native Live text'
 LIVE_REPLY = 'Remote Live reply'
 VOICE_ID = 'native-incoming-voice'
+TERMINAL_DROP = 'Actual Terminal peer to native GUI'
+GUI_TERMINAL_DROP = 'Native GUI to actual Terminal peer'
+REJECTED_DROP = 'Preserved after Core rejection'
 
 
 @dataclass
@@ -136,6 +148,9 @@ class NativeCoreApp(MetorApp):
         assert runtime.peer is not None
         self.target = runtime.peer.onion
         self.native = NativeX11Input()
+        self.ux = NativeUxProbe(self)
+        self.audio_probe = NativeAudioProbe(self)
+        self.terminal = GuiTerminalPeer(runtime)
         self.steps: deque[Step] = deque()
         self.checks: dict[str, object] = {}
         self.images: dict[str, str] = {}
@@ -160,6 +175,7 @@ class NativeCoreApp(MetorApp):
         self.voice_future: Future[None] | None = None
         self.core_checks: dict[str, Future[None]] = {}
         self.pending_snapshot: Future[RuntimeSnapshotEvent | None] | None = None
+        self.live_start_count = 0
 
     def on_start(self) -> None:
         """Starts the bounded observer after the actual app attaches to SDL Window."""
@@ -188,6 +204,16 @@ class NativeCoreApp(MetorApp):
         if self.last_frame:
             self.frames.append(now - self.last_frame)
         self.last_frame = now
+        try:
+            self.ux.frame()
+            self.audio_probe.frame()
+        except BaseException as error:
+            self.failure = error
+            self.capture('first-frame-failure')
+            self.ux.close()
+            self.audio_probe.close()
+            self.stop()
+            return
         peer = self.peer()
         if self.first_geometry is None and peer and peer.timeline._widgets:
             self.first_geometry = rectangle(next(iter(peer.timeline._widgets.values())))
@@ -232,6 +258,8 @@ class NativeCoreApp(MetorApp):
             self.not_before = self.phase_started + INPUT_SETTLE_SECONDS
         except BaseException as error:
             self.failure = error
+            self.ux.close()
+            self.audio_probe.close()
             peer = self.peer()
             if peer is not None:
                 print(
@@ -287,7 +315,11 @@ class NativeCoreApp(MetorApp):
                 item
                 for item in (scope or self.scope()).walk(restrict=True)
                 if isinstance(item, Action)
-                and (item.accessible_name == name or item.label.text == name)
+                and (
+                    item.accessible_name == name
+                    or item.accessible_name.startswith(name + ', ')
+                    or item.label.text == name
+                )
                 and item.get_root_window() is not None
             ),
             None,
@@ -382,6 +414,7 @@ class NativeCoreApp(MetorApp):
 
         assert self.entry().text == ''
         assert not self.controller.text.pending(self.target, Delivery.DROP)
+        self.ux.quiet_send()
         self.core_checks[f'drop_{index + 1}_durable_once'] = self.cli_worker.submit(
             verify
         )
@@ -452,7 +485,7 @@ class NativeCoreApp(MetorApp):
                 and self.contact_list() is not None
                 and self.action(INITIAL_ALIAS, self.contact_list()) is not None
             ),
-            lambda: self.click(INITIAL_ALIAS, self.contact_list()),
+            self._open_initial_drop,
         )
         self.add(
             'real_archive_first_frame',
@@ -462,6 +495,49 @@ class NativeCoreApp(MetorApp):
                 and time.monotonic() - self.first_draw_at > 0.4
             ),
             self._check_geometry,
+        )
+        self.add(
+            'drop_rejection_disable_at_core',
+            lambda: not gui.state.busy,
+            lambda: self._configure_drops(False),
+        )
+        self.add(
+            'drop_rejection_focus',
+            lambda: not gui.state.busy,
+            lambda: self.native.click(self.entry()),
+        )
+        self.add(
+            'drop_rejection_type',
+            lambda: self.entry().focus,
+            lambda: self.native.type(REJECTED_DROP),
+        )
+        self.add(
+            'drop_rejection_send',
+            lambda: self.entry().text == REJECTED_DROP,
+            lambda: self.native.key('Return'),
+        )
+        self.add(
+            'drop_rejection_visible_at_draft',
+            lambda: (
+                self.peer().composer.note.text
+                == 'Drops are disabled. Your draft is still here.'
+            ),
+            self._verify_rejected_drop,
+        )
+        self.add(
+            'drop_rejection_restore_core',
+            lambda: not gui.state.busy,
+            lambda: self._configure_drops(True),
+        )
+        self.add(
+            'drop_rejection_explicit_retry',
+            lambda: self.entry().text == REJECTED_DROP,
+            lambda: self.native.key('Return'),
+        )
+        self.add(
+            'drop_rejection_retry_accepted_once',
+            lambda: self.entry().text == '' and self.text_visible(REJECTED_DROP),
+            self._verify_retried_drop,
         )
         for index, text in enumerate(DROP_TEXTS):
             self.add(
@@ -488,6 +564,31 @@ class NativeCoreApp(MetorApp):
                 lambda value=text: self.entry().text == '' and self.text_visible(value),
                 lambda current=index: self._verify_drop(current),
             )
+        self.add(
+            'actual_terminal_peer_start',
+            lambda: not gui.state.busy,
+            self._start_terminal_peer,
+        )
+        self.add(
+            'actual_terminal_drop_visible_in_gui',
+            lambda: self.text_visible(TERMINAL_DROP),
+            lambda: self.native.click(self.entry()),
+        )
+        self.add(
+            'gui_to_terminal_drop_type',
+            lambda: self.entry().focus,
+            lambda: self.native.type(GUI_TERMINAL_DROP),
+        )
+        self.add(
+            'gui_to_terminal_drop_send',
+            lambda: self.entry().text == GUI_TERMINAL_DROP,
+            lambda: self.native.key('Return'),
+        )
+        self.add(
+            'gui_to_terminal_drop_visible',
+            lambda: self.entry().text == '' and self.text_visible(GUI_TERMINAL_DROP),
+            self._finish_terminal_peer,
+        )
         self.add(
             'incoming_voice_publish', lambda: not gui.state.busy, self._publish_voice
         )
@@ -547,7 +648,7 @@ class NativeCoreApp(MetorApp):
         self.add(
             'drop_to_live_projection',
             lambda: self.entry().text == '',
-            lambda: self.click('LIVE', self.peer()),
+            self._switch_live,
         )
         self.add(
             'live_projection_no_implicit_connect',
@@ -556,7 +657,25 @@ class NativeCoreApp(MetorApp):
                 and self.peer().subtitle.text == 'No Live connection'
                 and not self.peer().connect.disabled
             ),
-            lambda: self.native.click(self.peer().connect),
+            self._start_live,
+        )
+        self.add(
+            'live_pending_before_core_response',
+            lambda: (
+                'live_start_1' in self.ux.records and self.ux.connect_entered.is_set()
+            ),
+            self._duplicate_live_start,
+        )
+        self.add('live_counterpart_decline', self._peer_pending, self._reject_live)
+        self.add(
+            'live_decline_actionable_without_toast',
+            self._live_failure_visible,
+            self._verify_declined_live,
+        )
+        self.add(
+            'live_retry_native',
+            lambda: self.action('Retry Live', self.peer()) is not None,
+            self._start_live,
         )
         self.add('live_counterpart_pending', self._peer_pending, self._accept_live)
         self.add(
@@ -594,9 +713,32 @@ class NativeCoreApp(MetorApp):
             self._verify_live_timestamp,
         )
         self.add(
+            'live_end_before_transport_failure',
+            lambda: self.action('End Live', self.peer()) is not None,
+            lambda: self.click('End Live', self.peer()),
+        )
+        self.add(
+            'live_ended_native',
+            lambda: (
+                self.peer().subtitle.text == 'No Live connection'
+                and not self.peer().connect.disabled
+            ),
+            self._disable_peer_route,
+        )
+        self.add(
+            'live_start_unreachable_route',
+            lambda: not self.peer().connect.disabled,
+            self._start_live,
+        )
+        self.add(
+            'live_failed_actionable_without_toast',
+            self._live_failure_visible,
+            self._verify_failed_live,
+        )
+        self.add(
             'live_to_drop_projection',
-            lambda: self.entry().text == '',
-            lambda: self.click('DROP', self.peer()),
+            lambda: not self.peer().connect.disabled,
+            self._switch_drop,
         )
         self.add(
             'missing_audio_call_action',
@@ -614,7 +756,7 @@ class NativeCoreApp(MetorApp):
         self.add(
             'missing_audio_go_settings',
             lambda: self.action('Go to audio settings') is not None,
-            lambda: self.click('Go to audio settings'),
+            self._open_audio_settings,
         )
         self.add(
             'audio_closed_settings_modal',
@@ -627,7 +769,7 @@ class NativeCoreApp(MetorApp):
         self.add(
             'audio_close_native',
             lambda: self.action('Close') is not None,
-            lambda: self.click('Close'),
+            lambda: self.audio_probe.press_close(self.action('Close')),
         )
         self.add(
             'audio_close_restores_peer',
@@ -636,8 +778,12 @@ class NativeCoreApp(MetorApp):
         )
         self.add(
             'peer_back_leaves_conversation',
-            lambda: self.route('V11'),
-            lambda: self.click('Back'),
+            lambda: (
+                self.route('V11')
+                and self.peer() is None
+                and self.contact_list() is not None
+            ),
+            self._leave_peer_picker,
         )
         self.add(
             'picker_back_root',
@@ -679,13 +825,14 @@ class NativeCoreApp(MetorApp):
             lambda: self.action('Rename') is not None,
             lambda: self.click('Rename'),
         )
-        self.add('contact_rename_focus', lambda: self.route('V13'), self._focus_alias)
+        self.add(
+            'contact_rename_focus',
+            lambda: self._rename_alias() is not None,
+            self._focus_alias,
+        )
         self.add(
             'contact_select_alias',
-            lambda: any(
-                isinstance(item, TextField) and item.focus
-                for item in self.scope().walk()
-            ),
+            lambda: bool((alias := self._rename_alias()) is not None and alias.focus),
             lambda: self.native.key('a', modifiers=('Control_L',)),
         )
         self.add(
@@ -715,7 +862,7 @@ class NativeCoreApp(MetorApp):
                 self.feedback_overlay is not None
                 and self.feedback_overlay.message.text == 'Contact renamed'
             ),
-            lambda: self.capture('contact-renamed'),
+            self._verify_feedback,
         )
         self.add(
             'feedback_expires_without_navigation',
@@ -727,6 +874,19 @@ class NativeCoreApp(MetorApp):
             lambda: self.click('Back'),
         )
         self.add(
+            'notifications_open',
+            lambda: (
+                gui.state.route.view == 'V06'
+                and self.action('Notifications') is not None
+            ),
+            lambda: self.click('Notifications'),
+        )
+        self.add(
+            'notifications_title_centered',
+            lambda: self.route('V16'),
+            self._verify_notifications,
+        )
+        self.add(
             'settings_open',
             lambda: (
                 gui.state.route.view == 'V06' and self.action('Settings') is not None
@@ -734,7 +894,7 @@ class NativeCoreApp(MetorApp):
             lambda: self.click('Settings'),
         )
         self.add(
-            'settings_exit_scroll', lambda: self.route('V17'), self._scroll_settings
+            'settings_exit_scroll', lambda: self.route('V17'), self._verify_settings
         )
         self.add('settings_exit_reachable', self._exit_reachable, self._exit)
 
@@ -742,6 +902,7 @@ class NativeCoreApp(MetorApp):
         """Rejects a delayed short-message jump on the actual archive draw path."""
         peer = self.peer()
         assert peer is not None and self.first_geometry is not None
+        self.ux.peer_header()
         final = rectangle(next(iter(peer.timeline._widgets.values())))
         assert all(
             abs(before - after) <= 1
@@ -936,6 +1097,212 @@ class NativeCoreApp(MetorApp):
         )
         self.checks['cli_core_gui_cross_surface'] = True
 
+    def _start_terminal_peer(self) -> None:
+        """Starts a real Terminal child and sends its DROP outside the GUI thread."""
+
+        def start() -> None:
+            """Uses only the child terminal's native PTY commands and public Core."""
+            self.terminal.start()
+            self.terminal.send_drop(TERMINAL_DROP)
+
+        self.core_checks['terminal_peer_drop_sent'] = self.cli_worker.submit(start)
+
+    def _configure_drops(self, allowed: bool) -> None:
+        """Uses authenticated public configuration to exercise a genuine Core refusal."""
+
+        def configure() -> None:
+            """Changes only the disposable sender's profile policy on the worker SDK."""
+            result = self.observer.request(
+                SetConfigCommand('daemon.allow_drops', allowed), ConfigUpdatedEvent
+            )
+            assert result is not None
+
+        self.core_checks[f'core_drop_policy_{allowed}'] = self.cli_worker.submit(
+            configure
+        )
+
+    def _verify_rejected_drop(self) -> None:
+        """Requires persistent draft-local error text and a retained, editable draft."""
+        peer = self.peer()
+        assert peer is not None
+        assert self.entry().text == REJECTED_DROP and self.entry().focus
+        assert peer.composer.note.parent is peer.composer
+        assert not self.controller.text.pending(self.target, Delivery.DROP)
+        assert not self.controller.state.feedback.visible()
+        assert not self.text_visible(REJECTED_DROP)
+        self.capture('drop-rejected-draft')
+
+    def _verify_retried_drop(self) -> None:
+        """Requires the deliberate retry to create one durable message and clear its error."""
+
+        def verify() -> None:
+            """Reads persistence independently after native user confirmation."""
+            rows = self.archive(self.observer, self.target).messages
+            assert (
+                sum(
+                    isinstance(row.content, TextContent)
+                    and row.content.text == REJECTED_DROP
+                    for row in rows
+                )
+                == 1
+            )
+
+        self.ux.quiet_send()
+        assert not self.peer().composer.note.text
+        self.core_checks['rejected_draft_retried_exactly_once'] = (
+            self.cli_worker.submit(verify)
+        )
+
+    def _open_initial_drop(self) -> None:
+        """Measures initial loading from the native contact selection through first draw."""
+        action = self.action(INITIAL_ALIAS, self.contact_list())
+        assert action is not None
+        self.ux.arm_cold_drop(action)
+        self.native.click(action)
+
+    def _finish_terminal_peer(self) -> None:
+        """Requires the reverse GUI DROP to appear in the actual running Terminal."""
+
+        def finish() -> None:
+            """Checks rendered peer receipt before orderly child/terminal cleanup."""
+            self.terminal.wait_text(GUI_TERMINAL_DROP)
+            self.terminal.close()
+
+        self.ux.quiet_send()
+        self.core_checks['gui_terminal_actual_process_roundtrip'] = (
+            self.cli_worker.submit(finish)
+        )
+
+    def _start_live(self) -> None:
+        """Observes the first actual draw after an OS-level Start or Retry click."""
+        peer = self.peer()
+        assert peer is not None
+        self.live_start_count += 1
+        if self.live_start_count == 1:
+            self.ux.hold_first_connect()
+        self.ux.arm_start(f'live_start_{self.live_start_count}', peer.connect)
+        self.native.click(peer.connect)
+
+    def _duplicate_live_start(self) -> None:
+        """Clicks the disabled Start control again before allowing Core to reply."""
+        peer = self.peer()
+        assert peer is not None
+        self.native.click(peer.connect, allow_disabled=True)
+
+        def release(_elapsed: float) -> None:
+            """Releases a bounded real server scheduling barrier after native input settles."""
+            try:
+                self.ux.release_connect()
+            except BaseException as error:
+                self.failure = error
+                self.ux.close()
+                self.stop()
+
+        Clock.schedule_once(release, INPUT_SETTLE_SECONDS)
+
+    def _reject_live(self) -> None:
+        """Declines the real remote invitation through its recipient-owned handle."""
+
+        def reject() -> None:
+            """Reads and declines only the current invitation on the worker SDK."""
+            snapshot = self.remote.runtime_snapshot()
+            assert snapshot is not None
+            invitation = next(
+                item for item in snapshot.pending if item.onion == self.runtime.onion
+            )
+            assert invitation.action_handle is not None
+            result = self.remote.request(
+                RejectCommand(self.runtime.onion, invitation.action_handle), IpcEvent
+            )
+            assert isinstance(result, ConnectionRejectedEvent)
+
+        self.core_checks['live_counterpart_declined'] = self.cli_worker.submit(reject)
+
+    def _verify_declined_live(self) -> None:
+        """Requires useful recovery in the same connection area after real refusal."""
+        self._verify_live_failure('Live was declined. Try again or send a Drop.')
+        self.capture('live-declined')
+
+    def _disable_peer_route(self) -> None:
+        """Makes only the explicitly controlled fixture route unreachable."""
+        assert self.runtime.peer is not None
+        self.runtime.peer.tor._fixture_running = False
+
+    def _verify_failed_live(self) -> None:
+        """Requires explicit recovery after actual loopback connection refusal."""
+        try:
+            self._verify_live_failure(
+                'Live could not connect. Try again or send a Drop.'
+            )
+            self.capture('live-unreachable')
+        finally:
+            assert self.runtime.peer is not None
+            self.runtime.peer.tor._fixture_running = True
+
+    def _verify_live_failure(self, message: str) -> None:
+        """Checks visible failure, enabled retry and usable DROP without duplicate toast."""
+        peer = self.peer()
+        assert peer is not None
+        assert self.controller.live.failure(self.target) == message
+        assert peer.subtitle.text == message
+        retry = self.action('Retry Live', peer)
+        assert retry is not None and not retry.disabled
+        drop = self.action('DROP', peer)
+        assert drop is not None and not drop.disabled
+        assert not self.controller.state.feedback.visible()
+        self.ux.peer_header()
+        self.checks['live_failure_has_visible_recovery'] = True
+
+    def _live_failure_visible(self) -> bool:
+        """Waits for actual recovery controls after failure and authoritative reconciliation."""
+        peer = self.peer()
+        if peer is None:
+            return False
+        failure = self.controller.live.failure(self.target)
+        retry = self.action('Retry Live', peer)
+        return bool(
+            failure
+            and peer.subtitle.text == failure
+            and retry is not None
+            and not retry.disabled
+        )
+
+    def _switch_drop(self) -> None:
+        """Arms a first-draw observation before actual native mode selection."""
+        action = self.action('DROP', self.peer())
+        assert action is not None
+        self.ux.arm_drop(action)
+        self.native.click(action)
+
+    def _switch_live(self) -> None:
+        """Observes the first opposite-mode draw after the real native tab activation."""
+        action = self.action('LIVE', self.peer())
+        assert action is not None
+        self.ux.arm_live_tab(action)
+        self.native.click(action)
+
+    def _verify_feedback(self) -> None:
+        """Observes the intentional rename confirmation within its content column."""
+        self.ux.feedback_bounds()
+        self.capture('contact-renamed')
+
+    def _leave_peer_picker(self) -> None:
+        """Checks private native-view revocation before returning to the root list."""
+        self.ux.departed()
+        self.click('Back')
+
+    def _verify_notifications(self) -> None:
+        """Checks native enlarged heading layout before leaving the notification page."""
+        self.ux.secondary_header('Notifications')
+        self.capture('notifications')
+        self.click('Back')
+
+    def _verify_settings(self) -> None:
+        """Checks native enlarged heading layout before scrolling settings."""
+        self.ux.secondary_header('Settings')
+        self.capture('settings-heading')
+        self._scroll_settings()
+
     def _peer_pending(self) -> bool:
         """Observes the real counterpart request before explicit fixture acceptance."""
         if self.pending_snapshot is None:
@@ -1009,6 +1376,7 @@ class NativeCoreApp(MetorApp):
 
     def _verify_live_timestamp(self) -> None:
         """Requires the received canonical time to appear once in the native LIVE card."""
+        self.ux.peer_header()
         row = next(
             row
             for row in projection(self.controller, self.controller.state.route)
@@ -1020,6 +1388,11 @@ class NativeCoreApp(MetorApp):
         assert widget._metadata.text == row.metadata
         self.checks['incoming_live_timestamp_visible_once'] = True
         self.capture('live-connected')
+
+    def _open_audio_settings(self) -> None:
+        """Keeps real enumeration pending until native Close input is actually pressed."""
+        self.audio_probe.hold_scan()
+        self.click('Go to audio settings')
 
     def _check_audio(self) -> None:
         """Verifies the closed dialog is inert and exposes deliberate configuration controls."""
@@ -1033,13 +1406,49 @@ class NativeCoreApp(MetorApp):
         assert self.action('Choose headphone output') is not None
         self.capture('audio-settings')
 
-    def _focus_alias(self) -> None:
-        """Clicks the real writable alias field rather than assigning native text."""
-        alias = next(
+    def _rename_alias(self) -> TextField | None:
+        """Resolves the actually laid-out form rather than an earlier route's search."""
+        form = self.controller.contacts.form
+        if not self.route('V13') or form is None or self.contact_list() is not None:
+            return None
+        fields = [
             item
             for item in self.scope().walk()
-            if isinstance(item, TextField) and not item.readonly
+            if isinstance(item, TextField) and item.get_root_window() is not None
+        ]
+        address = next(
+            (item for item in fields if item.readonly and item.text == form.raw), None
         )
+        if address is None:
+            return None
+        raw_left, raw_bottom, raw_width, raw_height = rectangle(address)
+        if not (
+            raw_left >= 0
+            and raw_bottom >= 0
+            and raw_left + raw_width <= Window.width
+            and raw_bottom + raw_height <= Window.height
+        ):
+            return None
+        for item in fields:
+            if item.readonly or item.text != form.alias:
+                continue
+            left, bottom, width, height = rectangle(item)
+            if (
+                left >= 0
+                and bottom >= 0
+                and left + width <= Window.width
+                and bottom + height <= Window.height
+                and bottom + height <= raw_bottom
+                and width > 0
+                and height > 0
+            ):
+                return item
+        return None
+
+    def _focus_alias(self) -> None:
+        """Clicks the rendered form's exact alias without assigning native text."""
+        alias = self._rename_alias()
+        assert alias is not None
         self.native.click(alias)
 
     def _verify_alias(self) -> None:
@@ -1085,18 +1494,37 @@ class NativeCoreApp(MetorApp):
             and self.action('Exit Metor', item) is not None
         )
         _, lower, _, viewport_height = rectangle(scroll)
-        visible = bottom >= lower and bottom + height <= lower + viewport_height
-        if not visible and time.monotonic() - self.last_settings_scroll > 0.4:
+        visible = (
+            bottom >= lower - GEOMETRY_TOLERANCE
+            and bottom + height <= lower + viewport_height + GEOMETRY_TOLERANCE
+        )
+        if (
+            not visible
+            and not self.native._wheel
+            and time.monotonic() - self.last_settings_scroll > 0.4
+        ):
             self._scroll_settings()
-        if current != getattr(self, 'exit_geometry', None):
+        previous = getattr(self, 'exit_geometry', None)
+        if previous is None or any(
+            abs(before - after) > GEOMETRY_TOLERANCE
+            for before, after in zip(previous, current, strict=True)
+        ):
             self.exit_geometry = current
             self.exit_geometry_since = time.monotonic()
             return False
-        return (
+        ready = (
             visible
             and not self.native._wheel
             and time.monotonic() - self.exit_geometry_since > INPUT_SETTLE_SECONDS
         )
+        if ready:
+            self.ux.records['settings_exit_geometry'] = {
+                'action': current,
+                'viewport': rectangle(scroll),
+                'native_wheel_queue_empty': True,
+                'stability_tolerance_pixels': GEOMETRY_TOLERANCE,
+            }
+        return ready
 
     def _exit(self) -> None:
         """Closes through the actual user action and production lifecycle transaction."""
@@ -1120,6 +1548,7 @@ class NativeCoreApp(MetorApp):
             'actual_core_ipc': True,
             'actual_sqlcipher': True,
             'actual_peer_framing': True,
+            'controlled_core_start_scheduling': 'First actual Connect handler waits for a native draw and duplicate tap; original operation then resumes unchanged',
             'controlled_transport': 'Tor process and SOCKS replaced by bounded loopback TCP',
             'physical_input': False,
             'physical_audio': False,
@@ -1130,6 +1559,10 @@ class NativeCoreApp(MetorApp):
             'font_scale': self.args.font_scale,
             'native_input_events': self.native.events,
             'checks': self.checks,
+            'first_draw_and_layout': self.ux.records,
+            'native_audio_dismissal': self.audio_probe.records,
+            'controlled_audio_scan_scheduling': 'The actual native endpoint value or exception is held until XTest presses Close; release follows the first reconciled scan draw',
+            'first_draw_timing_method': 'Native OS-dispatched action release to first Window.on_flip; canvas_draw_ms spans on_draw to on_flip. No polling or settlement delay is added; these virtual-display observations are not a hardware latency guarantee.',
             'step_latency': distribution(self.timings),
             'action_confirmation_ms': self.confirmation_timings,
             'timing_method': 'Monotonic action-to-observation; 50 ms polling and 150 ms native input settlement; no hardware latency claim',
@@ -1250,8 +1683,11 @@ def main() -> None:
             Window.unbind(on_flip=app._frame)
             Clock.unschedule(app._heartbeat)
             app.on_stop()
+            app.ux.close()
+            app.audio_probe.close()
             app.native.close()
             app.cli_worker.shutdown(wait=True, cancel_futures=True)
+            app.terminal.close()
     evidence['temporary_core_cleanup'] = True
     args.result.parent.mkdir(parents=True, exist_ok=True)
     args.result.write_text(json.dumps(evidence, indent=2) + '\n', encoding='utf-8')

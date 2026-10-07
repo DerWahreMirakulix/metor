@@ -6,6 +6,7 @@ from kivy.metrics import dp
 from kivy.graphics import Color, Rectangle
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.anchorlayout import AnchorLayout
+from kivy.uix.scrollview import ScrollView
 from kivy.uix.widget import Widget
 
 from metor.core.api import Delivery
@@ -18,7 +19,7 @@ from metor.ui.gui.theme import color
 # Local Package Imports
 from .entry import entry_view
 from .root import root_view, RootContinuity, RootPanel
-from .peer import PeerView
+from .peer import PeerView, PeerProjections
 from .secondary import secondary_view
 from .contacts import ContactListView
 from .security import security_view, LockedActivity
@@ -52,6 +53,7 @@ class Shell(BoxLayout):
         self._private_render_key: tuple[object, ...] | None = None
         self._peer_key: tuple[object, ...] | None = None
         self._peer_panel: PeerView | None = None
+        self._peer_projections = PeerProjections(controller, refresh)
         self._contacts_panel: ContactListView | None = None
         self._contacts_key: tuple[object, ...] | None = None
         self._master: BoxLayout | None = None
@@ -89,12 +91,14 @@ class Shell(BoxLayout):
         """
         PointerTooltip.clear_all()
         if self.controller.state.covered:
+            self.revoke_peer_views()
             self._root_panel = None
             self._root_context = None
         if self.width < dp(
             Geometry.MIN_WIDTH
         ) or self.height + self.keyboard_inset < dp(Geometry.MIN_HEIGHT):
             self._private_render_key = None
+            self.revoke_peer_views()
             self._peer_key = None
             self._peer_panel = None
             self._contacts_panel = None
@@ -186,6 +190,10 @@ class Shell(BoxLayout):
             self._contacts_key = None
             self._root_panel = None
             self._root_context = None
+        self._peer_projections.reconcile(
+            allowed=not state.covered and prompt is None,
+            metrics_changed=metric_rebuild,
+        )
         peer_key = (state.generation, state.route, wide)
         if route_changed and self._root_panel is not None:
             for widget in self._root_panel.walk(restrict=True):
@@ -375,11 +383,7 @@ class Shell(BoxLayout):
                 panel.add_widget(Label('Choose a conversation', tone='textSecondary'))
             elif state.route.view in ('V08', 'V09'):
                 self._peer_key = peer_key
-                self._peer_panel = retained_peer or PeerView(
-                    self.controller, self.refresh, wide=wide
-                )
-                if retained_peer is not None:
-                    retained_peer.reflow(wide=wide)
+                self._peer_panel = self._peer_projections.current(wide=wide)
                 panel.add_widget(self._peer_panel)
             else:
                 secondary = retained_contacts or secondary_view(
@@ -402,6 +406,41 @@ class Shell(BoxLayout):
                 contact_continuity.restore(self._contacts_panel, self.controller)
             if secondary_continuity is not None:
                 secondary_continuity.restore(panel, self.controller)
+
+    def revoke_peer_views(self) -> None:
+        """Revokes visible and detached peer data before a privacy cover returns."""
+        self._peer_projections.clear()
+        self._peer_panel = None
+        self._peer_key = None
+
+    def feedback_anchor(self) -> Widget | None:
+        """Returns foreground content bounds excluding fixed input and navigation.
+
+        The overlay follows the actual native viewport, including a keyboard
+        inset and wide master/detail allocation, without reserving layout space.
+
+        Returns:
+            Widget | None: Authorized content viewport for temporary feedback.
+        """
+        if self.controller.state.covered:
+            return None
+        if self._peer_panel is not None:
+            return self._peer_panel.timeline.scroll
+        if self._contacts_panel is not None:
+            return self._contacts_panel.scroll
+        if self._detail is not None and self.controller.state.route.view not in {
+            'V06',
+            'V07',
+        }:
+            return next(
+                (
+                    widget
+                    for widget in self._detail.walk(restrict=True)
+                    if isinstance(widget, ScrollView)
+                ),
+                None,
+            )
+        return self._root_panel.scroll if self._root_panel is not None else None
 
     def set_input_inset(self, height: float) -> None:
         """Reserves keyboard height without replacing focused peer controls.

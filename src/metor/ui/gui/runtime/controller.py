@@ -278,9 +278,6 @@ class GuiController:
                 return False
             self._refresh_needed = True
             return True
-        if update.operation.startswith('archive:'):
-            self.archive.needed = True
-            return True
         if update.operation.startswith('inventory-page:'):
             self.inventory.needed = True
             return True
@@ -340,6 +337,7 @@ class GuiController:
         """
         if self.state.covered:
             return
+        previous = self.state.route
         if route != self.state.route:
             self.voice.depart()
             self.playback.stop()
@@ -353,7 +351,11 @@ class GuiController:
         if route.view == 'V20':
             self.profiles.reload()
             self.refresh_state()
-        self.archive.reset()
+        self.archive.reset(
+            preserve_latest=previous.view in {'V08', 'V09'}
+            and route.view in {'V08', 'V09'}
+            and previous.peer == route.peer
+        )
         self.inventory.reset()
         self.handoff.needed = True
         if route.peer is not None and route.delivery == Delivery.DROP:
@@ -582,6 +584,8 @@ class GuiController:
             if isinstance(update.event, GuiPreferencesRejectedEvent):
                 self.preferences.rejected(update.event)
                 continue
+            if self.text.install(update):
+                continue
             if update.status:
                 self.state.status = update.status
                 if (
@@ -591,8 +595,6 @@ class GuiController:
                     self._unknown_actions.add(update.operation)
                     if update.operation == 'A-settings':
                         self.preferences.uncertain()
-            if self.text.install(update):
-                continue
             if update.status:
                 continue
             if self.state.covered and self.state.route.view == 'V05':
@@ -651,6 +653,8 @@ class GuiController:
                 ):
                     self.state.snapshot = update.event
             elif isinstance(update.event, RuntimeStateChangedEvent):
+                if update.event.scope == 'messages':
+                    self.archive.changed(update.event.onion)
                 if update.event.scope == 'inbox':
                     self.handoff.needed = True
                 if update.event.scope in {'messages', 'inbox'} and (
@@ -680,6 +684,7 @@ class GuiController:
         self.voice.review_actions.poll()
         self.playback.poll()
         self.handoff.poll()
+        self.archive.poll_visible()
         self.drop.poll()
         self.live.poll()
         changed = self.notifications.poll() or changed

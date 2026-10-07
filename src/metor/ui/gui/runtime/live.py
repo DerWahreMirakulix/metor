@@ -1,12 +1,18 @@
 """Explicit LIVE fallback and dismissal using canonical Core outcomes."""
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from metor.core.api import (
     Delivery,
+    ConnectedEvent,
     ConnectCommand,
+    ConnectionActor,
+    ConnectionAutoAcceptedEvent,
     ConnectionConnectingEvent,
+    ConnectionFailedEvent,
+    ConnectionReasonCode,
+    ConnectionRejectedEvent,
     DisconnectCommand,
     DismissLiveContextCommand,
     FallbackCommand,
@@ -19,9 +25,11 @@ from metor.core.api import (
     LiveControlRejectedEvent,
     MessageDirectionCode,
     MessageOperationReason,
+    MaxConnectionsReachedEvent,
     RetunnelCommand,
     RetunnelInitiatedEvent,
 )
+from metor.ui.gui.constants import GuiLimits
 from metor.ui.gui.state import Route
 from metor.ui.gui.state.mailbox import Update
 
@@ -45,6 +53,18 @@ class LiveMutation:
     retained: tuple[ReceiptTarget, ...] = ()
 
 
+@dataclass
+class LiveStart:
+    """Bridges explicit local admission to authoritative transport presentation."""
+
+    snapshot_id: int
+    revision: int
+    phase: Literal['submitting', 'connecting', 'connected', 'checking', 'failed'] = (
+        'submitting'
+    )
+    error: str = ''
+
+
 class LiveActions:
     """Keeps local presentation until an acknowledged Core mutation permits cleanup."""
 
@@ -60,6 +80,37 @@ class LiveActions:
         self.pending: LiveMutation | None = None
         self._serial = 0
         self._uncertain_snapshot: int | None = None
+        self._starts: dict[str, LiveStart] = {}
+
+    def starting(self, peer: str) -> bool:
+        """Reports an admitted start before its final transport outcome is known."""
+        progress = self._starts.get(peer)
+        return progress is not None and progress.phase != 'failed'
+
+    def failure(self, peer: str) -> str:
+        """Returns one peer's bounded local failure until retry or connection succeeds."""
+        if self.controller.state.covered:
+            return ''
+        progress = self._starts.get(peer)
+        return progress.error if progress is not None else ''
+
+    def retry_ready(self, peer: str) -> bool:
+        """Enables a fresh explicit start only when its authoritative route permits it."""
+        state = self.controller.state
+        if (
+            state.covered
+            or state.busy
+            or state.snapshot is None
+            or self.controller.client is None
+            or self.pending is not None
+            or self.starting(peer)
+        ):
+            return False
+        return not any(
+            row.onion == peer
+            and (row.session_state != 'disconnected' or row.recovery_eligible)
+            for row in state.snapshot.live_contexts
+        )
 
     def start(self, peer: str) -> bool:
         """Starts or reconnects only on explicit intent, opening an existing active context.
@@ -70,7 +121,15 @@ class LiveActions:
             bool: Whether navigation or a new request was admitted.
         """
         state = self.controller.state
-        if state.covered or state.snapshot is None or self.pending is not None:
+        if state.covered or self.starting(peer):
+            return False
+        if self.controller.client is None or state.snapshot is None:
+            state.status = 'Open a profile before starting Live'
+            return False
+        if state.busy or self.pending is not None:
+            state.status = (
+                'Wait for the current action to finish, then try Start Live again'
+            )
             return False
         entry = next(
             (row for row in state.snapshot.live_contexts if row.onion == peer), None
@@ -83,7 +142,20 @@ class LiveActions:
         if entry is not None and entry.session_state != 'disconnected':
             state.status = 'A Live request is already in progress'
             return False
-        return self._request(peer, 'start')
+        if len(self._starts) >= GuiLimits.TEXT_CONTEXTS and peer not in self._starts:
+            completed = next(
+                (key for key, item in self._starts.items() if item.phase == 'failed'),
+                None,
+            )
+            if completed is None:
+                state.status = 'Finish a pending Live request before starting another'
+                return False
+            del self._starts[completed]
+        if not self._request(peer, 'start'):
+            state.status = 'Live request was not started. Try again.'
+            return False
+        self._starts[peer] = LiveStart(id(state.snapshot), state.snapshot.revision or 0)
+        return True
 
     def end(
         self,
@@ -272,31 +344,62 @@ class LiveActions:
         Returns:
             bool: Whether this owner handled the completion.
         """
+        if update.generation != self.controller.state.generation:
+            return False
+        self._observe_start(update.event)
         mutation = self.pending
         if mutation is None or update.operation != mutation.operation:
             return False
         controller, event = self.controller, update.event
         if event is None:
+            progress = self._starts.get(mutation.peer)
+            if (
+                mutation.kind == 'start'
+                and progress is not None
+                and progress.phase in {'submitting', 'connecting'}
+            ):
+                progress.phase = 'checking'
             if mutation.kind == 'fallback':
                 controller.receipts.start(mutation.retained)
             self._uncertain_snapshot = id(controller.state.snapshot)
             controller.refresh_state()
-            if not controller.state.covered:
+            if not controller.state.covered and mutation.kind != 'start':
                 controller.state.status = 'Could not confirm the Live action. Refreshing current state; no automatic retry.'
             return True
         self.pending = None
         status: str | None = 'Live action could not be completed'
         if (
             mutation.kind == 'start'
-            and isinstance(event, ConnectionConnectingEvent)
+            and isinstance(
+                event,
+                (
+                    ConnectionConnectingEvent,
+                    ConnectionAutoAcceptedEvent,
+                    ConnectedEvent,
+                ),
+            )
             and event.onion == mutation.peer
         ):
+            progress = self._starts.get(mutation.peer)
+            if progress is not None and progress.phase in {'submitting', 'checking'}:
+                progress.phase = 'connecting'
+                progress.snapshot_id = id(controller.state.snapshot)
+                progress.revision = max(progress.revision, event.revision or 0)
+            status = None
+        elif mutation.kind == 'start':
+            self._fail_start(
+                mutation.peer,
+                'Too many Live connections. End one and try again.'
+                if isinstance(event, MaxConnectionsReachedEvent)
+                else 'Live could not connect. Try again or send a Drop.',
+            )
             status = None
         elif (
             mutation.kind == 'end'
             and isinstance(event, LiveControlCompletedEvent)
             and event.onion == mutation.peer
         ):
+            self._starts.pop(mutation.peer, None)
             status = (
                 'Chat invitation cancelled' if mutation.attempt_id else 'Live ended'
             )
@@ -324,7 +427,11 @@ class LiveActions:
             if controller.state.route == Route('V09', mutation.peer, Delivery.LIVE):
                 controller.navigate(Route('V08', mutation.peer, Delivery.DROP))
             status = (
-                str(event.count) + ' queued as Drop' + ('s' if event.count != 1 else '')
+                None
+                if controller.state.route == Route('V08', mutation.peer, Delivery.DROP)
+                else str(event.count)
+                + ' moved to Drop'
+                + ('s' if event.count != 1 else '')
             )
         elif (
             mutation.kind == 'close'
@@ -347,6 +454,53 @@ class LiveActions:
         if not controller.state.covered and status is not None:
             controller.state.status = status
         return True
+
+    def _fail_start(self, peer: str, text: str) -> None:
+        """Keeps actionable failure by its peer and notifies only a departed view."""
+        state = self.controller.state
+        progress = self._starts.get(peer)
+        if progress is None or progress.phase == 'failed' or state.covered:
+            return
+        progress.phase, progress.error = 'failed', text
+        progress.snapshot_id = id(state.snapshot)
+        if state.route != Route('V09', peer, Delivery.LIVE):
+            state.status = self.controller.contacts.alias(peer) + ': ' + text
+
+    def _observe_start(self, event: IpcEvent | None) -> None:
+        """Installs terminal start facts without treating recovery as a new invitation."""
+        if (
+            not isinstance(
+                event, (ConnectedEvent, ConnectionFailedEvent, ConnectionRejectedEvent)
+            )
+            or not event.onion
+        ):
+            return
+        state = self.controller.state
+        peer = event.onion
+        progress = self._starts.get(peer)
+        if state.covered or progress is None:
+            return
+        if state.snapshot is not None and (
+            event.epoch is not None
+            and event.epoch != state.snapshot.epoch
+            or event.revision is not None
+            and event.revision < progress.revision
+        ):
+            return
+        progress.revision = max(progress.revision, event.revision or 0)
+        if isinstance(event, ConnectedEvent):
+            progress.phase = 'connected'
+            progress.error = ''
+            progress.snapshot_id = id(state.snapshot)
+        elif isinstance(event, ConnectionRejectedEvent):
+            if (
+                event.actor is not ConnectionActor.LOCAL
+                and event.reason_code
+                is not ConnectionReasonCode.MUTUAL_TIEBREAKER_LOSER
+            ):
+                self._fail_start(peer, 'Live was declined. Try again or send a Drop.')
+        else:
+            self._fail_start(peer, 'Live could not connect. Try again or send a Drop.')
 
     def confirm_fallback(self, peer: str, msg_id: str) -> None:
         """Installs positively confirmed conversion of one original own LIVE identity.
@@ -378,6 +532,7 @@ class LiveActions:
             None
         """
         controller = self.controller
+        self._starts.pop(peer, None)
         controller.playback.forget(peer, Delivery.LIVE)
         controller.transcript.discard(peer, Delivery.LIVE)
         controller.state.drafts.pop((peer, Delivery.LIVE), None)
@@ -423,3 +578,30 @@ class LiveActions:
         ):
             self.pending = None
             self._uncertain_snapshot = None
+        if snapshot is None or controller.state.covered:
+            return
+        for peer, progress in tuple(self._starts.items()):
+            if progress.snapshot_id == id(snapshot) or (
+                snapshot.revision is not None and snapshot.revision < progress.revision
+            ):
+                continue
+            progress.snapshot_id = id(snapshot)
+            entry = next(
+                (row for row in snapshot.live_contexts if row.onion == peer), None
+            )
+            if entry is not None and (
+                entry.session_state == 'connected' or entry.recovery_eligible
+            ):
+                self._starts.pop(peer, None)
+            elif progress.phase in {'connecting', 'connected', 'checking'} and not (
+                entry is not None
+                and (entry.outbound_attempt_id or entry.session_state == 'pending')
+            ):
+                self._fail_start(
+                    peer,
+                    'Live request could not be confirmed. Try again or send a Drop.'
+                    if progress.phase == 'checking'
+                    else 'Live ended. Try again or send a Drop.'
+                    if progress.phase == 'connected'
+                    else 'Live could not connect. Try again or send a Drop.',
+                )

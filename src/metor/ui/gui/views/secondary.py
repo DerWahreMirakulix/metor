@@ -53,6 +53,7 @@ def secondary_view(controller: GuiController, refresh: Callable[[], None]) -> Bo
         'V18': 'Technical history' if route.history_raw else 'Activity history',
     }.get(route.view, 'Metor')
     header = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(12))
+    header.bind(minimum_height=header.setter('height'))
 
     def back() -> None:
         """Restores caller presentation without a communication command.
@@ -76,14 +77,17 @@ def secondary_view(controller: GuiController, refresh: Callable[[], None]) -> Bo
         controller.navigate(target)
         refresh()
 
-    header.add_widget(IconAction('chevron-left', 'Back', back))
-    header.add_widget(Label(title, role='title', wrap=False))
+    header.add_widget(
+        IconAction('chevron-left', 'Back', back, pos_hint={'center_y': 0.5})
+    )
+    header.add_widget(Label(title, role='peer', pos_hint={'center_y': 0.5}))
     if route.view == 'V18':
         header.add_widget(
             IconAction(
                 'trash-2',
                 'Clear activity history',
                 lambda: confirm_history_clear(controller),
+                pos_hint={'center_y': 0.5},
                 disabled=state.busy
                 or controller.history.pending
                 or 'history_metadata_pages' not in state.capabilities,

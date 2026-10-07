@@ -136,7 +136,7 @@ class SecurityController:
         controller.core_settings.cover()
         controller.history.cover()
         controller.state.secondary_scroll.clear()
-        controller.messages = None
+        controller.archive.reset()
         self.restriction = None
         self.pending = True
         self.restoring = False

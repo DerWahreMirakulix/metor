@@ -103,6 +103,90 @@ class TextAdmissionTests(unittest.TestCase):
         )
         self.assertFalse(self.gui.text.operations)
 
+    def test_accepted_text_is_visible_without_a_success_toast(self) -> None:
+        """The confirmed message itself acknowledges Send in both delivery modes."""
+        for delivery in (Delivery.DROP, Delivery.LIVE):
+            with self.subTest(delivery=delivery):
+                self.gui.state.route = Route(
+                    'V08' if delivery is Delivery.DROP else 'V09', 'peer', delivery
+                )
+                self.gui.state.set_draft('peer', delivery, 'one visible message')
+                self.gui.send_text('peer', delivery)
+                action = next(iter(self.gui.text.operations))
+                identity = action.removeprefix('A11:')
+                event = (
+                    DropQueuedEvent('Peer', 'peer')
+                    if delivery is Delivery.DROP
+                    else TextAcceptedEvent('peer', identity, delivery)
+                )
+                self.gui.text.install(Update(0, action, event))
+                self.assertEqual(self.gui.state.feedback.visible(), '')
+                self.assertEqual(self.gui.text.error('peer', delivery), '')
+                self.assertNotIn(('peer', delivery), self.gui.state.drafts)
+                self.assertIn(
+                    ('peer', delivery, MessageDirectionCode.OUT, identity),
+                    self.gui.transcript.items,
+                )
+
+    def test_visible_rejection_remains_beside_the_preserved_draft(self) -> None:
+        """Actionable send failure survives transient expiry without a duplicate toast."""
+        self.gui.state.route = Route('V08', 'peer', Delivery.DROP)
+        self.gui.state.set_draft('peer', Delivery.DROP, 'keep this draft')
+        self.gui.send_text('peer', Delivery.DROP)
+        action = next(iter(self.gui.text.operations))
+        self.gui.text.install(Update(0, action, DropsDisabledEvent()))
+        self.assertIn('Drops are disabled', self.gui.text.error('peer', Delivery.DROP))
+        self.assertEqual(self.gui.state.feedback.visible(), '')
+        self.gui.state.feedback.clear()
+        self.assertIn('Drops are disabled', self.gui.text.error('peer', Delivery.DROP))
+        self.assertEqual(self.gui.text.error('other', Delivery.DROP), '')
+        self.assertEqual(
+            self.gui.state.drafts[('peer', Delivery.DROP)], 'keep this draft'
+        )
+        self.gui.state.covered = True
+        self.assertEqual(self.gui.text.error('peer', Delivery.DROP), '')
+
+    def test_unknown_send_is_handled_before_generic_worker_feedback(self) -> None:
+        """An uncertain response stays local and cannot create a second send intent."""
+        self.gui.state.route = Route('V09', 'peer', Delivery.LIVE)
+        action, _identity = self.admit()
+        self.gui.mailbox.put(
+            Update(0, action, status='Operation could not be confirmed')
+        )
+        self.gui.poll()
+        self.assertIn(
+            'Checking send result', self.gui.text.error('peer', Delivery.LIVE)
+        )
+        self.assertTrue(self.gui.text.pending('peer', Delivery.LIVE))
+        self.assertEqual(self.gui.state.feedback.visible(), '')
+        self.gui.send_text('peer', Delivery.LIVE)
+        self.gui.command.assert_called_once()
+
+    def test_reconciled_send_does_not_clear_another_actions_feedback(self) -> None:
+        """Only the uncertain message's own transient feedback is retired on resolution."""
+        action, identity = self.admit()
+        self.gui.text.install(Update(0, action))
+        self.gui.state.status = 'Contact saved'
+        self.gui.text.install(
+            Update(0, action, TextAcceptedEvent('peer', identity, Delivery.LIVE))
+        )
+        self.assertEqual(self.gui.state.feedback.visible(), 'Contact saved')
+        self.assertEqual(self.gui.text.error('peer', Delivery.LIVE), '')
+
+    def test_background_reconciliation_does_not_extend_transient_feedback(self) -> None:
+        """Repeated reads retain the inline error without creating a permanent toast."""
+        action, _identity = self.admit()
+        self.gui.text.install(Update(0, action))
+        feedback = self.gui.state.feedback
+        first = feedback.revision, feedback.expires_at
+        self.assertIn('LIVE:', feedback.text)
+        self.gui.text.install(Update(0, 'text-check:' + action))
+        self.assertEqual((feedback.revision, feedback.expires_at), first)
+        self.assertEqual(feedback.visible(now=first[1]), '')
+        self.assertIn(
+            'Checking send result', self.gui.text.error('peer', Delivery.LIVE)
+        )
+
     def test_confirmed_drop_is_immediately_presented_without_clearing_latest_history(
         self,
     ) -> None:

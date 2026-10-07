@@ -99,7 +99,12 @@ The Core-backed conversation fixture runs the actual `MetorApp`, controller and
 SDK against two disposable encrypted Core runtimes. X11 XTest mouse and keyboard
 events enter through SDL; GUI commands, request results and runtime callbacks
 are not replaced. It checks authenticated startup, contact changes, repeated
-DROP sending before LIVE, history, focus, navigation and LIVE delivery:
+DROP sending before LIVE, history, focus, navigation and LIVE delivery. First-draw
+probes check immediate connection feedback before Core acknowledgment, retained
+DROP content on tab changes and measured header alignment. Real peer rejection
+and an unreachable test route exercise actionable connection failures and retry.
+An actual Terminal subprocess exchanges text with the GUI through the same Core
+peer path; send failures retain the draft with a local explanation:
 
 ```sh
 python tests/gui_native_core.py --width 360 --height 640 --font-scale 1.5 \
@@ -270,14 +275,44 @@ location at narrow and wide widths. Short timelines align at the top from the
 first layout; overflowing timelines follow the latest edge only while the user
 has chosen to follow it.
 
-Action results appear once in a dismissible overlay and expire after six
-seconds without moving the timeline or composer. Navigation and privacy covers
-revoke them. Ongoing connection, recording, sending, and unknown-result states
-belong to their corresponding controls, rather than repeated global banners or
+An admitted Start Live action changes its visible controls before the next
+native frame, even while Core is still processing the request. Connection
+progress and failure stay in that header. Retry becomes available only after
+Core confirms an eligible state; repeated clicks cannot start another attempt.
+A connection failure for a conversation that is no longer visible produces one
+contact-scoped transient result. Recovery does not create a new call invitation.
+
+Switching between DROP and LIVE for the same peer retains its already-loaded
+latest DROP page while refreshing it. The two native views are reused within
+that conversation; the inactive view releases focus and pending input. Leaving
+the conversation or covering the GUI revokes both views and their private text.
+Other peers, profile changes, privacy covers and confirmed deletion cannot reuse
+that page. A first read displays
+`Loading messages…`, an empty confirmed page displays `No Drops yet`, and a
+failed read provides an inline Retry action. Retrying the read never resends or
+consumes a message.
+
+Successful text and Voice sends are acknowledged by the message and its delivery
+state, without an additional `Queued` or success toast. Send rejection and
+unknown outcomes remain beside the affected draft or recording until resolved;
+the content is retained. Editing or explicitly retrying clears an obsolete
+draft error. Background reconciliation does not repeatedly extend a transient
+notification.
+
+Other action results that need a separate acknowledgment appear once in a
+dismissible overlay and expire after six seconds. The overlay stays inside the
+foreground content viewport, above fixed input controls, including in the wide
+master/detail layout. Long result text scrolls within that bounded surface. If
+the keyboard leaves less than a full dismiss target of space, the transient
+overlay stays hidden and retains its original expiry; actionable composer and
+connection errors remain inline. Navigation and privacy covers revoke overlays.
+Ongoing connection, recording, sending, and unknown-result states belong to
+their corresponding controls, rather than repeated global banners or
 Notification Center entries. Background reads do not disable foreground actions;
 confirmed mutations invalidate older read projections before those can overwrite
-the result. Exact action reconciliation precedes general reads, whose admission
-rotates fairly under continuous state events. Message-only changes request fresh
+the result. A newly opened archive receives the next free read turn after exact
+action reconciliation; general background reads otherwise retain fair admission.
+Message-only changes request fresh
 data without rejecting in-flight reads or regressing confirmed delivery receipts;
 contact changes and mutations still invalidate the affected projections.
 
@@ -391,6 +426,9 @@ settings opens the same closed configuration dialog. Microphone and headphone
 selection each open a separate device chooser and return to configuration;
 closing the dialog removes the chooser completely. The composer has no permanent
 setup banner, and call readiness does not create action feedback or notifications.
+Audio dialogs keep a bounded stable frame while device results update inside
+their scrolling content. Refreshing a dialog preserves Close and Back/Cancel
+input ownership; refreshed confirmation actions require a new deliberate press.
 Playing a supported Voice message with no output configured uses that recovery
 dialog. Selecting a route never starts capture or playback;
 the user initiates the next recording or Play action.
@@ -531,6 +569,10 @@ keyboard targets.
 Required controls stay visible or reachable at the minimum viewport and text
 scale. Buttons and touch targets use at least 48 logical units where the
 current component permits it; labels wrap or controls stack when necessary.
+Conversation names and secondary navigation headings share the peer-title
+typography. Titles, status text and adjacent actions stay vertically centered
+within their row; wrapped text grows the row rather than shifting its controls
+or shrinking the font.
 
 The packaged Inter Tight face is the visual baseline. The current core palette
 uses background `#101619`, surface `#171F22`, primary text `#F3F7F6`, DROP

@@ -242,7 +242,9 @@ class MetorApp(App):
             else 0
         )
         if self.feedback_overlay is not None:
-            self.feedback_overlay.bottom_inset = keyboard_height
+            self.feedback_overlay.anchor_to(
+                self.shell.feedback_anchor() if self.shell is not None else None
+            )
             self.feedback_overlay.render()
         if self.invitation_overlay is not None:
             self.invitation_overlay.render()
@@ -438,6 +440,8 @@ class MetorApp(App):
         PointerTooltip.clear_all()
         if self.feedback_overlay is not None:
             self.feedback_overlay.revoke()
+        if self.shell is not None:
+            self.shell.revoke_peer_views()
 
     def _lifecycle_source_failed(self) -> None:
         """Expose lost native monitoring while retaining the privacy cover.

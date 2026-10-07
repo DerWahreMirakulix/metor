@@ -487,17 +487,24 @@ class ContactIntentTests(unittest.TestCase):
         self.assertEqual(self.gui.state.route, Route('V09', peer, Delivery.LIVE))
         self.gui.command.assert_not_called()
 
-    def test_failed_start_stays_in_picker(self) -> None:
-        """An unavailable target never navigates or triggers an automatic retry."""
+    def test_start_opens_progress_immediately_and_unknown_result_never_retries(
+        self,
+    ) -> None:
+        """The picker uses the shared start lifecycle before any Core reply arrives."""
         peer = address(2)
         self.gui.state.route = Route('V11', delivery=Delivery.LIVE)
+        self.gui.client = Mock()
+        self.gui.submit = Mock(return_value=True)
+        self.gui.contacts.select(peer, 'live')
+        self.assertEqual(self.gui.state.route, Route('V09', peer, Delivery.LIVE))
+        self.assertTrue(self.gui.live.starting(peer))
+        mutation = self.gui.live.pending
+        self.gui.live.install(Update(0, mutation.operation))
         self.gui.contacts.select(peer, 'live')
         self.gui.contacts.poll()
-        self.assertEqual(self.gui.state.route.view, 'V11')
-        self.gui.contacts.install(Update(0, 'contact:start:' + peer))
-        self.gui.contacts.select(peer, 'live')
-        self.gui.contacts.poll()
-        self.assertEqual(self.gui.command.call_count, 1)
+        self.assertEqual(self.gui.submit.call_count, 1)
+        self.assertEqual(self.gui.state.route, Route('V09', peer, Delivery.LIVE))
+        self.gui.back()
         self.assertEqual(self.gui.state.route.view, 'V11')
 
     def test_scanner_manual_fallback_keeps_intent_and_returns_to_caller(self) -> None:

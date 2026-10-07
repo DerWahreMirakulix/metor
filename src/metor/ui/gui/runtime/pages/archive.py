@@ -14,6 +14,7 @@ from metor.core.api import (
 from metor.ui.gui.constants import GuiLimits
 from metor.ui.gui.state.mailbox import Update
 
+from ..receipts import ReceiptTarget
 from ..transcript import advanced_status
 
 if TYPE_CHECKING:
@@ -36,20 +37,166 @@ class ArchivePages:
         self.needed = False
         self._serial = 0
         self._operation: str | None = None
+        self._visible_request = False
+        self._checks: set[ReceiptTarget] = set()
+        self.error = ''
 
-    def reset(self) -> None:
-        """Invalidates old route results and requests the current projection's newest page.
+    @property
+    def loading(self) -> bool:
+        """Reports a deferred or admitted read for the visible DROP conversation."""
+        state = self.controller.state
+        return (
+            not state.covered
+            and state.route.peer is not None
+            and state.route.delivery is Delivery.DROP
+            and (self.needed or self._operation is not None)
+        )
+
+    def reset(self, *, preserve_latest: bool = False) -> None:
+        """Requests the newest page, optionally retaining the same conversation's known rows.
 
         Args:
-            None
+            preserve_latest: Whether a same-peer projection switch may retain its
+                already-authorized newest page while obtaining fresh Core facts.
         Returns:
             None
         """
+        state, page = self.controller.state, self.controller.messages
+        retain = (
+            preserve_latest
+            and not state.covered
+            and state.route.peer is not None
+            and self.before is None
+            and page is not None
+            and page.page_available
+            and page.onion == state.route.peer
+        )
         self._serial += 1
         self._operation = None
         self.before = None
-        self.controller.messages = None
+        if not retain:
+            self.controller.messages = None
         self.needed = True
+        self._visible_request = True
+        self.error = ''
+
+    def retry(self) -> bool:
+        """Retries the selected read without changing delivery or replaying a mutation."""
+        state = self.controller.state
+        if (
+            state.covered
+            or state.route.peer is None
+            or state.route.delivery is not Delivery.DROP
+            or self._operation is not None
+        ):
+            return False
+        self.error = ''
+        self.needed = True
+        self._visible_request = True
+        self.load()
+        return True
+
+    def changed(self, peer: str | None) -> None:
+        """Rechecks known archive copies after Core reports changed DROP contents.
+
+        The event may describe another client's deletion or a DROP promotion.
+        Hidden eligible rows therefore require a fresh archive read before reuse.
+        Positive pending work, unsent reviews, LIVE content, and canonical Core
+        data remain owned by their existing services.
+
+        Args:
+            peer: Changed canonical peer, or all peers for an unqualified event.
+        """
+        controller, state = self.controller, self.controller.state
+        visible_peer = (
+            state.route.peer
+            if not state.covered
+            and state.route.view == 'V08'
+            and state.route.delivery is Delivery.DROP
+            else None
+        )
+        statuses: dict[ReceiptTarget, MessageStatusCode] = {}
+        page = controller.messages
+        if page is not None and page.onion:
+            statuses.update(
+                (
+                    ReceiptTarget(
+                        page.onion, Delivery.DROP, item.direction, item.msg_id
+                    ),
+                    item.status,
+                )
+                for item in page.messages
+                if item.msg_id
+            )
+        inventory = controller.inventory.page
+        if inventory is not None:
+            for item in inventory.messages:
+                target = ReceiptTarget(
+                    item.onion, item.delivery, item.direction, item.msg_id
+                )
+                statuses[target] = advanced_status(
+                    statuses.get(target, item.status), item.status
+                )
+        for key, cached in controller.transcript.items.items():
+            target = ReceiptTarget(*key)
+            if target in statuses:
+                statuses[target] = advanced_status(statuses[target], cached.status)
+        for turn in controller.voice.live_turns.values():
+            target = ReceiptTarget(
+                turn.binding.peer,
+                turn.actual_delivery,
+                MessageDirectionCode.OUT,
+                turn.binding.msg_id,
+            )
+            if target in statuses:
+                statuses[target] = advanced_status(statuses[target], turn.status)
+        affected = {
+            target
+            for target, status in statuses.items()
+            if target.delivery is Delivery.DROP
+            and (peer is None or target.peer == peer)
+            and status not in {MessageStatusCode.PENDING, MessageStatusCode.DRAFT}
+        }
+        if affected and self._operation is not None:
+            self._serial += 1
+            self._operation = None
+            self.needed = True
+        for target in affected:
+            if target.peer != visible_peer:
+                controller.transcript.discard(
+                    target.peer, Delivery.DROP, target.msg_id, target.direction
+                )
+        retained = set(controller.receipts.capture(Delivery.DROP, None))
+        self._checks = (self._checks | affected) & retained
+        if inventory is not None:
+            controller.inventory.page = replace(
+                inventory,
+                messages=[
+                    item
+                    for item in inventory.messages
+                    if item.onion == visible_peer
+                    or ReceiptTarget(
+                        item.onion, item.delivery, item.direction, item.msg_id
+                    )
+                    not in affected
+                ],
+            )
+        if (
+            page is not None
+            and page.onion != visible_peer
+            and (peer is None or page.onion == peer)
+        ):
+            pending = [
+                item
+                for item in page.messages
+                if ReceiptTarget(
+                    page.onion or '', Delivery.DROP, item.direction, item.msg_id or ''
+                )
+                not in affected
+            ]
+            self.reset()
+            if pending:
+                controller.messages = replace(page, messages=pending, has_older=False)
 
     def older(self) -> bool:
         """Requests rows before the exact oldest currently displayed archive identity.
@@ -70,8 +217,12 @@ class ArchivePages:
         first = page.messages[0]
         if not first.msg_id:
             return False
+        self._serial += 1
+        self._operation = None
         self.before = first.direction, first.msg_id
         self.needed = True
+        self._visible_request = True
+        self.error = ''
         return True
 
     def load(self) -> bool:
@@ -88,6 +239,7 @@ class ArchivePages:
         if (
             state.covered
             or client is None
+            or self._operation is not None
             or route.peer is None
             or route.delivery is not Delivery.DROP
         ):
@@ -113,6 +265,8 @@ class ArchivePages:
             return False
         self._serial, self._operation = serial, operation
         self.needed = False
+        self._visible_request = False
+        self.error = ''
         return True
 
     def install(self, update: Update) -> bool:
@@ -127,8 +281,11 @@ class ArchivePages:
             return False
         if update.operation != self._operation:
             return True
+        self._operation = None
         if not self.controller.read_is_current(update):
             self.needed = True
+            if self.controller.messages is None:
+                self._visible_request = True
             return True
         event, state = update.event, self.controller.state
         if state.covered or state.route.delivery is not Delivery.DROP:
@@ -136,10 +293,13 @@ class ArchivePages:
         if isinstance(event, MessagesDataEvent) and event.onion == state.route.peer:
             if event.page_available:
                 self.controller.messages = self._release_confirmed_text(event)
+                self.error = ''
             else:
-                state.status = 'This history page is unavailable. Return to latest messages to refresh.'
+                self.error = (
+                    'This history page is unavailable. Return to latest messages.'
+                )
         else:
-            state.status = 'History could not be loaded. Retry from latest messages.'
+            self.error = 'Messages could not be loaded. Try again.'
         return True
 
     def _release_confirmed_text(self, event: MessagesDataEvent) -> MessagesDataEvent:
@@ -214,3 +374,16 @@ class ArchivePages:
         """
         if self.needed:
             self.load()
+        if self._checks and not self.controller.receipts.busy:
+            self.controller.receipts.start(tuple(self._checks))
+            self._checks.clear()
+
+    def poll_visible(self) -> None:
+        """Gives one explicit navigation read the next free bounded read turn.
+
+        Exact action reconciliation runs first. Once admitted, subsequent
+        refreshes use ordinary fair scheduling, so an open chat cannot starve
+        snapshot, preferences, or other background readers.
+        """
+        if self._visible_request:
+            self.poll()

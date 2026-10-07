@@ -174,6 +174,7 @@ class Timeline(BoxLayout):
         """
         super().__init__(orientation='vertical', spacing=dp(16))
         self.controller, self.route, self.refresh = controller, route, refresh
+        self._revoked = False
         self._widgets: dict[
             tuple[MessageDirectionCode, str], MessageBubble | VoiceCard
         ] = {}
@@ -207,6 +208,30 @@ class Timeline(BoxLayout):
             '', self._jump, size_hint_x=None, width=dp(160), pos_hint={'center_x': 0.5}
         )
         self.empty = Label('', role='support', tone='textSecondary')
+        self.archive_notice = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(12))
+        self.archive_error = Label(
+            '', role='support', tone='danger', pos_hint={'center_y': 0.5}
+        )
+        self.archive_error.bind(
+            height=lambda _widget, height: setattr(
+                self.archive_notice, 'height', max(dp(48), height)
+            )
+        )
+        self.retry_archive = Action(
+            'Retry',
+            self._retry_archive,
+            size_hint_x=None,
+            width=dp(88),
+            pos_hint={'center_y': 0.5},
+        )
+        self.retry_archive.accessible_name = 'Retry loading messages'
+        self.archive_notice.add_widget(self.archive_error)
+        self.archive_notice.add_widget(self.retry_archive)
+
+    def _retry_archive(self) -> None:
+        """Refreshes this page without resending or consuming any message."""
+        self.controller.archive.retry()
+        self.refresh()
 
     def _scroll_changed(self, _widget: object, value: float) -> None:
         """Captures an identity anchor when the user leaves the newest edge.
@@ -311,6 +336,8 @@ class Timeline(BoxLayout):
         Returns:
             None
         """
+        if self._revoked:
+            return
         if self._edge:
             self.scroll.scroll_y = 0
         self.scroll.update_from_scroll()
@@ -321,7 +348,20 @@ class Timeline(BoxLayout):
         Args:
             _args: Measured content or viewport height event.
         """
-        self._layout_trigger()
+        if not self._revoked:
+            self._layout_trigger()
+
+    def revoke(self) -> None:
+        """Releases the discarded projection and all scheduled native layout work."""
+        self._revoked = True
+        self._layout_trigger.cancel()
+        self._widgets.clear()
+        self._rows.clear()
+        self._visible.clear()
+        self._known.clear()
+        self._anchor = None
+        self.column.clear_widgets()
+        self.clear_widgets()
 
     def _menu(self, key: tuple[MessageDirectionCode, str]) -> None:
         """Opens actions for an immutable direction-qualified timeline item.
@@ -359,6 +399,8 @@ class Timeline(BoxLayout):
         Returns:
             None
         """
+        if self._revoked:
+            return
         rows = projection(self.controller, self.route)
         keys = [row.key for row in rows]
         incoming = set(keys) - self._known
@@ -438,13 +480,27 @@ class Timeline(BoxLayout):
                 self.column.add_widget(widget, index=index)
             self._visible = visible
             self._layout_trigger()
-        if not selected:
+        archive = self.controller.archive
+        archive_error = archive.error if self.route.delivery is Delivery.DROP else ''
+        self.archive_error.text = archive_error
+        self.retry_archive.disabled = (
+            self.controller.state.busy
+            or archive.loading
+            or self.controller.client is None
+        )
+        if archive_error and self.archive_notice.parent is None:
+            self.add_widget(self.archive_notice, index=len(self.children))
+        elif not archive_error and self.archive_notice.parent is self:
+            self.remove_widget(self.archive_notice)
+        if not selected and not archive_error:
             self.empty.text = (
-                'No Drops yet'
+                'Loading messages…'
+                if self.route.delivery is Delivery.DROP and archive.loading
+                else 'No Drops yet'
                 if self.route.delivery is Delivery.DROP
-                else 'Live conversation'
+                else 'No Live messages yet'
                 if active
-                else 'Start Live to chat here'
+                else 'Messages appear here when Live connects'
             )
             if self.empty.parent is None:
                 self.column.add_widget(self.empty)

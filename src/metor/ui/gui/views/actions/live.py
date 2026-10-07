@@ -10,7 +10,11 @@ from metor.ui.gui.widgets.sheet import confirm
 
 
 def live_context_actions(
-    controller: GuiController, peer: str, body: BoxLayout, dismiss: Callable[[], None]
+    controller: GuiController,
+    peer: str,
+    body: BoxLayout,
+    dismiss: Callable[[], None],
+    refresh: Callable[[], None],
 ) -> None:
     """Builds current-state actions while preserving the originally selected peer.
 
@@ -19,6 +23,7 @@ def live_context_actions(
         peer: Immutable canonical target.
         body: Native scrolling menu body.
         dismiss: Closes the existing menu before another explicit interaction.
+        refresh: Presents admitted action state before any asynchronous result.
     Returns:
         None
     """
@@ -48,6 +53,7 @@ def live_context_actions(
                 else entry.context_generation,
                 entry.outbound_attempt_id if not entry.recovery_eligible else None,
             )
+        refresh()
 
     def reconnect() -> None:
         """Starts an explicit reconnect and never runs merely because the menu opened.
@@ -59,6 +65,7 @@ def live_context_actions(
         """
         dismiss()
         controller.live.start(peer)
+        refresh()
 
     active = bool(
         entry and (entry.session_state == 'connected' or entry.recovery_eligible)
@@ -67,7 +74,7 @@ def live_context_actions(
     if active or calling:
         body.add_widget(
             Action(
-                'Cancel call' if calling else 'End Live',
+                'Cancel Live' if calling else 'End Live',
                 end,
                 tone='danger',
                 disabled=busy
@@ -86,6 +93,7 @@ def live_context_actions(
         dismiss()
         if entry is not None and entry.context_generation is not None:
             controller.live.change_route(peer, entry.context_generation)
+        refresh()
 
     if entry is not None and entry.session_state == 'connected':
         body.add_widget(
@@ -109,6 +117,7 @@ def live_context_actions(
         """
         dismiss()
         controller.live.fallback(peer)
+        refresh()
 
     def close() -> None:
         """Explains local destruction of unseen content before a Core dismissal.
@@ -128,6 +137,7 @@ def live_context_actions(
             )
         else:
             controller.live.close_context(peer)
+            refresh()
 
     if pending:
         body.add_widget(Action('Send pending as Drop', fallback, disabled=busy))

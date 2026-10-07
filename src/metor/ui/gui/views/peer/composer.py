@@ -4,6 +4,7 @@ from collections.abc import Callable
 
 from kivy.metrics import dp, sp
 from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.widget import Widget
 
 from metor.core.api import Delivery, MessageDirectionCode
 from metor.ui.gui.platform.audio import PcmVoice
@@ -35,6 +36,7 @@ class Composer(BoxLayout):
         """
         super().__init__(orientation='vertical', size_hint_y=None, spacing=dp(8))
         self.controller, self.route, self.refresh = controller, route, refresh
+        self._revoked = False
         self.bind(minimum_height=self.setter('height'))
         self._mode = ''
         self._action: Action | None = None
@@ -111,12 +113,72 @@ class Composer(BoxLayout):
         )
         self.reconnect = Action(
             'Reconnect chat',
-            lambda: controller.live.start(route.peer or ''),
+            self._reconnect,
         )
         self.recheck = Action(
             'Recheck recording',
-            lambda: controller.voice.review_actions.check(route.peer or ''),
+            self._recheck,
         )
+
+    def _recheck(self) -> None:
+        """Shows readback progress immediately without publishing the recording again."""
+        if self._revoked:
+            return
+        self.controller.voice.review_actions.check(self.route.peer or '')
+        self.update()
+        self.refresh()
+
+    def _reconnect(self) -> None:
+        """Shows admitted LIVE progress in the same frame as the explicit retry."""
+        if self._revoked:
+            return
+        self.controller.live.start(self.route.peer or '')
+        self.update()
+        self.refresh()
+
+    def _owned_widgets(self) -> set[Widget]:
+        """Includes every retained stage, even while another stage is attached."""
+        return {
+            widget
+            for fragment in (
+                self.bar,
+                self.entry,
+                self.review,
+                self.alternatives,
+                self.note,
+                self.send,
+                self.ptt,
+                self.reconnect,
+                self.recheck,
+                self.as_drop,
+            )
+            for widget in fragment.walk(restrict=True)
+        }
+
+    def suspend(self) -> None:
+        """Revokes input in attached and detached stages without altering the draft."""
+        self.ptt.cancel_input()
+        for widget in self._owned_widgets():
+            if isinstance(widget, Action):
+                widget.cancel_input()
+            elif isinstance(widget, TextField):
+                widget.focus = False
+        self.disabled = True
+
+    def revoke(self) -> None:
+        """Clears all native stage copies without changing controller-owned drafts."""
+        self._revoked = True
+        self.suspend()
+        self._editing = True
+        try:
+            for widget in self._owned_widgets():
+                if isinstance(widget, (Label, TextField)):
+                    widget.text = ''
+                if isinstance(widget, Action):
+                    widget.accessible_name = ''
+        finally:
+            self._editing = False
+        self.clear_widgets()
 
     def _edit(self, _widget: object, text: str) -> None:
         """Admits a bounded draft while preserving the native cursor on repaint.
@@ -127,14 +189,20 @@ class Composer(BoxLayout):
         Returns:
             None
         """
-        if self._editing:
+        if self._editing or self._revoked:
             return
         state = self.controller.state
         if not state.set_draft(self.route.peer or '', self.route.delivery, text):
             self.entry.text = state.drafts.get(
                 (self.route.peer or '', self.route.delivery), ''
             )
-            state.status = 'Draft limit reached, finish another draft'
+            self.controller.text.report_error(
+                self.route.peer or '',
+                self.route.delivery,
+                'Draft limit reached. Finish another draft before adding more text.',
+            )
+        else:
+            self.controller.text.clear_error(self.route.peer or '', self.route.delivery)
         self.refresh()
 
     def _submit(self, _widget: object) -> None:
@@ -147,7 +215,8 @@ class Composer(BoxLayout):
         """
         state = self.controller.state
         if (
-            state.covered
+            self._revoked
+            or state.covered
             or self.controller.client is None
             or state.route != self.route
             or self.controller.voice.press.active
@@ -155,6 +224,7 @@ class Composer(BoxLayout):
         ):
             return
         self.controller.send_text(self.route.peer or '', self.route.delivery)
+        self.update()
         self.refresh()
 
     def _review_action(self, send: bool, delivery: Delivery | None = None) -> None:
@@ -166,10 +236,13 @@ class Composer(BoxLayout):
         Returns:
             None
         """
+        if self._revoked:
+            return
         self.controller.playback.stop()
         self.controller.voice.review_actions.act(
             self.route.peer or '', send=send, delivery=delivery
         )
+        self.update()
         self.refresh()
 
     def _play_review(self) -> None:
@@ -180,6 +253,8 @@ class Composer(BoxLayout):
         Returns:
             None
         """
+        if self._revoked:
+            return
         peer = self.route.peer or ''
         review = self.controller.voice.reviews.get(peer)
         if review is None:
@@ -214,6 +289,8 @@ class Composer(BoxLayout):
         Returns:
             None
         """
+        if self._revoked:
+            return
         voice, state = self.controller.voice, self.controller.state
         review = (
             voice.reviews.get(self.route.peer or '')
@@ -270,7 +347,15 @@ class Composer(BoxLayout):
             self.delete.disabled = self.as_drop.disabled = blocked
             self.commit.disabled = blocked or is_live and not live_ready
             self.reconnect.disabled = (
-                blocked or self.controller.live.pending is not None
+                blocked
+                or self.controller.live.pending is not None
+                or self.controller.live.starting(self.route.peer or '')
+                or not self.controller.live.retry_ready(self.route.peer or '')
+            )
+            self.reconnect.label.text = self.reconnect.accessible_name = (
+                'Connecting…'
+                if self.controller.live.starting(self.route.peer or '')
+                else 'Reconnect chat'
             )
             self.alternatives.clear_widgets()
             if is_live:
@@ -281,7 +366,9 @@ class Composer(BoxLayout):
                     self.review.add_widget(self.alternatives)
             elif self.alternatives.parent is self.review:
                 self.review.remove_widget(self.alternatives)
-            self.note.text = (
+            self.note.text = self.controller.voice.review_actions.notice(
+                self.route.peer or ''
+            ) or (
                 'Outcome unconfirmed'
                 if review.unknown
                 else 'Live chat ended. Reconnect or explicitly send as Drop.'
@@ -353,7 +440,8 @@ class Composer(BoxLayout):
             if phase == 'finalizing'
             else 'Recording outcome unconfirmed'
             if phase == 'failed'
-            else self.controller.text.pending_status(
+            else self.controller.text.error(self.route.peer or '', self.route.delivery)
+            or self.controller.text.pending_status(
                 self.route.peer or '', self.route.delivery
             )
         )
