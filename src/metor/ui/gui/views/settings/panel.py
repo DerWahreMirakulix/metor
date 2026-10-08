@@ -20,6 +20,7 @@ from .descriptors import core_settings_group
 from .device import device_settings_group
 from .timeout import TimeoutEditor
 from .privacy import notification_preference, profile_name_preference
+from .loading import show_initial_loading
 from ..profiles import request_exit
 
 
@@ -45,6 +46,8 @@ def settings_body(controller: GuiController, refresh: Callable[[], None]) -> Box
             )
         )
         device_settings_group(controller, body, refresh)
+        return body
+    if show_initial_loading(controller, body, include_device=True):
         return body
     preferences = current.preferences
     if controller.preferences.last_error:

@@ -22,6 +22,10 @@ from kivy.input.providers.mouse import MouseMotionEvent
 from kivy.metrics import dp
 from kivy.uix.floatlayout import FloatLayout
 
+from gui_native_action_lifetime import (
+    verify_clipped_action_hover,
+    verify_detached_action_input,
+)
 from metor.ui.gui.widgets.context import ContextAction
 from metor.ui.gui.widgets.controls import TextField
 from metor.ui.gui.widgets.symbol import IconAction
@@ -231,6 +235,8 @@ class GestureHarness(App):
         EventLoop.post_dispatch_input('end', after_acceptance)
         assert self.plain_calls == [True, True]
         self.panel.remove_widget(self.plain)
+        verify_detached_action_input(self.panel)
+        verify_clipped_action_hover(self.panel)
         self.action.focus = False
         self.field.focus = True
         Clock.schedule_once(self.pointer_feedback, 0.2)
@@ -527,6 +533,11 @@ def main() -> None:
                 'hold_500ms': 'pass',
                 'travel_over_8_units': 'pass',
                 'detached_target_cancellation': 'pass',
+                'detached_ancestor_keyboard_release_cancelled': 'pass',
+                'detached_ancestor_pointer_release_cancelled': 'pass',
+                'reattached_ancestor_fresh_actions': 'pass',
+                'clipped_scrolling_action_has_no_hover': 'pass',
+                'tooltip_revalidates_scrolling_viewport': 'pass',
                 'context_free_reattach_and_stale_release': 'pass',
                 'reattached_first_click': 'pass',
                 'pointer_preserves_typing_focus': 'pass',

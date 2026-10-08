@@ -45,7 +45,7 @@ def notification_center(
     header.bind(minimum_height=header.setter('height'))
 
     def back() -> None:
-        """Cancels selection or returns to the preceding presentation.
+        """Returns to the preceding presentation and clears local selection.
 
         Args:
             None
@@ -71,7 +71,7 @@ def notification_center(
     header.add_widget(
         IconAction(
             'chevron-left',
-            'Cancel selection' if store.selecting else 'Back',
+            'Back',
             back,
             pos_hint={'center_y': 0.5},
         )
@@ -136,7 +136,7 @@ def notice_row(
     """
     store = controller.notifications.store
     key = notice.key
-    row = BoxLayout(size_hint_y=None, height=dp(88), spacing=dp(8))
+    row = BoxLayout(size_hint_y=None, height=dp(88))
 
     def activate() -> None:
         """Selects or opens this exact notification entry.
@@ -166,6 +166,7 @@ def notice_row(
     action.height = dp(88)
     action.padding = (dp(16), dp(16), dp(16), dp(18))
     action.remove_widget(action.label)
+    group = BoxLayout(spacing=dp(8))
     column = BoxLayout(orientation='vertical', spacing=dp(8))
     top = BoxLayout(size_hint_y=None, height=dp(28), spacing=dp(8))
     kind = Label(TITLES[notice.kind], role='row')
@@ -181,7 +182,8 @@ def notice_row(
         text=stamp.text, font_name=stamp.font_name, font_size=stamp.font_size
     )
     measure_stamp.refresh()
-    stamp.width = max(dp(40), measure_stamp.texture.size[0])
+    stamp.width = max(dp(40), measure_stamp.texture.size[0] + dp(2))
+    stamp.shorten = False
     top.add_widget(stamp)
     column.add_widget(top)
     summary = controller.contacts.alias(notice.peer)
@@ -200,7 +202,8 @@ def notice_row(
     )
     column.add_widget(summary_row)
     action.accessible_name = TITLES[notice.kind] + ': ' + summary
-    action.add_widget(column)
+    group.add_widget(column)
+    action.add_widget(group)
 
     def measure(*_args: object) -> None:
         """Recomputes the native row height from rendered text metrics.
@@ -225,6 +228,7 @@ def notice_row(
             'square-check' if key in store.selected else 'square',
             'Deselect notification' if key in store.selected else 'Select notification',
             activate,
+            surface='surface',
             pos_hint={'center_y': 0.5},
         )
         auxiliary.focus_key = ('notice_select', key[0].value, key[1])
@@ -233,10 +237,12 @@ def notice_row(
             'ellipsis',
             'Notification actions',
             partial(notice_menu, controller, key, refresh),
+            surface='surface',
+            tone='textSecondary',
             pos_hint={'center_y': 0.5},
         )
         auxiliary.focus_key = ('notice_more', key[0].value, key[1])
-    row.add_widget(auxiliary)
+    group.add_widget(auxiliary)
     return row
 
 

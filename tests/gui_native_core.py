@@ -39,6 +39,8 @@ from frontend_e2e_runtime import EncryptedFrontendRuntime
 from frontend_gui_terminal import GuiTerminalPeer
 from gui_native_audio_scan import NativeAudioProbe
 from gui_native_route import verify_gui_module_origin
+from gui_native_secondary import NativeSecondaryProbe
+from gui_native_live_stop import NativeLiveStopProbe
 from gui_native_ux import GEOMETRY_TOLERANCE, NativeUxProbe
 from gui_native_x11 import NativeX11Input, rectangle
 from metor.client import FrontendLaunchContext, MetorClient
@@ -149,6 +151,7 @@ class NativeCoreApp(MetorApp):
         self.target = runtime.peer.onion
         self.native = NativeX11Input()
         self.ux = NativeUxProbe(self)
+        self.live_stop_probe = NativeLiveStopProbe(self)
         self.audio_probe = NativeAudioProbe(self)
         self.terminal = GuiTerminalPeer(runtime)
         self.steps: deque[Step] = deque()
@@ -206,11 +209,13 @@ class NativeCoreApp(MetorApp):
         self.last_frame = now
         try:
             self.ux.frame()
+            self.live_stop_probe.frame()
             self.audio_probe.frame()
         except BaseException as error:
             self.failure = error
             self.capture('first-frame-failure')
             self.ux.close()
+            self.live_stop_probe.close()
             self.audio_probe.close()
             self.stop()
             return
@@ -259,6 +264,7 @@ class NativeCoreApp(MetorApp):
         except BaseException as error:
             self.failure = error
             self.ux.close()
+            self.live_stop_probe.close()
             self.audio_probe.close()
             peer = self.peer()
             if peer is not None:
@@ -268,6 +274,44 @@ class NativeCoreApp(MetorApp):
                         {
                             'route': self.controller.state.route.view,
                             'busy': self.controller.state.busy,
+                            'live_state': next(
+                                (
+                                    item.session_state
+                                    for item in self.controller.state.snapshot.live_contexts
+                                    if item.onion == self.target
+                                ),
+                                None,
+                            )
+                            if self.controller.state.snapshot is not None
+                            else None,
+                            'live_starting': self.controller.live.starting(self.target),
+                            'live_stopping': self.controller.live.stop_status(
+                                self.target
+                            ),
+                            'live_failure': self.controller.live.failure(self.target),
+                            'live_context_facts': [
+                                {
+                                    'state': item.session_state,
+                                    'recovery_eligible': item.recovery_eligible,
+                                    'outbound_attempt_present': bool(
+                                        item.outbound_attempt_id
+                                    ),
+                                    'generation': item.context_generation,
+                                }
+                                for item in self.controller.state.snapshot.live_contexts
+                                if item.onion == self.target
+                            ]
+                            if self.controller.state.snapshot is not None
+                            else [],
+                            'live_subtitle': peer.subtitle.text,
+                            'live_connect_attached': peer.connect.get_root_window()
+                            is not None,
+                            'live_connect_disabled': peer.connect.disabled,
+                            'live_connect_in_slot': peer.connect.parent
+                            is peer.live_slot,
+                            'live_slot_actions': [
+                                item.accessible_name for item in peer.live_slot.children
+                            ],
                             'archive_count': len(self.controller.messages.messages)
                             if self.controller.messages
                             else 0,
@@ -677,6 +721,17 @@ class NativeCoreApp(MetorApp):
             lambda: self.action('Retry Live', self.peer()) is not None,
             self._start_live,
         )
+        self.add(
+            'live_cancel_counterpart_pending',
+            self._peer_pending,
+            self.live_stop_probe.cancel,
+        )
+        self.add(
+            'live_cancel_progress_before_core_reply',
+            self.live_stop_probe.pending_visible,
+            self.live_stop_probe.duplicate,
+        )
+        self.add('live_cancel_confirmed', self.live_stop_probe.ended, self._start_live)
         self.add('live_counterpart_pending', self._peer_pending, self._accept_live)
         self.add(
             'live_connected',
@@ -893,8 +948,10 @@ class NativeCoreApp(MetorApp):
             ),
             lambda: self.click('Settings'),
         )
+        self.add('settings_heading', lambda: self.route('V17'), self._verify_settings)
+        NativeSecondaryProbe(self).add_steps()
         self.add(
-            'settings_exit_scroll', lambda: self.route('V17'), self._verify_settings
+            'settings_exit_scroll', lambda: self.route('V17'), self._scroll_settings
         )
         self.add('settings_exit_reachable', self._exit_reachable, self._exit)
 
@@ -1298,10 +1355,9 @@ class NativeCoreApp(MetorApp):
         self.click('Back')
 
     def _verify_settings(self) -> None:
-        """Checks native enlarged heading layout before scrolling settings."""
+        """Checks native enlarged heading layout before secondary navigation."""
         self.ux.secondary_header('Settings')
         self.capture('settings-heading')
-        self._scroll_settings()
 
     def _peer_pending(self) -> bool:
         """Observes the real counterpart request before explicit fixture acceptance."""
@@ -1684,6 +1740,7 @@ def main() -> None:
             Clock.unschedule(app._heartbeat)
             app.on_stop()
             app.ux.close()
+            app.live_stop_probe.close()
             app.audio_probe.close()
             app.native.close()
             app.cli_worker.shutdown(wait=True, cancel_futures=True)

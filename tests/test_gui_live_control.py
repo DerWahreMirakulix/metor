@@ -3,17 +3,361 @@
 import socket
 import threading
 import unittest
+import gc
+import weakref
 from unittest.mock import patch
+from unittest.mock import Mock
 
 import test_gui_producers as support
+from metor.client import FrontendLaunchContext
 from metor.core.api import (
+    Delivery,
+    ConnectionConnectingEvent,
+    ContactEntry,
     DisconnectCommand,
     IpcEvent,
+    LiveContextEntry,
     LiveControlCompletedEvent,
     LiveControlRejectedEvent,
     RetunnelCommand,
     RetunnelInitiatedEvent,
+    RuntimeSnapshotEvent,
 )
+from metor.ui.gui.constants import GuiLimits
+from metor.ui.gui.runtime import GuiController
+from metor.ui.gui.state import Route
+from metor.ui.gui.state.mailbox import Update
+
+
+class LiveStopPresentationTests(unittest.TestCase):
+    """Stop feedback bridges IPC acknowledgement and the next authoritative snapshot."""
+
+    def setUp(self) -> None:
+        """Creates one qualified invitation and controlled asynchronous admission."""
+        self.gui = GuiController(
+            FrontendLaunchContext('fixture', Mock()), simulator=True
+        )
+        self.gui.state.covered = False
+        self.gui.state.capabilities = frozenset({'qualified_live_control'})
+        self.gui.state.route = Route('V09', 'bob', Delivery.LIVE)
+        self.gui.state.snapshot = RuntimeSnapshotEvent(
+            'fixture',
+            'self',
+            live_contexts=[
+                LiveContextEntry(
+                    'Bob', 'bob', True, 'connecting', outbound_attempt_id='ab' * 16
+                )
+            ],
+            revision=4,
+        )
+        self.gui.client = Mock()
+        self.gui.submit = Mock(return_value=True)
+        self.gui.refresh_state = Mock()
+
+    def complete(self, event: IpcEvent | None) -> None:
+        """Installs the correlated result while retaining the original displayed snapshot."""
+        mutation = self.gui.live.pending
+        self.assertIsNotNone(mutation)
+        assert mutation is not None
+        self.assertTrue(self.gui.live.install(Update(0, mutation.operation, event)))
+
+    def test_cancel_feedback_is_immediate_and_acknowledgement_cannot_rearm_it(
+        self,
+    ) -> None:
+        """Duplicate input stays blocked through the entire old-snapshot interval."""
+        self.assertTrue(self.gui.live.end('bob', attempt_id='ab' * 16))
+        self.assertEqual(self.gui.live.stop_status('bob'), 'Cancelling Live…')
+        self.gui.client.request.assert_not_called()
+        self.assertFalse(self.gui.live.end('bob', attempt_id='ab' * 16))
+        self.gui.submit.call_args.args[1]()
+        command = self.gui.client.request.call_args.args[0]
+        self.assertIsInstance(command, DisconnectCommand)
+        self.assertEqual(command.attempt_id, 'ab' * 16)
+        self.assertIsNone(command.context_generation)
+        self.complete(LiveControlCompletedEvent('bob'))
+        self.assertIsNone(self.gui.live.pending)
+        self.gui.live.poll()
+        self.assertEqual(self.gui.live.stop_status('bob'), 'Cancelling Live…')
+        self.assertFalse(self.gui.live.end('bob', attempt_id='ab' * 16))
+        self.assertFalse(self.gui.live.start('bob'))
+        self.gui.state.snapshot = RuntimeSnapshotEvent('fixture', 'self', revision=5)
+        self.gui.live.poll()
+        self.assertEqual(self.gui.live.stop_status('bob'), '')
+        self.assertTrue(self.gui.live.retry_ready('bob'))
+        self.assertEqual(self.gui.submit.call_count, 1)
+
+    def test_end_feedback_does_not_describe_a_replacement_connection(self) -> None:
+        """The original action cannot label a newer logical connection as ending."""
+        self.gui.state.snapshot = RuntimeSnapshotEvent(
+            'fixture',
+            'self',
+            live_contexts=[
+                LiveContextEntry('Bob', 'bob', True, 'connected', context_generation=1)
+            ],
+            revision=4,
+        )
+        self.assertTrue(self.gui.live.end('bob', context_generation=1))
+        self.assertEqual(self.gui.live.stop_status('bob'), 'Ending Live…')
+        self.gui.state.snapshot = RuntimeSnapshotEvent(
+            'fixture',
+            'self',
+            live_contexts=[
+                LiveContextEntry('Bob', 'bob', True, 'connected', context_generation=2)
+            ],
+            revision=5,
+        )
+        self.assertEqual(self.gui.live.stop_status('bob'), '')
+        self.complete(LiveControlCompletedEvent('bob'))
+        self.gui.live.poll()
+        self.assertTrue(self.gui.live.end('bob', context_generation=2))
+
+    def test_snapshot_while_cancel_pending_cannot_remove_progress(self) -> None:
+        """A concurrent snapshot cannot finish a stop or substitute for post-result state."""
+        self.assertTrue(self.gui.live.end('bob', attempt_id='ab' * 16))
+        self.gui.state.snapshot = RuntimeSnapshotEvent(
+            'fixture',
+            'self',
+            live_contexts=[
+                LiveContextEntry(
+                    'Bob', 'bob', True, 'connecting', outbound_attempt_id='ab' * 16
+                )
+            ],
+            revision=5,
+        )
+        self.gui.live.poll()
+        self.assertEqual(self.gui.live.stop_status('bob'), 'Cancelling Live…')
+        self.complete(LiveControlCompletedEvent('bob'))
+        self.gui.live.poll()
+        self.assertEqual(self.gui.live.stop_status('bob'), 'Cancelling Live…')
+        self.assertFalse(self.gui.live.end('bob', attempt_id='ab' * 16))
+        self.gui.state.snapshot = RuntimeSnapshotEvent('fixture', 'self', revision=6)
+        self.gui.live.poll()
+        self.assertEqual(self.gui.live.stop_status('bob'), '')
+        self.assertTrue(self.gui.live.retry_ready('bob'))
+        self.assertEqual(self.gui.submit.call_count, 1)
+
+    def test_disconnected_snapshot_before_reply_keeps_the_cancel_owner(self) -> None:
+        """An early broadcast of transport teardown cannot expose Start before confirmation."""
+        self.assertTrue(self.gui.live.end('bob', attempt_id='ab' * 16))
+        self.gui.state.snapshot = RuntimeSnapshotEvent(
+            'fixture',
+            'self',
+            live_contexts=[LiveContextEntry('Bob', 'bob', True, 'disconnected')],
+            revision=5,
+        )
+        self.gui.live.poll()
+        self.assertEqual(self.gui.live.stop_status('bob'), 'Cancelling Live…')
+        self.assertFalse(self.gui.live.retry_ready('bob'))
+        self.complete(LiveControlCompletedEvent('bob'))
+        self.gui.live.poll()
+        self.assertEqual(self.gui.live.stop_status('bob'), 'Cancelling Live…')
+        self.gui.state.snapshot = RuntimeSnapshotEvent('fixture', 'self', revision=6)
+        self.gui.live.poll()
+        self.assertEqual(self.gui.live.stop_status('bob'), '')
+        self.assertTrue(self.gui.live.retry_ready('bob'))
+
+    def test_started_invitation_cancellation_does_not_become_connection_failure(
+        self,
+    ) -> None:
+        """A teardown snapshot before Cancel acknowledgement stays explicit stop progress."""
+        self.gui.state.snapshot = RuntimeSnapshotEvent('fixture', 'self', revision=1)
+        self.assertTrue(self.gui.live.start('bob'))
+        self.complete(ConnectionConnectingEvent('Bob', 'bob', revision=2))
+        self.gui.state.snapshot = RuntimeSnapshotEvent(
+            'fixture',
+            'self',
+            live_contexts=[
+                LiveContextEntry(
+                    'Bob', 'bob', True, 'connecting', outbound_attempt_id='ab' * 16
+                )
+            ],
+            revision=3,
+        )
+        self.gui.live.poll()
+        self.assertTrue(self.gui.live.starting('bob'))
+        self.assertTrue(self.gui.live.end('bob', attempt_id='ab' * 16))
+        self.gui.state.snapshot = RuntimeSnapshotEvent('fixture', 'self', revision=4)
+        self.gui.live.poll()
+        self.assertEqual(self.gui.live.stop_status('bob'), 'Cancelling Live…')
+        self.assertEqual(self.gui.live.failure('bob'), '')
+        self.assertTrue(self.gui.live.starting('bob'))
+        self.complete(LiveControlCompletedEvent('bob'))
+        self.gui.live.poll()
+        self.assertEqual(self.gui.live.stop_status('bob'), 'Cancelling Live…')
+        self.assertEqual(self.gui.live.failure('bob'), '')
+        self.gui.state.snapshot = RuntimeSnapshotEvent('fixture', 'self', revision=5)
+        self.gui.live.poll()
+        self.assertEqual(self.gui.live.stop_status('bob'), '')
+        self.assertEqual(self.gui.live.failure('bob'), '')
+        self.assertFalse(self.gui.live.starting('bob'))
+        self.assertTrue(self.gui.live.retry_ready('bob'))
+        self.assertEqual(self.gui.submit.call_count, 2)
+
+    def test_uncertain_cancel_requires_fresh_state_without_automatic_retry(
+        self,
+    ) -> None:
+        """An absent reply retains progress until an authoritative read permits new intent."""
+        self.assertTrue(self.gui.live.end('bob', attempt_id='ab' * 16))
+        self.complete(None)
+        self.assertEqual(self.gui.live.stop_status('bob'), 'Cancelling Live…')
+        self.gui.live.poll()
+        self.assertFalse(self.gui.live.end('bob', attempt_id='ab' * 16))
+        self.gui.state.snapshot = RuntimeSnapshotEvent(
+            'fixture',
+            'self',
+            live_contexts=[
+                LiveContextEntry(
+                    'Bob', 'bob', True, 'connecting', outbound_attempt_id='ab' * 16
+                )
+            ],
+            revision=5,
+        )
+        self.gui.live.poll()
+        self.assertIsNone(self.gui.live.pending)
+        self.assertEqual(self.gui.live.stop_status('bob'), '')
+        self.assertEqual(self.gui.submit.call_count, 1)
+        self.assertTrue(self.gui.live.end('bob', attempt_id='ab' * 16))
+
+    def test_rejected_cancel_rearms_only_explicit_intent(self) -> None:
+        """A rejected exact action removes progress while preserving the existing chat."""
+        self.assertTrue(self.gui.live.end('bob', attempt_id='ab' * 16))
+        self.complete(LiveControlRejectedEvent('bob'))
+        self.assertEqual(self.gui.live.stop_status('bob'), '')
+        self.assertEqual(self.gui.submit.call_count, 1)
+        self.assertTrue(self.gui.live.end('bob', attempt_id='ab' * 16))
+
+    def test_stop_feedback_is_bounded_and_hidden_under_privacy_cover(self) -> None:
+        """Unrefreshed stops cannot accumulate unlimited peer state or reveal private activity."""
+        with patch.object(GuiLimits, 'TEXT_CONTEXTS', 1):
+            self.assertTrue(self.gui.live.end('bob', attempt_id='ab' * 16))
+            self.complete(LiveControlCompletedEvent('bob'))
+            self.assertFalse(self.gui.live.end('carol', context_generation=2))
+        self.gui.state.covered = True
+        self.assertEqual(self.gui.live.stop_status('bob'), '')
+        self.assertEqual(self.gui.submit.call_count, 1)
+
+    def test_inactive_recovery_hints_allow_fresh_explicit_start(self) -> None:
+        """A cancelled invitation's no-token scheduled row cannot strand the user."""
+        for session in ('reconnect_grace', 'reconnect_scheduled'):
+            with self.subTest(session=session):
+                gui = GuiController(
+                    FrontendLaunchContext('fixture', Mock()), simulator=True
+                )
+                gui.state.covered = False
+                gui.client = Mock()
+                gui.submit = Mock(return_value=True)
+                gui.state.snapshot = RuntimeSnapshotEvent(
+                    'fixture',
+                    'self',
+                    live_contexts=[LiveContextEntry('Bob', 'bob', True, session)],
+                )
+                self.assertTrue(gui.live.idle('bob'))
+                self.assertTrue(gui.live.retry_ready('bob'))
+                self.assertTrue(gui.live.start('bob'))
+                self.assertTrue(gui.live.starting('bob'))
+                self.assertFalse(gui.live.retry_ready('bob'))
+                self.assertFalse(gui.live.start('bob'))
+                self.assertEqual(gui.submit.call_count, 1)
+
+    def test_recovery_permission_or_outbound_attempt_blocks_new_start(self) -> None:
+        """A transport hint with a logical recovery token or actual attempt stays occupied."""
+        for session in ('reconnect_grace', 'reconnect_scheduled'):
+            for recovery, attempt in ((True, None), (False, 'ab' * 16)):
+                with self.subTest(session=session, recovery=recovery, attempt=attempt):
+                    self.gui.state.snapshot = RuntimeSnapshotEvent(
+                        'fixture',
+                        'self',
+                        live_contexts=[
+                            LiveContextEntry(
+                                'Bob',
+                                'bob',
+                                True,
+                                session,
+                                recovery_eligible=recovery,
+                                outbound_attempt_id=attempt,
+                            )
+                        ],
+                    )
+                    self.assertFalse(self.gui.live.idle('bob'))
+                    self.assertFalse(self.gui.live.retry_ready('bob'))
+                    self.assertEqual(self.gui.submit.call_count, 0)
+
+    def test_cover_releases_uncertain_start_snapshot_without_rearming_request(
+        self,
+    ) -> None:
+        """Real application lock releases sensitive projection ownership and keeps uncertainty."""
+        self.gui.state.snapshot = RuntimeSnapshotEvent(
+            'fixture',
+            'private-own-address',
+            contacts=[ContactEntry('Sensitive contact', 'bob')],
+            revision=4,
+        )
+        snapshot = weakref.ref(self.gui.state.snapshot)
+        self.assertTrue(self.gui.live.start('bob'))
+        self.complete(None)
+        mutation = self.gui.live.pending
+        self.assertIsNotNone(mutation)
+        self.assertTrue(self.gui.live._awaiting_snapshot)
+        self.assertTrue(self.gui.security.lock())
+        gc.collect()
+        self.assertIsNone(snapshot())
+        self.assertIsNone(self.gui.live._uncertain_snapshot)
+        self.assertIsNone(self.gui.live._progress.starts['bob'].snapshot)
+        self.assertEqual(self.gui.live._progress.starts['bob'].phase, 'checking')
+        self.assertEqual(self.gui.live._progress.starts['bob'].revision, 4)
+        self.assertIs(self.gui.live.pending, mutation)
+        self.assertTrue(self.gui.live._awaiting_snapshot)
+        self.gui.state.snapshot = RuntimeSnapshotEvent('fixture', '', revision=5)
+        self.gui.live.poll()
+        self.assertIs(self.gui.live.pending, mutation)
+        self.assertTrue(self.gui.live._awaiting_snapshot)
+        self.assertFalse(self.gui.live.retry_ready('bob'))
+        self.assertEqual(self.gui.submit.call_count, 1)
+        self.gui.state.covered = False
+        self.gui.state.snapshot = RuntimeSnapshotEvent('fixture', 'self', revision=6)
+        self.gui.live.poll()
+        self.assertIsNone(self.gui.live.pending)
+        self.assertFalse(self.gui.live._awaiting_snapshot)
+        self.assertTrue(self.gui.live.retry_ready('bob'))
+        self.assertEqual(self.gui.submit.call_count, 1)
+        self.assertTrue(self.gui.live.start('bob'))
+        self.assertEqual(self.gui.submit.call_count, 2)
+
+    def test_cover_releases_stop_snapshot_preserving_exact_pending_identity(
+        self,
+    ) -> None:
+        """A covered Cancel loses its private snapshot without abandoning result ownership."""
+        assert self.gui.state.snapshot is not None
+        snapshot = weakref.ref(self.gui.state.snapshot)
+        self.assertTrue(self.gui.live.end('bob', attempt_id='ab' * 16))
+        mutation = self.gui.live.pending
+        self.assertTrue(self.gui.security.lock())
+        gc.collect()
+        self.assertIsNone(snapshot())
+        self.assertIs(self.gui.live.pending, mutation)
+        assert mutation is not None
+        self.assertEqual(mutation.attempt_id, 'ab' * 16)
+        stopping = self.gui.live._progress.stops['bob']
+        self.assertIsNone(stopping.snapshot)
+        self.assertTrue(stopping.awaiting_result)
+        self.assertEqual(stopping.revision, 4)
+        self.assertEqual(self.gui.live.stop_status('bob'), '')
+        self.gui.live.poll()
+        self.assertIs(self.gui.live.pending, mutation)
+        self.assertFalse(self.gui.live.end('bob', attempt_id='ab' * 16))
+        self.complete(None)
+        self.assertFalse(stopping.awaiting_result)
+        self.assertTrue(self.gui.live._awaiting_snapshot)
+        self.gui.state.snapshot = RuntimeSnapshotEvent('fixture', '', revision=5)
+        self.gui.live.poll()
+        self.assertIs(self.gui.live.pending, mutation)
+        self.assertEqual(self.gui.submit.call_count, 1)
+        self.gui.state.covered = False
+        self.gui.state.snapshot = RuntimeSnapshotEvent('fixture', 'self', revision=6)
+        self.gui.live.poll()
+        self.assertIsNone(self.gui.live.pending)
+        self.assertTrue(self.gui.live.retry_ready('bob'))
+        self.assertEqual(self.gui.submit.call_count, 1)
 
 
 class LiveControlCoreTests(unittest.TestCase):

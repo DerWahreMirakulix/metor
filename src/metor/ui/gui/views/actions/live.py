@@ -4,6 +4,7 @@ from collections.abc import Callable
 
 from kivy.uix.boxlayout import BoxLayout
 
+from metor.core.api import Delivery
 from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.widgets import Action, Label
 from metor.ui.gui.widgets.sheet import confirm
@@ -15,6 +16,8 @@ def live_context_actions(
     body: BoxLayout,
     dismiss: Callable[[], None],
     refresh: Callable[[], None],
+    *,
+    primary_controls: bool = True,
 ) -> None:
     """Builds current-state actions while preserving the originally selected peer.
 
@@ -24,6 +27,7 @@ def live_context_actions(
         body: Native scrolling menu body.
         dismiss: Closes the existing menu before another explicit interaction.
         refresh: Presents admitted action state before any asynchronous result.
+        primary_controls: Includes connection controls only when no header owns them.
     Returns:
         None
     """
@@ -34,7 +38,11 @@ def live_context_actions(
         else None
     )
     pending = entry.pending_outbound_count if entry else 0
-    busy = controller.state.busy or controller.live.pending is not None
+    busy = (
+        controller.state.busy
+        or controller.live.pending is not None
+        or bool(controller.live.stop_status(peer))
+    )
 
     def end() -> None:
         """Ends only the originally displayed logical context or calling attempt.
@@ -71,7 +79,7 @@ def live_context_actions(
         entry and (entry.session_state == 'connected' or entry.recovery_eligible)
     )
     calling = bool(entry and entry.outbound_attempt_id and not active)
-    if active or calling:
+    if primary_controls and (active or calling):
         body.add_widget(
             Action(
                 'Cancel Live' if calling else 'End Live',
@@ -128,11 +136,15 @@ def live_context_actions(
             None
         """
         dismiss()
-        if entry is not None and entry.unseen_count:
+        if (
+            entry is not None
+            and entry.unseen_count
+            or controller.state.drafts.get((peer, Delivery.LIVE))
+        ):
             confirm(
                 controller,
-                'Close Live',
-                'Close this ended Live conversation and remove its local unread items and transcript. Drops and saved contacts remain.',
+                'Remove Live conversation',
+                'Remove this ended Live conversation, its unread items, transcript and unsent text draft. Drops and saved contacts remain.',
                 lambda: controller.live.close_context(peer),
             )
         else:
@@ -152,9 +164,31 @@ def live_context_actions(
         or entry.session_state == 'disconnected'
         and not entry.recovery_eligible
     )
-    if ended:
-        body.add_widget(Action('Reconnect', reconnect, disabled=busy))
-        body.add_widget(Action('Close Live', close, disabled=busy or bool(pending)))
+    retained = (
+        entry is not None
+        or any(
+            item.peer == peer and item.delivery is Delivery.LIVE
+            for item in controller.transcript.items.values()
+        )
+        or bool(controller.state.drafts.get((peer, Delivery.LIVE)))
+    )
+    if controller.live.idle(peer) and retained and primary_controls:
+        body.add_widget(
+            Action(
+                'Reconnect Live',
+                reconnect,
+                disabled=busy or not controller.live.retry_ready(peer),
+            )
+        )
+    if ended and retained:
+        body.add_widget(
+            Action(
+                'Remove Live conversation',
+                close,
+                tone='danger',
+                disabled=busy or bool(pending),
+            )
+        )
         if pending:
             body.add_widget(
                 Label(

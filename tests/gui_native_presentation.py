@@ -21,6 +21,7 @@ from kivy.clock import Clock
 from kivy.core.window import Window
 from kivy.metrics import Metrics, dp
 from kivy.uix.boxlayout import BoxLayout
+from gui_native_notifications import exercise_notification_actions
 from gui_native_projections import exercise_projection_reuse
 
 from metor.client import FrontendHost, FrontendLaunchContext
@@ -55,7 +56,7 @@ def exercise_feedback_layout(
         profile='Simulator',
         onion='',
         epoch='simulator',
-        contacts=[ContactEntry('Contact with a longer name', 'feedback-peer')],
+        contacts=[ContactEntry('Feedback', 'feedback-peer')],
     )
     state.navigate(Route('V08', 'feedback-peer', Delivery.DROP))
     state.status = (
@@ -89,6 +90,9 @@ def exercise_feedback_layout(
         assert overlay.card.x >= anchor.x and overlay.card.right <= anchor.right
         assert overlay.card.y >= anchor.y and overlay.card.top <= anchor.top
         assert overlay.dismiss.height == dp(Geometry.TARGET)
+        assert overlay.dismiss.y - overlay.card.y >= dp(12) - dp(1)
+        assert overlay.card.top - overlay.dismiss.top >= dp(12) - dp(1)
+        assert overlay.card.right - overlay.dismiss.right >= dp(12) - dp(1)
         assert overlay.message.height > overlay.message_viewport.height
         assert overlay.card.y >= app.input_dock.keyboard.top
         assert app.root is not None
@@ -113,7 +117,7 @@ def exercise_feedback_layout(
         assert app.shell is not None and app.feedback_overlay is not None
         assert app.input_dock is not None
         overlay, anchor = app.feedback_overlay, app.shell.feedback_anchor()
-        assert anchor is not None and anchor.height < dp(Geometry.TARGET)
+        assert anchor is not None and anchor.height < dp(Geometry.TARGET + 24)
         assert overlay.card.parent is None
         assert ActionSheet.current is None
         assert state.feedback.visible()
@@ -353,7 +357,14 @@ def main() -> None:
         """
         assert app.shell is not None and app.viewport is not None
         labels = [widget for widget in app.shell.walk() if isinstance(widget, Label)]
-        name = next(widget for widget in labels if widget.text == alias)
+        name = next((widget for widget in labels if widget.text == alias), None)
+        assert name is not None, (
+            controller.state.route,
+            controller.state.covered,
+            [widget.text for widget in labels],
+            app.shell.children,
+            app.shell._foreground_key,
+        )
         assert Path(name.font_name).name == 'DejaVuSans-Bold.ttf'
         assert name.texture is not None and name.texture.width > 0
         field = TextField(text=alias)
@@ -368,7 +379,8 @@ def main() -> None:
             if isinstance(widget, IconAction)
             and widget.accessible_name.startswith('Notifications')
         )
-        icon._pointer(Window, icon.to_window(*icon.center))
+        Window.mouse_pos = icon.to_window(*icon.center)
+        icon._pointer(Window, Window.mouse_pos)
         assert icon._hovered
         icon.tooltip.cancel()
         icon.tooltip._show(0)
@@ -385,7 +397,8 @@ def main() -> None:
                 None
             """
             assert app.root is not None and app.shell is not None
-            icon._pointer(Window, icon.to_window(*icon.center))
+            Window.mouse_pos = icon.to_window(*icon.center)
+            icon._pointer(Window, Window.mouse_pos)
             icon.tooltip.cancel()
             icon.tooltip._show(0)
             assert icon.tooltip.visible
@@ -405,13 +418,18 @@ def main() -> None:
                 app,
                 args.output,
                 lambda: exercise_projection_reuse(
-                    app, lambda: exercise_sheet_refresh(app, app.stop)
+                    app,
+                    lambda: exercise_notification_actions(
+                        app,
+                        args.output,
+                        lambda: exercise_sheet_refresh(app, app.stop),
+                    ),
                 ),
             )
 
         Clock.schedule_once(capture_and_cover, 0)
 
-    Clock.schedule_once(inspect, 1.0)
+    Clock.schedule_once(lambda _elapsed: Clock.schedule_once(inspect, 0), 1.0)
     with patch('metor.ui.gui.app.create_desktop_lifecycle_source', return_value=None):
         app.run()
 

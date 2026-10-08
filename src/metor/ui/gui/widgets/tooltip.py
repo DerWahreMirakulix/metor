@@ -100,7 +100,11 @@ class PointerTooltip:
         """
         self._pending = None
         owner = self.owner
-        if owner.disabled or not owner._hovered or owner.get_root_window() is None:
+        if (
+            owner.disabled
+            or not owner._hovered
+            or not owner._pointer_hit(Window.mouse_pos)
+        ):
             self.cancel()
             return
         root: Widget = owner

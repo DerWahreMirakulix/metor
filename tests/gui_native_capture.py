@@ -48,7 +48,11 @@ from gui_native_purge import configure_purge
 from gui_native_render import capture_viewport
 from gui_native_responsive import exercise_responsive
 from gui_native_root import exercise_root_navigation, exercise_root_refresh
-from gui_native_settings import exercise_setting_editor, exercise_setting_keyboard
+from gui_native_settings import (
+    exercise_setting_editor,
+    exercise_setting_keyboard,
+    exercise_settings_loading,
+)
 from gui_native_timeout import exercise_timeout
 from kivy.clock import Clock
 from kivy.core.clipboard import Clipboard
@@ -1024,6 +1028,11 @@ def main() -> None:
                     return
                 if args.view == 'setting_editor':
                     exercise_setting_editor(
+                        app, lambda: Clock.schedule_once(capture, 0.3)
+                    )
+                    return
+                if args.view == 'settings':
+                    exercise_settings_loading(
                         app, lambda: Clock.schedule_once(capture, 0.3)
                     )
                     return

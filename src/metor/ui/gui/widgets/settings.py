@@ -32,6 +32,7 @@ class SettingRow(Action):
             None
         """
         super().__init__(title, callback, surface='surface', tone='text', **kwargs)
+        self.focus_key = ('setting', title)
         self.remove_widget(self.label)
         self.padding = (dp(20), dp(16))
         self.spacing = dp(12)

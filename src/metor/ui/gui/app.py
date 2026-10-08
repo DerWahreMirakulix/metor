@@ -289,6 +289,7 @@ class MetorApp(App):
         Returns:
             None
         """
+        PointerTooltip.clear_all()
         self.controller.security.activity()
 
     def _keyboard(self, _window: object, key: int, *_args: object) -> bool:

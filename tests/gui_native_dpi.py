@@ -273,7 +273,19 @@ def main() -> None:
         assert peer is not None and peer.route == state.route
         assert peer.composer.entry.text == 'DPI draft'
         assert peer.composer.entry.focus
-        assert abs(peer.header.height - dp(Geometry.TARGET)) <= 1
+        assert abs(peer.header.height - peer.header.minimum_height) <= 1
+        assert len(peer.header.children) == 2
+        assert all(
+            row.height >= dp(Geometry.TARGET) - 1 for row in peer.header.children
+        )
+        assert (
+            abs(
+                peer.header.height
+                - sum(row.height for row in peer.header.children)
+                - peer.header.spacing
+            )
+            <= 1
+        )
         assert Window.minimum_width == Geometry.MIN_WIDTH
         assert Window.minimum_height == Geometry.MIN_HEIGHT + 24
         assert (shell._master is not None) is expected_wide

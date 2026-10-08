@@ -133,6 +133,7 @@ class SecurityController:
         state.status = 'Locking…'
         state.snapshot = None
         state.preferences = None
+        controller.live.cover()
         controller.core_settings.cover()
         controller.history.cover()
         controller.state.secondary_scroll.clear()

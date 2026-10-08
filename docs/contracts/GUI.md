@@ -103,6 +103,11 @@ DROP sending before LIVE, history, focus, navigation and LIVE delivery. First-dr
 probes check immediate connection feedback before Core acknowledgment, retained
 DROP content on tab changes and measured header alignment. Real peer rejection
 and an unreachable test route exercise actionable connection failures and retry.
+An outgoing Cancel is held before qualified Core execution to check disabled
+`Cancelling Live…` on its first draw and suppression of repeated clicks. Settings →
+Profiles → My contact opens with one native click; Back returns through the
+same hierarchy. At desktop size, DROP/LIVE switching keeps Settings open and
+one sidebar conversation click opens its detail.
 An actual Terminal subprocess exchanges text with the GUI through the same Core
 peer path; send failures retain the draft with a local explanation:
 
@@ -373,7 +378,10 @@ privacy-permitted facts; it is never reconstructed from unread totals.
 Settings present user concepts under Live, Privacy, Device, Profiles, and
 Advanced. Core descriptors own types, limits, scope, effective values, and
 policy. The GUI shows only supported controls and displays failed updates as
-failures. Accept calls without unlocking, lock notification privacy,
+failures. Initial supported service and device metadata resolve behind one
+loading state before the complete settings layout becomes interactive. Later
+reloads retain visible controls, scroll position and keyboard focus.
+Accept calls without unlocking, lock notification privacy,
 application idle timeout, profile-name visibility, keyboard layout, and pins are
 independent protected preferences. Accept calls without unlocking defaults Off;
 LIVE auto-accept never grants conversation audio. A profile password is the
@@ -502,8 +510,12 @@ navigating and cannot dismiss a privacy cover or accepted destructive work.
 Closing an action sheet removes its input surface immediately; an invisible
 closing animation cannot intercept the next foreground action.
 Master navigation returns Back to the active DROP/LIVE overview. Selection
-follows the foreground section; keyboard focus survives a repaint of that same
-route and clears when the route changes.
+of secondary header actions follows the foreground section; the master
+DROP/LIVE mode and its accent start action remain selected independently.
+Back leaves the current page and clears its list selection; the separate Cancel
+selection action stays within the list. Keyboard focus survives a repaint of
+that same route and clears when the route changes. Detached controls cannot
+activate from a delayed pointer or keyboard release.
 
 Pointer actions show hover and press feedback while preserving the current
 typing owner; keyboard navigation retains its visible focus ring. Recovery
@@ -549,7 +561,10 @@ conversation prompt. A peer opened from a contact picker returns to that picker;
 switching DROP/LIVE within the peer does not add a navigation step. Contacts,
 Notifications, and Settings replace the foreground detail,
 while authentication, restriction, profile transition, and purge cover the whole
-application. Incoming-call presentation cannot obscure or steal an existing
+application. Desktop master tabs stay available on secondary pages; selecting a
+tab changes the list while preserving the foreground page. Selecting a
+conversation or New Drop/Start Live opens its destination on the first click.
+Incoming-call presentation cannot obscure or steal an existing
 PTT owner. Confirmation and authentication sheets show the relevant current
 identity and consequence; stale asynchronous results cannot close a newer
 sheet or reveal an old profile.

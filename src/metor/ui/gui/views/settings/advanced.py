@@ -12,6 +12,7 @@ from metor.ui.gui.widgets.sheet import ActionSheet
 
 # Local Package Imports
 from .descriptors import core_settings_group
+from .loading import show_initial_loading
 
 
 def advanced_body(controller: GuiController) -> BoxLayout:
@@ -24,6 +25,8 @@ def advanced_body(controller: GuiController) -> BoxLayout:
     """
     body = BoxLayout(orientation='vertical', spacing=dp(12), size_hint_y=None)
     body.bind(minimum_height=body.setter('height'))
+    if show_initial_loading(controller, body):
+        return body
     body.add_widget(
         Action(
             'Raw activity history',

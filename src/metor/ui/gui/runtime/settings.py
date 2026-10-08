@@ -19,6 +19,9 @@ if TYPE_CHECKING:
     from .controller import GuiController
 
 
+_READ_ERROR = 'Current service settings could not be read. Retry when available.'
+
+
 @dataclass(frozen=True)
 class SettingMutation:
     """One explicitly saved profile override and its original displayed expectation."""
@@ -45,6 +48,7 @@ class CoreSettings:
         self.pending: SettingMutation | None = None
         self.refresh_needed = True
         self.loaded = False
+        self.initial_read_complete = False
         self.last_read_success = False
         self.error = ''
         self.revision = 0
@@ -131,6 +135,7 @@ class CoreSettings:
         if self.controller.state.covered:
             self.cover()
             return True
+        self.initial_read_complete = True
         event = update.event
         if (
             isinstance(event, ConfigListDataEvent)
@@ -140,15 +145,15 @@ class CoreSettings:
             self.entries = tuple(event.entries)
             self.loaded = True
             self.last_read_success = True
+            if self.error == _READ_ERROR:
+                self.error = ''
             if self._unknown:
                 self.pending = None
                 self._unknown = False
             self.revision += 1
         else:
             self.last_read_success = False
-            self.error = (
-                'Current service settings could not be read. Retry when available.'
-            )
+            self.error = _READ_ERROR
             self.revision += 1
         return True
 
@@ -172,6 +177,7 @@ class CoreSettings:
         """
         self.entries = ()
         self.loaded = False
+        self.initial_read_complete = False
         self.last_read_success = False
         self.refresh_needed = True
         self.revision += 1

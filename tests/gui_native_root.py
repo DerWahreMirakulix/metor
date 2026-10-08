@@ -9,6 +9,7 @@ from kivy.uix.scrollview import ScrollView
 
 from metor.core.api import Delivery, DropConversationSummaryEntry
 from metor.ui.gui.app import MetorApp
+from metor.ui.gui.state import Route
 from metor.ui.gui.widgets import Action, Label
 
 
@@ -50,11 +51,14 @@ def exercise_root_navigation(app: MetorApp, complete: Callable[[], None]) -> Non
     assert state.route.view == 'V12' and shell._contacts_panel is not None
     if shell.width >= dp(960):
         assert root.header_actions['V12'].surface == 'dropSurface'
-        assert root.tabs[Delivery.DROP].surface == 'surface'
+        assert root.tabs[Delivery.DROP].surface == 'dropSurface'
+        assert root.new.surface == 'drop' and root.new._tone == 'onAccent'
         root.tabs[Delivery.LIVE].dispatch('on_release')
         shell.render()
         assert state.route.view == 'V12' and state.root_delivery is Delivery.LIVE
         assert shell._contacts_panel is not None
+        assert shell._root_panel.tabs[Delivery.LIVE].surface == 'liveSurface'
+        assert shell._root_panel.new.surface == 'live'
     shell._contacts_panel.back.dispatch('on_release')
     shell.render()
     if shell.width >= dp(960):
@@ -94,7 +98,7 @@ def exercise_root_navigation(app: MetorApp, complete: Callable[[], None]) -> Non
         notifications.dispatch('on_release')
         shell.render()
         assert state.route.view == 'V16'
-        assert not root.new.focus and root.new.surface == 'raised'
+        assert not root.new.focus and root.new.surface == 'live'
         assert notifications.surface == 'dropSurface'
         assert 'current view' in notifications.accessible_name
         app.controller.back()
@@ -112,9 +116,65 @@ def exercise_root_navigation(app: MetorApp, complete: Callable[[], None]) -> Non
         assert 'current view' in settings.accessible_name
         assert not root.header_actions['V16'].focus
         assert root.header_actions['V16'].surface == 'raised'
+        assert root.tabs[Delivery.LIVE].surface == 'liveSurface'
+        assert root.new.surface == 'live' and root.new._tone == 'onAccent'
+        detail = shell._detail
+        root.tabs[Delivery.DROP].dispatch('on_release')
+        shell.render()
+        root = shell._root_panel
+        assert state.route.view == 'V17' and state.root_delivery is Delivery.DROP
+        assert shell._detail is detail
+        assert root.tabs[Delivery.DROP].surface == 'dropSurface'
+        assert root.tabs[Delivery.LIVE].surface == 'surface'
+        assert root.new.label.text == 'New Drop' and root.new.surface == 'drop'
+        root.tabs[Delivery.LIVE].dispatch('on_release')
+        shell.render()
+        assert state.route.view == 'V17' and shell._detail is detail
         app.controller.back()
         shell.render()
         assert_overview('V07')
+
+        root = shell._root_panel
+        root.header_actions['V17'].dispatch('on_release')
+        shell.render()
+        app.controller.navigate(Route('V20'))
+        shell.render()
+        app.controller.poll()
+        my_contact = next(
+            widget
+            for widget in shell._detail.walk(restrict=True)
+            if isinstance(widget, Action) and widget.accessible_name == 'My contact'
+        )
+        my_contact.dispatch('on_release')
+        assert state.route.view == 'V15'
+        assert app.controller.poll()
+        shell.render()
+        identity_detail = shell._detail
+        assert identity_detail is not None
+        assert any(
+            isinstance(widget, Label) and widget.text == 'My contact'
+            for widget in identity_detail.walk(restrict=True)
+        )
+        shell.render()
+        assert shell._detail is identity_detail
+        app.controller.back()
+        shell.render()
+        assert state.route.view == 'V20'
+        app.controller.back()
+        shell.render()
+        assert state.route.view == 'V17'
+        root = shell._root_panel
+        root.tabs[Delivery.DROP].dispatch('on_release')
+        shell.render()
+        root = shell._root_panel
+        row = next(iter(root.rows.values()))
+        row.action.dispatch('on_release')
+        shell.render()
+        assert state.route == Route('V08', row.entry.peer, Delivery.DROP)
+        assert shell._peer_panel is not None
+        app.controller.back()
+        shell.render()
+        assert_overview('V06')
 
     shell._root_panel.tabs[Delivery.DROP].dispatch('on_release')
     shell.render()

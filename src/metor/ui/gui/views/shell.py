@@ -165,12 +165,20 @@ class Shell(BoxLayout):
             else None
         )
         secondary_continuity = (
-            SecondaryMetricContinuity.capture(self._detail, self.controller)
-            if metrics_changed
-            and not state.covered
+            SecondaryMetricContinuity.capture(
+                self._detail,
+                self.controller,
+                preserve_scroll=metrics_changed or state.route.view != 'V18',
+            )
+            if not state.covered
             and self._detail is not None
             and previous_route == (state.generation, state.route)
             and state.route.view not in {'V06', 'V07', 'V08', 'V09', 'V11', 'V12'}
+            and (
+                metrics_changed
+                or state.route.view
+                in {'V13', 'V14', 'V15', 'V16', 'V17', 'V18', 'V19', 'V20'}
+            )
             else None
         )
         metric_rebuild = (
@@ -224,14 +232,7 @@ class Shell(BoxLayout):
             and self._peer_panel is not None
         ):
             self._peer_panel.update()
-            master_key = self._root_key()
-            if wide and master_key != self._master_key and self._master is not None:
-                self.remove_widget(self._master)
-                self._master = self._root(root_continuity)
-                self._master.size_hint_x = None
-                self._master.width = dp(Geometry.MASTER)
-                self.add_widget(self._master, index=len(self.children))
-                self._master_key = master_key
+            self._update_master(root_continuity)
             return
         if (
             not state.covered
@@ -241,27 +242,49 @@ class Shell(BoxLayout):
             and self._contacts_panel is not None
         ):
             self._contacts_panel.update()
-            master_key = self._root_key()
-            if wide and master_key != self._master_key and self._master is not None:
-                self.remove_widget(self._master)
-                self._master = self._root(root_continuity)
-                self._master.size_hint_x = None
-                self._master.width = dp(Geometry.MASTER)
-                self.add_widget(self._master, index=len(self.children))
-                self._master_key = master_key
+            self._update_master(root_continuity)
             return
         private = (
             state.covered
             or state.route.view
-            in {'V02', 'V03', 'V04', 'V12', 'V13', 'V17', 'V18', 'V19', 'V20', 'V21'}
+            in {
+                'V02',
+                'V03',
+                'V04',
+                'V12',
+                'V13',
+                'V14',
+                'V15',
+                'V16',
+                'V17',
+                'V18',
+                'V19',
+                'V20',
+                'V21',
+            }
             or prompt is not None
         )
         if private:
+            view = state.route.view
+            settings_view = view in {'V17', 'V19'}
+            covered_view = state.covered or prompt is not None
+            notices = self.controller.notifications.store
+            if view == 'V16' and not covered_view:
+                notices.mark_seen()
             key = (
                 state.generation,
                 state.route,
-                id(state.snapshot)
-                if state.route.view in {'V11', 'V12', 'V15'}
+                state.snapshot.onion if view == 'V15' and state.snapshot else None,
+                (
+                    notices.revision,
+                    notices.selecting,
+                    frozenset(notices.selected),
+                    tuple(
+                        (notice.peer, self.controller.contacts.alias(notice.peer))
+                        for notice in notices.items.values()
+                    ),
+                )
+                if view == 'V16' and not covered_view
                 else None,
                 (
                     controller_form.serial,
@@ -269,27 +292,44 @@ class Shell(BoxLayout):
                     controller_form.unknown,
                     controller_form.pending,
                 )
-                if (controller_form := self.controller.contacts.form)
+                if view == 'V13' and (controller_form := self.controller.contacts.form)
                 else None,
-                state.busy,
-                state.status if state.covered or prompt is not None else None,
+                state.busy if view not in {'V14', 'V15', 'V16'} else None,
+                state.status if covered_view else None,
                 id(prompt),
-                id(self.controller.security.restriction),
-                state.preferences.preferences_revision if state.preferences else None,
-                self.controller.core_settings.revision,
-                self.controller.history.revision,
-                self.controller.profiles.revision,
-                (self.controller.purge.title, self.controller.purge.detail),
+                id(self.controller.security.restriction) if covered_view else None,
+                state.preferences.preferences_revision
+                if state.preferences
+                and (covered_view or settings_view or view == 'V04')
+                else None,
+                self.controller.preferences.last_error if settings_view else None,
+                state.capabilities if settings_view or view == 'V18' else None,
+                self.controller.core_settings.revision if settings_view else None,
+                self.controller.history.revision if view == 'V18' else None,
+                self.controller.profiles.revision
+                if covered_view or view in {'V02', 'V03', 'V20'}
+                else None,
+                (self.controller.purge.title, self.controller.purge.detail)
+                if view in {'V21', 'V22'}
+                else None,
                 (
                     self.controller.device.phase,
                     self.controller.device.title,
                     self.controller.device.detail,
                     self.controller.device.progress,
-                    self.controller.device.battery_status,
-                ),
-                id(self.controller.voice.routes.endpoints),
-                self.controller.voice.routes.scanned,
-                self.controller.voice.headset_confirmed,
+                )
+                if view in {'V21', 'V22'}
+                else None,
+                self.controller.device.battery_status if view == 'V17' else None,
+                (
+                    self.controller.device.settings.loaded,
+                    self.controller.device.settings.pending,
+                    self.controller.device.settings.feedback,
+                    id(self.controller.device.settings.descriptors),
+                    id(self.controller.device.settings.values),
+                )
+                if view == 'V17'
+                else None,
                 wide
                 if not state.covered
                 and prompt is None
@@ -297,6 +337,7 @@ class Shell(BoxLayout):
                 else None,
             )
             if key == self._private_render_key:
+                self._update_master(root_continuity)
                 return
             self._private_render_key = key
         else:
@@ -327,6 +368,12 @@ class Shell(BoxLayout):
         for retained in (retained_peer, retained_contacts):
             if retained is not None and retained.parent is not None:
                 retained.parent.remove_widget(retained)
+        if self._detail is not None:
+            for widget in self._detail.walk(restrict=True):
+                if isinstance(widget, Action):
+                    widget.cancel_input()
+                elif isinstance(widget, TextField):
+                    widget.focus = False
         self.clear_widgets()
         self._peer_key = None
         self._peer_panel = None
@@ -533,6 +580,24 @@ class Shell(BoxLayout):
             state.root_pages.get(state.root_delivery, 0),
             tuple(conversation_rows(self.controller, state.root_delivery)),
         )
+
+    def _update_master(self, continuity: RootContinuity | None) -> None:
+        """Refreshes wide master content independently of the foreground page.
+
+        Args:
+            continuity: Current master focus and scroll, if its context is unchanged.
+        """
+        if self._master is None:
+            return
+        key = self._root_key()
+        if key == self._master_key:
+            return
+        self.remove_widget(self._master)
+        self._master = self._root(continuity)
+        self._master.size_hint_x = None
+        self._master.width = dp(Geometry.MASTER)
+        self.add_widget(self._master, index=len(self.children))
+        self._master_key = key
 
     def _root(self, continuity: RootContinuity | None = None) -> BoxLayout:
         """Builds a bounded root page without replacing an existing wide peer pane.

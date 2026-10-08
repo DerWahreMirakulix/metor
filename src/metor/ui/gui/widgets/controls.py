@@ -213,13 +213,33 @@ class Action(FocusBehavior, ButtonBehavior, Panel):  # pyright: ignore[reportInc
         Returns:
             None
         """
-        hovered = self.get_root_window() is not None and self.collide_point(
-            *self.to_widget(*position, relative=False)
-        )
+        hovered = self._pointer_hit(position)
         if hovered == self._hovered:
             return
         self._hovered = hovered
         self._feedback()
+
+    def _pointer_hit(self, position: tuple[float, float]) -> bool:
+        """Tests an attached target against each enclosing scrolling viewport.
+
+        Args:
+            position: Native pointer coordinates in the window.
+        Returns:
+            bool: Whether the visible portion of this control owns the pointer.
+        """
+        if self.get_root_window() is None or not self.collide_point(
+            *self.to_widget(*position, relative=False)
+        ):
+            return False
+        ancestor = self.parent
+        while ancestor is not None and ancestor is not Window:
+            if isinstance(ancestor, ScrollView):
+                left, bottom = ancestor.to_window(ancestor.x, ancestor.y)
+                right, top = ancestor.to_window(ancestor.right, ancestor.top)
+                if not (left <= position[0] <= right and bottom <= position[1] <= top):
+                    return False
+            ancestor = ancestor.parent
+        return True
 
     def on_touch_down(  # pyright: ignore[reportIncompatibleMethodOverride]
         self, touch: MotionEvent
@@ -239,13 +259,16 @@ class Action(FocusBehavior, ButtonBehavior, Panel):  # pyright: ignore[reportInc
         return handled
 
     def _release(self, *_args: object) -> None:
-        """Invokes only an enabled deliberate release.
+        """Invokes only an enabled deliberate release on an attached target.
 
         Args:
             _args: Native release event.
         Returns:
             None
         """
+        if self.get_root_window() is None:
+            self.cancel_input()
+            return
         if not self.disabled:
             self._activate()
 
@@ -296,6 +319,9 @@ class Action(FocusBehavior, ButtonBehavior, Panel):  # pyright: ignore[reportInc
         Returns:
             bool: Whether activation input was handled.
         """
+        if self.get_root_window() is None:
+            self.cancel_input()
+            return False
         if (
             self.focus
             and not self.disabled
@@ -347,6 +373,9 @@ class Action(FocusBehavior, ButtonBehavior, Panel):  # pyright: ignore[reportInc
         Returns:
             bool: Whether the event was handled.
         """
+        if self.get_root_window() is None:
+            self.cancel_input()
+            return False
         if keycode[1] in ('spacebar', 'enter'):
             armed, self._keyboard_armed = self._keyboard_armed, False
             self.state = 'normal'

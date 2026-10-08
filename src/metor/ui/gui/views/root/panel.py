@@ -158,19 +158,15 @@ class RootPanel(BoxLayout):
             ) + (', current view' if selected else '')
             action._feedback()
         for delivery, action in self.tabs.items():
-            selected = (
-                state.route.view in {'V06', 'V07', 'V08', 'V09', 'V11'}
-                and delivery is self.delivery
-            )
+            selected = delivery is self.delivery
             action.surface = delivery.value + 'Surface' if selected else 'surface'
             action.accessible_name = delivery.value.upper() + (
                 ', current mode' if selected else ''
             )
             action._feedback()
         new_view = state.route.view == 'V11' and state.route.delivery is self.delivery
-        new_selected = state.route.view in {'V06', 'V07'} or new_view
-        self.new.surface = self.delivery.value if new_selected else 'raised'
-        self.new._tone = 'onAccent' if new_selected else 'text'
+        self.new.surface = self.delivery.value
+        self.new._tone = 'onAccent'
         self.new.accessible_name = self.new.label.text + (
             ', current view' if new_view else ''
         )

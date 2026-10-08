@@ -2,20 +2,183 @@
 
 from collections.abc import Callable
 from dataclasses import replace
-from unittest.mock import patch
+import threading
+import time
+from unittest.mock import Mock, patch
 
 from kivy.clock import Clock
 from kivy.base import EventLoop
 from kivy.core.window import Window
 from kivy.input.providers.mouse import MouseMotionEvent
 from kivy.metrics import dp
+from kivy.uix.scrollview import ScrollView
 
-from metor.core.api import SettingSnapshotEntry
+from metor.client.platform import (
+    DeviceSettingDescriptor,
+    DeviceSettingKind,
+    DeviceSettingResult,
+    DeviceSettingStatus,
+)
+from metor.core.api import ConfigListDataEvent, SettingSnapshotEntry
 from metor.ui.gui.app import MetorApp
+from metor.ui.gui.runtime.device.settings import DeviceSettings
+from metor.ui.gui.state.mailbox import Update
 from metor.ui.gui.views.settings.editor import SettingEditor
-from metor.ui.gui.widgets import Action
+from metor.ui.gui.widgets import Action, Label, SettingRow
 from metor.ui.gui.widgets.sheet import ActionSheet
 from metor.ui.gui.widgets.keyboard import KeyboardKey
+
+
+def exercise_settings_loading(app: MetorApp, complete: Callable[[], None]) -> None:
+    """Publishes delayed settings together and preserves focus/scroll on readback.
+
+    This fixture uses the native event loop and a controlled device worker, with
+    synthetic public Core metadata and no real profile or hardware writes.
+
+    Args:
+        app: Running native settings fixture with protected preferences.
+        complete: Continuation after initial layout and refreshed-focus checks.
+    Returns:
+        None
+    """
+    assert app.shell is not None
+    shell, controller = app.shell, app.controller
+    state = controller.state
+    assert state.preferences is not None
+    state.capabilities = state.capabilities | {'safe_setting_descriptors'}
+    core = controller.core_settings
+    core.initial_read_complete = True
+    core.loaded = True
+    core.error = 'This setting changed elsewhere.'
+    core.cover()
+    assert not core.initial_read_complete and not core.loaded and core.error
+    assert not controller.device.settings.available
+    shell.render()
+    assert any(
+        isinstance(widget, Label) and widget.text == 'Loading settings…'
+        for widget in shell.walk()
+    )
+    assert not any(isinstance(widget, SettingRow) for widget in shell.walk())
+    release = threading.Event()
+    descriptor = DeviceSettingDescriptor(
+        'haptic_feedback', 'Haptic feedback', DeviceSettingKind.BOOLEAN
+    )
+
+    def device_read(_key: str) -> DeviceSettingResult:
+        """Holds one synthetic metadata read until the visible loading probe."""
+        if not release.wait(5):
+            raise TimeoutError('Synthetic device read was not released')
+        return DeviceSettingResult(DeviceSettingStatus.APPLIED, True)
+
+    controller.device.settings.close()
+    device = DeviceSettings(Mock(describe=lambda: (descriptor,), read=device_read))
+    controller.device.settings = device
+    assert device.refresh()
+    shell.render()
+    assert any(
+        isinstance(widget, Label) and widget.text == 'Loading settings…'
+        for widget in shell.walk()
+    )
+    assert not any(isinstance(widget, SettingRow) for widget in shell.walk())
+    event = ConfigListDataEvent(
+        'daemon',
+        'synthetic-instance',
+        [
+            SettingSnapshotEntry(
+                'daemon.auto_reconnect',
+                'True',
+                'global',
+                'Core Daemon',
+                value_type='bool',
+                display_name='Automatically reconnect Live',
+                display_group='Live',
+                editable=True,
+                scope='profile',
+            )
+        ],
+    )
+    controller.core_settings.install(
+        Update(state.generation, 'core-settings:read', event)
+    )
+    assert (
+        core.initial_read_complete and core.error == 'This setting changed elsewhere.'
+    )
+    shell.render()
+    assert not any(isinstance(widget, SettingRow) for widget in shell.walk())
+    release.set()
+    deadline = time.monotonic() + 5
+
+    def after_layout(callback: Callable[[float], None], frames: int = 5) -> None:
+        """Lets nested native measurements settle before comparing focus/geometry."""
+        if frames:
+            Clock.schedule_once(lambda _elapsed: after_layout(callback, frames - 1), 0)
+        else:
+            callback(0)
+
+    def ready(_elapsed: float) -> None:
+        """Waits for the real device worker result and displays both sources once."""
+        device.poll()
+        if not device.loaded:
+            assert time.monotonic() < deadline, 'Synthetic device read did not settle'
+            Clock.schedule_once(ready, 0)
+            return
+        shell.render()
+        rows = [widget for widget in shell.walk() if isinstance(widget, SettingRow)]
+        assert any(row.focus_key == ('setting', 'Haptic feedback') for row in rows)
+        assert any(
+            row.focus_key == ('setting', 'Automatically reconnect Live') for row in rows
+        )
+        assert not any(
+            isinstance(widget, Label) and widget.text == 'Loading settings…'
+            for widget in shell.walk()
+        )
+        after_layout(refresh)
+
+    def refresh(_elapsed: float) -> None:
+        """Changes a displayed value while preserving the focused row identity."""
+        timeout = next(
+            widget
+            for widget in shell.walk()
+            if isinstance(widget, SettingRow)
+            and widget.focus_key == ('setting', 'Application timeout')
+        )
+        timeout.focus = True
+        scroll = next(
+            widget for widget in shell._detail.walk() if isinstance(widget, ScrollView)
+        )
+        scroll.scroll_y = 0.4
+        current = state.preferences
+        assert current is not None
+        state.preferences = replace(
+            current,
+            preferences_revision=current.preferences_revision + 1,
+            preferences=replace(current.preferences, idle_seconds=120),
+        )
+        controller.core_settings.reload()
+        shell.render()
+        assert not any(
+            isinstance(widget, Label) and widget.text == 'Loading settings…'
+            for widget in shell.walk()
+        )
+        after_layout(verify)
+
+    def verify(_elapsed: float) -> None:
+        """Checks restored native focus and normalized viewport after repaint."""
+        timeout = next(
+            widget
+            for widget in shell.walk()
+            if isinstance(widget, SettingRow)
+            and widget.focus_key == ('setting', 'Application timeout')
+        )
+        scroll = next(
+            widget for widget in shell._detail.walk() if isinstance(widget, ScrollView)
+        )
+        assert timeout.focus and '120 s' in timeout.accessible_name
+        assert abs(scroll.scroll_y - 0.4) < 0.001
+        timeout.focus = False
+        complete()
+
+    Clock.schedule_once(ready, 0)
 
 
 def exercise_setting_editor(app: MetorApp, complete: Callable[[], None]) -> None:

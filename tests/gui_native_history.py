@@ -69,9 +69,12 @@ def exercise_history(app: MetorApp, complete: Callable[[], None]) -> None:
         None
     """
     scroll = next(
-        widget for widget in app.shell.walk() if isinstance(widget, ScrollView)
+        widget
+        for widget in app.shell._detail.walk(restrict=True)
+        if isinstance(widget, ScrollView)
     )
     scroll.scroll_y = 0
+    focused: Action | None = None
 
     def enter(action: Action) -> None:
         """Dispatches real native focus/keys without actual Core mutations.
@@ -158,29 +161,68 @@ def exercise_history(app: MetorApp, complete: Callable[[], None]) -> None:
         Clock.schedule_once(cancel, 0.3)
 
     def refreshed(_elapsed: float) -> None:
-        """Checks the rebuilt native scroll retains the previous visible position.
+        """Checks a real history repaint retains action focus and remembered scroll.
 
         Args:
             _elapsed: Native restore/layout delay.
         Returns:
             None
         """
-        nonlocal scroll
+        nonlocal scroll, focused
         scroll = next(
-            widget for widget in app.shell.walk() if isinstance(widget, ScrollView)
+            widget
+            for widget in app.shell._detail.walk(restrict=True)
+            if isinstance(widget, ScrollView)
         )
         assert abs(scroll.scroll_y) < 0.01
-        page(_elapsed)
+        replacement = next(
+            widget
+            for widget in app.shell._detail.walk(restrict=True)
+            if isinstance(widget, Action) and widget.accessible_name == 'Refresh newest'
+        )
+        assert focused is not None and replacement is not focused
+        assert not focused.focus and replacement.focus
+        focused = replacement
+        app.controller.state.secondary_scroll[app.controller.state.route] = 1.0
+        app.controller.history.revision += 1
+        app.refresh()
+        Clock.schedule_once(reset_scroll, 0.3)
+
+    def reset_scroll(_elapsed: float) -> None:
+        """Keeps a requested new-page scroll reset while restoring its action focus."""
+        nonlocal scroll
+        scroll = next(
+            widget
+            for widget in app.shell._detail.walk(restrict=True)
+            if isinstance(widget, ScrollView)
+        )
+        assert abs(scroll.scroll_y - 1) < 0.01
+        replacement = next(
+            widget
+            for widget in app.shell._detail.walk(restrict=True)
+            if isinstance(widget, Action) and widget.accessible_name == 'Refresh newest'
+        )
+        assert focused is not None and replacement is not focused
+        assert not focused.focus and replacement.focus
+        scroll.scroll_y = 0
+        Clock.schedule_once(page, 0.3)
 
     def refresh(_elapsed: float) -> None:
-        """Forces a background-status rebuild while the reader is at the bottom.
+        """Forces a metadata revision while the reader owns a bottom action.
 
         Args:
             _elapsed: Native layout delay.
         Returns:
             None
         """
-        app.controller.state.status = 'History readback available'
+        nonlocal focused
+        focused = next(
+            widget
+            for widget in app.shell._detail.walk(restrict=True)
+            if isinstance(widget, Action) and widget.accessible_name == 'Refresh newest'
+        )
+        focused.focus = True
+        app.controller.history.revision += 1
         app.refresh()
         Clock.schedule_once(refreshed, 0.3)
 

@@ -209,8 +209,8 @@ class PresentationTests(unittest.TestCase):
         state.back()
         self.assertEqual(state.route, Route('V07', delivery=Delivery.LIVE))
 
-    def test_back_cancels_list_selection_before_leaving_view(self) -> None:
-        """Visible and hardware Back share contact and notification selection semantics.
+    def test_back_leaves_lists_and_clears_their_selection(self) -> None:
+        """Visible and hardware Back navigate on the first press even during selection.
 
         Args:
             None
@@ -232,7 +232,7 @@ class PresentationTests(unittest.TestCase):
         controller.contacts.book.selecting = True
         controller.contacts.book.selected.add('peer')
         controller.back()
-        self.assertEqual(controller.state.route, Route('V12'))
+        self.assertEqual(controller.state.route, Route('V06'))
         self.assertFalse(controller.contacts.book.selecting)
         self.assertFalse(controller.contacts.book.selected)
 
@@ -240,11 +240,75 @@ class PresentationTests(unittest.TestCase):
         controller.notifications.store.selecting = True
         controller.notifications.store.selected.add((NoticeKind.DROP, 'peer'))
         controller.back()
-        self.assertEqual(controller.state.route, Route('V16'))
+        self.assertEqual(controller.state.route, Route('V06'))
         self.assertFalse(controller.notifications.store.selecting)
         self.assertFalse(controller.notifications.store.selected)
+
+    def test_poll_reports_navigation_without_waiting_for_a_core_result(self) -> None:
+        """Navigation-only callbacks request one repaint through the normal GUI tick."""
+        controller = GuiController(
+            FrontendLaunchContext('fixture', Mock()), simulator=True
+        )
+        controller.state.covered = False
+        controller.state.route = Route('V06')
+        controller.poll()
+        self.assertFalse(controller.poll())
+
+        controller.navigate(Route('V20'))
+        self.assertTrue(controller.poll())
+        self.assertFalse(controller.poll())
+        controller.navigate(Route('V15'))
+        self.assertTrue(controller.poll())
+        self.assertFalse(controller.poll())
+
+        controller.state.select_root_delivery(Delivery.LIVE)
+        self.assertTrue(controller.poll())
+        self.assertEqual(controller.state.route, Route('V15'))
+        self.assertFalse(controller.poll())
+        controller.back()
+        self.assertTrue(controller.poll())
+        self.assertEqual(controller.state.route, Route('V20'))
+        self.assertFalse(controller.poll())
+        controller.state.covered = True
+        controller.navigate(Route('V16'))
+        self.assertFalse(controller.poll())
+
+    def test_master_chat_navigation_leaves_secondary_on_first_action(self) -> None:
+        """Selecting a sidebar peer replaces the page and resets its nested Back path."""
+        controller = GuiController(
+            FrontendLaunchContext('fixture', Mock()), simulator=True
+        )
+        controller.state.covered = False
+        controller.state.route = Route('V06')
+        controller.navigate(Route('V17'), from_root=True)
+        controller.navigate(Route('V20'))
+        controller.navigate(Route('V15'))
+        peer = Route('V08', 'peer', Delivery.DROP)
+        controller.navigate(peer, from_root=True)
+        self.assertEqual(controller.state.route, peer)
+        self.assertEqual(controller.state.back_stack, [Route('V06')])
         controller.back()
         self.assertEqual(controller.state.route, Route('V06'))
+
+    def test_leaving_selected_lists_does_not_restore_an_old_selection(self) -> None:
+        """Forward navigation clears selection just as Back does, without a mutation."""
+        controller = GuiController(
+            FrontendLaunchContext('fixture', Mock()), simulator=True
+        )
+        controller.state.covered = False
+        for route in (Route('V12'), Route('V16')):
+            controller.navigate(route, from_root=True)
+            if route.view == 'V12':
+                controller.contacts.book.selecting = True
+                controller.contacts.book.selected.add('peer')
+            else:
+                controller.notifications.store.selecting = True
+                controller.notifications.store.selected.add((NoticeKind.DROP, 'peer'))
+            controller.navigate(Route('V17'), from_root=True)
+            self.assertFalse(controller.contacts.book.selecting)
+            self.assertFalse(controller.contacts.book.selected)
+            self.assertFalse(controller.notifications.store.selecting)
+            self.assertFalse(controller.notifications.store.selected)
 
     def test_navigation_has_no_communication_side_effect(self) -> None:
         """Peer LIVE, selectors and secondary routes never initiate calls."""

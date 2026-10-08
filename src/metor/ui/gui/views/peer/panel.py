@@ -216,6 +216,7 @@ class PeerView(BoxLayout):
                     body,
                     lambda: sheet.dismiss(animation=False),
                     self._refresh_connection,
+                    primary_controls=False,
                 )
 
         sheet = ActionSheet(
@@ -309,6 +310,7 @@ class PeerView(BoxLayout):
         )
         starting = controller.live.starting(peer or '')
         failure = controller.live.failure(peer or '')
+        stopping = controller.live.stop_status(peer or '')
         active = live is not None and (
             live.session_state == 'connected' or live.recovery_eligible
         )
@@ -332,6 +334,8 @@ class PeerView(BoxLayout):
         self.subtitle.text = (
             'Drop conversation'
             if self.route.delivery is Delivery.DROP
+            else stopping
+            if stopping
             else failure
             if failure
             else 'Changing route…'
@@ -348,14 +352,14 @@ class PeerView(BoxLayout):
         )
         control: LiveHeaderAction | None
         if self.route.delivery is Delivery.LIVE:
-            control = self.end if active or connecting else self.connect
+            control = self.end if active or connecting or stopping else self.connect
             available = (
                 active
                 or connecting
+                or bool(stopping)
                 or starting
                 or bool(failure)
-                or live is None
-                or live.session_state == 'disconnected'
+                or controller.live.idle(peer or '')
             )
             if not available:
                 control = None
@@ -373,11 +377,15 @@ class PeerView(BoxLayout):
             state.busy
             or controller.client is None
             or controller.live.pending is not None
+            or bool(stopping)
         )
         self.end.disabled = (
             self.end.disabled
             or 'qualified_live_control' not in state.capabilities
             or identity == (None, None)
+        )
+        self.end.label.text = self.end.accessible_name = stopping or (
+            'Cancel Live' if connecting else 'End Live'
         )
         self.connect.disabled = (
             self.connect.disabled

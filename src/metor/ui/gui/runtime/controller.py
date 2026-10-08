@@ -92,6 +92,11 @@ class GuiController:
         self._guard = threading.Lock()
         self._refresh_needed: bool = False
         self._messages_needed: bool = False
+        self._navigation_identity: tuple[int, Route, Delivery] = (
+            self.state.generation,
+            self.state.route,
+            self.state.root_delivery,
+        )
         self.text = TextController(self)
         self.drop = DropActions(self)
         self.live = LiveActions(self)
@@ -339,6 +344,11 @@ class GuiController:
             return
         previous = self.state.route
         if route != self.state.route:
+            if previous.view == 'V12' and self.contacts.book.selecting:
+                self.contacts.book.cancel_selection()
+            if previous.view == 'V16' and self.notifications.store.selecting:
+                self.notifications.store.selecting = False
+                self.notifications.store.selected.clear()
             self.voice.depart()
             self.playback.stop()
         self.state.navigate(route, from_root=from_root)
@@ -362,7 +372,7 @@ class GuiController:
             self.load_messages()
 
     def back(self) -> None:
-        """Stops the bound press before returning to the previous projection.
+        """Leaves the current page and its selection for the previous projection.
 
         Args:
             None
@@ -372,11 +382,9 @@ class GuiController:
         if not self.state.covered:
             if self.state.route.view == 'V12' and self.contacts.book.selecting:
                 self.contacts.book.cancel_selection()
-                return
             if self.state.route.view == 'V16' and self.notifications.store.selecting:
                 self.notifications.store.selecting = False
                 self.notifications.store.selected.clear()
-                return
             self.voice.depart()
             self.playback.stop()
             self.state.back()
@@ -704,6 +712,13 @@ class GuiController:
             )
             or changed
         )
+        navigation = (
+            self.state.generation,
+            self.state.route,
+            self.state.root_delivery,
+        )
+        changed = navigation != self._navigation_identity or changed
+        self._navigation_identity = navigation
         return changed or initially_covered != self.state.covered
 
     def close(

@@ -70,7 +70,13 @@ class RootRow(BoxLayout):
         column = BoxLayout(orientation='vertical', spacing=dp(3))
         self.name_row = BoxLayout(size_hint_y=None, height=sp(22), spacing=dp(4))
         self.name = Label('', role='row', wrap=False)
-        self.pin = Symbol('pin', tone='drop', size_hint_x=None, width=dp(24))
+        self.pin = Symbol(
+            'pin',
+            tone='drop',
+            size_hint=(None, None),
+            size=(dp(24), dp(24)),
+            pos_hint={'center_y': 0.5},
+        )
         self.name_row.add_widget(self.name)
         column.add_widget(self.name_row)
         self.detail = Label('', role='support', tone='textSecondary')
@@ -129,9 +135,11 @@ class RootRow(BoxLayout):
             word[0] for word in entry.label.split()[:2] if word
         ).upper()
         if entry.pinned and self.pin.parent is None:
-            self.name_row.add_widget(self.pin)
+            self.group.add_widget(
+                self.pin, index=self.group.children.index(self.more) + 1
+            )
         elif not entry.pinned and self.pin.parent is not None:
-            self.name_row.remove_widget(self.pin)
+            self.group.remove_widget(self.pin)
         status = (
             'New Drops'
             if entry.unseen and entry.delivery is Delivery.DROP
@@ -150,7 +158,9 @@ class RootRow(BoxLayout):
             measure.refresh()
             self.badge.width = measure.texture.size[0] + dp(12)
             if self.badge.parent is None:
-                self.group.add_widget(self.badge)
+                self.group.add_widget(
+                    self.badge, index=self.group.children.index(self.more) + 1
+                )
         elif self.badge.parent is not None:
             self.group.remove_widget(self.badge)
         self._base_accessible_name = (

@@ -34,6 +34,76 @@ from metor.ui.gui.state.mailbox import Update
 class SettingsCoreTests(unittest.TestCase):
     """Verifies stale native-form intent through two actual encrypted Core clients."""
 
+    def test_descriptor_retry_clears_initial_read_error(self) -> None:
+        """A successful explicit retry replaces the failed initial read outcome."""
+        gui = GuiController(
+            FrontendLaunchContext(
+                'fixture',
+                Mock(
+                    profile_state=lambda: FrontendProfileState(
+                        'fixture', True, False, False
+                    )
+                ),
+            )
+        )
+        self.addCleanup(gui.close)
+        gui.state.covered = False
+        settings = gui.core_settings
+        failed = Update(gui.state.generation, 'core-settings:read', None)
+        self.assertTrue(settings.install(failed))
+        self.assertFalse(settings.loaded)
+        self.assertTrue(settings.initial_read_complete)
+        self.assertFalse(settings.last_read_success)
+        self.assertIn('could not be read', settings.error)
+        settings.reload()
+        confirmed = Update(
+            gui.state.generation,
+            'core-settings:read',
+            ConfigListDataEvent('daemon', 'fixture', []),
+        )
+        self.assertTrue(settings.install(confirmed))
+        self.assertTrue(settings.loaded)
+        self.assertTrue(settings.initial_read_complete)
+        self.assertTrue(settings.last_read_success)
+        self.assertEqual(settings.error, '')
+
+    def test_cover_requires_initial_read_despite_retained_error(self) -> None:
+        """A previous failure cannot bypass the next authorized loading state."""
+        gui = GuiController(
+            FrontendLaunchContext(
+                'fixture',
+                Mock(
+                    profile_state=lambda: FrontendProfileState(
+                        'fixture', True, False, False
+                    )
+                ),
+            )
+        )
+        self.addCleanup(gui.close)
+        gui.state.covered = False
+        settings = gui.core_settings
+        settings.install(Update(gui.state.generation, 'core-settings:read', None))
+        self.assertTrue(settings.initial_read_complete)
+        read_error = settings.error
+        for error in (read_error, 'This setting changed elsewhere.'):
+            with self.subTest(error=error):
+                settings.error = error
+                settings.cover()
+                self.assertFalse(settings.initial_read_complete)
+                self.assertFalse(settings.loaded)
+                self.assertEqual(settings.entries, ())
+                self.assertEqual(settings.error, error)
+                settings.install(
+                    Update(
+                        gui.state.generation,
+                        'core-settings:read',
+                        ConfigListDataEvent('daemon', 'fixture', []),
+                    )
+                )
+                self.assertTrue(settings.initial_read_complete)
+                self.assertTrue(settings.loaded)
+                self.assertEqual(settings.error, '' if error == read_error else error)
+
     def test_initial_descriptor_read_keeps_loaded_preference_controls_enabled(
         self,
     ) -> None:

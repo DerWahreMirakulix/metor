@@ -35,7 +35,7 @@ class FeedbackOverlay(FloatLayout):
             surface='raised',
             orientation='horizontal',
             size_hint=(None, None),
-            padding=(dp(12), 0),
+            padding=dp(12),
             spacing=dp(8),
         )
         self.message = Label('', role='support', pos_hint={'center_y': 0.5})
@@ -124,7 +124,9 @@ class FeedbackOverlay(FloatLayout):
         anchor = self._anchor
         if anchor is None:
             return
-        if anchor.height < dp(Geometry.TARGET) or anchor.width <= 0:
+        inset = dp(12)
+        minimum_height = dp(Geometry.TARGET) + 2 * inset
+        if anchor.height < minimum_height or anchor.width <= 0:
             if self.card.parent is not None:
                 self.dismiss.focus = False
                 self.remove_widget(self.card)
@@ -132,7 +134,8 @@ class FeedbackOverlay(FloatLayout):
         left, bottom = self.to_widget(*anchor.to_window(*anchor.pos))
         self.card.width = max(0, min(dp(Geometry.COMPACT_MAX), anchor.width))
         self.card.height = min(
-            anchor.height, max(dp(Geometry.TARGET), self.message.height + dp(16))
+            anchor.height,
+            max(minimum_height, self.message.height + 2 * inset),
         )
         self.card.pos = (
             left + (anchor.width - self.card.width) / 2,

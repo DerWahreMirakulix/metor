@@ -180,13 +180,18 @@ class SecondaryMetricContinuity:
 
     @classmethod
     def capture(
-        cls, panel: Widget, controller: GuiController
+        cls,
+        panel: Widget,
+        controller: GuiController,
+        *,
+        preserve_scroll: bool = True,
     ) -> SecondaryMetricContinuity:
         """Captures native focus without copying the controller-owned form values.
 
         Args:
             panel: Current secondary foreground panel.
             controller: Current presentation authority.
+            preserve_scroll: Whether a repaint should retain the current viewport.
         Returns:
             SecondaryMetricContinuity: Field identity, cursor and viewport position.
         """
@@ -210,7 +215,7 @@ class SecondaryMetricContinuity:
             _focused_action_identity(panel),
             focused,
             fields[focused].cursor if focused is not None else None,
-            scroll.scroll_y if scroll is not None else None,
+            scroll.scroll_y if scroll is not None and preserve_scroll else None,
         )
 
     def restore(self, panel: Widget, controller: GuiController) -> None:
