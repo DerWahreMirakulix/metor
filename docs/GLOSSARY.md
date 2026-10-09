@@ -124,10 +124,21 @@ prefix is client scope and rejected with `CLIENT_SCOPE_KEY_REJECTED`.
 ## Protected GUI metadata
 
 - `DropConversationSummaryEntry.pending_count`: content-free count of pending
-  outbound DROP receipts. It defaults to zero for older IPC-2 writers and remains
-  separate from inbound `unread_count`. Clearing local history does not cancel
-  this delivery state. Core retains its canonical conversation order, with
+  outbound DROP receipts that retain a delivery spool. It defaults to zero for
+  older IPC-2 writers and remains separate from inbound `unread_count`.
+  History-only clearing preserves this queue. Core retains its canonical conversation order, with
   stable peer-identity ties; the GUI applies protected pin order only.
+- `ClearMessagesCommand.cancel_pending` / `DeleteMessageCommand.cancel_pending`:
+  explicit local queued-DROP cancellation, defaulting to false for existing
+  clients. Core advertises `drop_pending_cancellation`; cancellation removes
+  emission authority and payloads while retaining an unknown remote-outcome
+  receipt. It cannot recall a copy already transmitted and preserves unsent
+  Voice drafts. The GUI sets it when deleting a peer conversation or Drop.
+- `DismissLiveContextCommand.cancel_pending`: explicit cancellation of published
+  pending LIVE messages while removing an ended, non-recovering context. It
+  defaults to false, preserving existing clients' pending-work rejection. Core
+  advertises `live_pending_cancellation`; DROP messages and unpublished Voice
+  drafts remain separate, and a transmitted copy cannot be recalled.
 - `profile_instance_id`: opaque storage-owned identity in a runtime snapshot and
   protected GUI preference result; independent of profile name and own Onion.
 - `GuiPreferences`: bounded `ui.gui` document with DROP pin identities and

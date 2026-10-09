@@ -27,6 +27,8 @@ class GuiState:
     generation: int = 0
     root_delivery: Delivery = Delivery.DROP
     root_pages: dict[Delivery, int] = field(default_factory=dict)
+    ended_live_expanded: bool = False
+    ended_live_page: int = 0
     secondary_scroll: dict[Route, float] = field(default_factory=dict)
     route: Route = field(default_factory=Route)
     back_stack: list[Route] = field(default_factory=list)
@@ -41,6 +43,7 @@ class GuiState:
     _status: str = field(default='', init=False, repr=False)
     feedback: ActionFeedback = field(default_factory=ActionFeedback)
     drafts: dict[tuple[str, Delivery], str] = field(default_factory=dict)
+    reserved_drafts: dict[tuple[str, Delivery], str] = field(default_factory=dict)
 
     @property
     def status(self) -> str:
@@ -80,6 +83,8 @@ class GuiState:
         self._covered = value
         if value:
             self.feedback.clear()
+            self.ended_live_expanded = False
+            self.ended_live_page = 0
         if value and self.privacy_fence is not None:
             self.privacy_fence()
 
@@ -160,11 +165,12 @@ class GuiState:
             bool: Whether the bounded draft was accepted.
         """
         key = (peer, delivery)
-        if key not in self.drafts and len(self.drafts) >= GuiLimits.TEXT_CONTEXTS:
+        contexts = self.drafts.keys() | self.reserved_drafts.keys()
+        if key not in contexts and len(contexts) >= GuiLimits.TEXT_CONTEXTS:
             return False
         size = sum(
             len(text.encode('utf-8')) for k, text in self.drafts.items() if k != key
-        )
+        ) + sum(len(text.encode('utf-8')) for text in self.reserved_drafts.values())
         if size + len(value.encode('utf-8')) > GuiLimits.TEXT_BYTES:
             return False
         if value:
@@ -186,6 +192,7 @@ class GuiState:
         self.preferences = None
         self.capabilities = frozenset()
         self.drafts.clear()
+        self.reserved_drafts.clear()
         self.back_stack.clear()
         self.root_pages.clear()
         self.secondary_scroll.clear()

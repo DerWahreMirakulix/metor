@@ -931,6 +931,7 @@ def main() -> None:
                     IncomingConnectionEvent('Lyra', 'lyra', 'second')
                 )
                 assert depart.call_count == 0
+            controller.live_invitations.show('first')
             app.refresh()
 
         Clock.schedule_once(show_calls, 0.5)
@@ -940,6 +941,7 @@ def main() -> None:
     settled_frames = 0
     confirmation_checked = False
     native_probes_done = False
+    invitation_privacy_checked = 0
 
     def open_keyboard(_elapsed: float) -> None:
         """Shows the explicit dock in a native minimum-size fixture.
@@ -971,7 +973,8 @@ def main() -> None:
             local_keyboard_checked, \
             settled_frames, \
             confirmation_checked, \
-            native_probes_done
+            native_probes_done, \
+            invitation_privacy_checked
         assert app.shell is not None
         expected = (dp(args.width), dp(args.height))
         assert app.viewport is not None
@@ -1130,6 +1133,41 @@ def main() -> None:
                 in {'Open profile', 'Switch profile', 'New profile'}
                 for widget in app.shell.walk()
             )
+        if args.view == 'incoming' and invitation_privacy_checked < 2:
+            overlay = app.invitation_overlay
+            slot = app.invitation_slot
+            assert overlay is not None and slot is not None and overlay.children
+            if invitation_privacy_checked == 0:
+                assert controller.live_invitations.visible
+                assert any(
+                    isinstance(widget, Label) and widget.text == 'Orion'
+                    for widget in overlay.walk()
+                )
+            else:
+                assert not controller.live_invitations.visible and slot.height > 0
+                assert any(
+                    isinstance(widget, Action)
+                    and widget.accessible_name == 'Pending Live · 2'
+                    for widget in overlay.walk()
+                )
+            stale_actions = [
+                widget for widget in overlay.walk() if isinstance(widget, Action)
+            ]
+            controller.state.covered = True
+            assert not overlay.children and slot.height == 0
+            assert all(
+                not widget.focus and widget.get_root_window() is None
+                for widget in stale_actions
+            )
+            controller.state.covered = False
+            if invitation_privacy_checked == 0:
+                controller.live_invitations.dismiss()
+            else:
+                controller.live_invitations.show('first')
+            invitation_privacy_checked += 1
+            app.refresh()
+            Clock.schedule_once(capture, 0.2)
+            return
         if args.view == 'profiles' and args.height >= 800:
             assert not any(
                 widget.do_scroll_y
@@ -1290,6 +1328,8 @@ def main() -> None:
             'core_integration': False,
             'physical_input': False,
             'native_widget_synthetic_keyboard': True,
+            'invitation_privacy_synchronous': args.view == 'incoming'
+            and invitation_privacy_checked == 2,
             'audio': False,
             'font_scale': args.font_scale,
             'text_field_geometry': [

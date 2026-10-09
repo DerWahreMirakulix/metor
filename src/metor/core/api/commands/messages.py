@@ -112,37 +112,67 @@ class GetMessagesCommand(IpcCommand):
 @register_command(CommandType.CLEAR_MESSAGES)
 @dataclass
 class ClearMessagesCommand(IpcCommand):
-    """Clears only local DROP conversation payload/history state."""
+    """Clears local DROP history, optionally cancelling queued outbound delivery.
+
+    Cancellation stops future emission and retries; transmitted copies may arrive.
+    The default preserves queued delivery for existing clients.
+    """
 
     target: Optional[str] = None
     non_contacts_only: bool = False
+    cancel_pending: bool = False
     command_type: CommandType = field(
         default=CommandType.CLEAR_MESSAGES,
         init=False,
     )
 
+    def __post_init__(self) -> None:
+        """Rejects non-boolean cancellation instructions before Core mutation."""
+        if type(self.cancel_pending) is not bool:
+            raise ValueError('Invalid pending cancellation scope')
+
 
 @register_command(CommandType.DELETE_MESSAGE)
 @dataclass
 class DeleteMessageCommand(IpcCommand):
-    """Deletes one eligible local DROP payload while retaining dedupe metadata."""
+    """Deletes an exact local DROP, optionally stopping its queued delivery.
+
+    Cancellation preserves content-free receipt metadata and never recalls a copy
+    already transmitted. The default rejects pending outbound Drops.
+    """
 
     target: str
     msg_id: str
     direction: Optional[MessageDirectionCode] = None
+    cancel_pending: bool = False
     command_type: CommandType = field(default=CommandType.DELETE_MESSAGE, init=False)
+
+    def __post_init__(self) -> None:
+        """Rejects non-boolean cancellation instructions before Core mutation."""
+        if type(self.cancel_pending) is not bool:
+            raise ValueError('Invalid pending cancellation scope')
 
 
 @register_command(CommandType.DISMISS_LIVE_CONTEXT)
 @dataclass
 class DismissLiveContextCommand(IpcCommand):
-    """Destroys resolved inbound state for a disconnected LIVE context."""
+    """Destroys ended LIVE state, optionally cancelling its pending outbound work.
+
+    The default preserves unresolved outbound work for existing clients. Explicit
+    cancellation stops future emission; already transmitted copies may arrive.
+    """
 
     target: str
+    cancel_pending: bool = False
     command_type: CommandType = field(
         default=CommandType.DISMISS_LIVE_CONTEXT,
         init=False,
     )
+
+    def __post_init__(self) -> None:
+        """Rejects non-boolean cancellation intent before any Core mutation."""
+        if type(self.cancel_pending) is not bool:
+            raise ValueError('Invalid pending LIVE cancellation scope')
 
 
 @register_command(CommandType.BEGIN_VOICE)

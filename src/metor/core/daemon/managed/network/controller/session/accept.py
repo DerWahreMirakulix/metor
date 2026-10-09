@@ -92,6 +92,19 @@ def accept(
         )
         return
 
+    is_recovery_pending = pending_origin in {
+        ConnectionOrigin.AUTO_RECONNECT,
+        ConnectionOrigin.GRACE_RECONNECT,
+        ConnectionOrigin.RETUNNEL,
+    }
+    recovery_generation = (
+        controller._state.accepted_live_context_generation(onion)
+        if is_recovery_pending
+        else None
+    )
+    if is_recovery_pending and recovery_generation is None:
+        controller._state.retire_connection(conn)
+        return
     try:
         controller._state.send_frame(
             conn, f'{TorCommand.ACCEPTED.value}\n'.encode('utf-8')
@@ -133,7 +146,11 @@ def accept(
             pass
         return
 
-    controller._state.add_active_connection(onion, conn)
+    if not controller._state.add_active_connection(
+        onion, conn, expected_context_generation=recovery_generation
+    ):
+        controller._state.retire_connection(conn)
+        return
     controller._hm.log_event(
         HistoryEvent.CONNECTED,
         onion,

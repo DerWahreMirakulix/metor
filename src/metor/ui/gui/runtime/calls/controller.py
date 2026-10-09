@@ -16,11 +16,14 @@ from metor.core.api import (
     IpcEvent,
 )
 from metor.ui.gui.constants import GuiLimits
+from metor.ui.gui.platform.audio import HeadsetAudio
 from metor.ui.gui.platform.call_audio import CallHeadsetAudio
 from metor.ui.gui.state.mailbox import Update
 
 # Local Package Imports
 from .media import CallMediaWorker
+from .handover import CallHandover
+from .reconcile import EndCallReconciliation
 
 if TYPE_CHECKING:
     from ..controller import GuiController
@@ -43,6 +46,35 @@ class CallActions:
         self._snapshot_pending = False
         self._checking_id: str | None = None
         self._media_failed_id: str | None = None
+        self._ending_id: str | None = None
+        self._handover = CallHandover(controller)
+        self._end_reconciliation = EndCallReconciliation(controller)
+
+    def show(self, call_id: str) -> bool:
+        """Opens only the current ongoing Call's controls without an SDK operation."""
+        current = self.current
+        if (
+            current is None
+            or current.call_id != call_id
+            or current.state is CallState.ENDED
+            or not (current.owned or current.state is CallState.INCOMING)
+        ):
+            return False
+        self.visible = True
+        self.revision += 1
+        return True
+
+    def handover(self, call_id: str, canonical_peer: str) -> bool:
+        """Continues an explicit end-and-call choice only through confirmed current state."""
+        return self._handover.request(call_id, canonical_peer)
+
+    def cover(self) -> None:
+        """Cancels continuation and expanded controls while preserving accepted Call media."""
+        self._handover.cancel()
+        self._end_reconciliation.clear()
+        if self.current is not None and self.current.state is not CallState.INCOMING:
+            self.visible = False
+            self.revision += 1
 
     @property
     def active(self) -> bool:
@@ -60,12 +92,15 @@ class CallActions:
 
     @property
     def ready(self) -> bool:
-        """Requires explicit microphone/output choices and confirmed headset routing."""
+        """Requires selected microphone/output endpoints to match the installed audio route."""
         voice = self.controller.voice
+        audio = voice.audio
         return (
-            voice.headset_confirmed
+            isinstance(audio, HeadsetAudio)
             and voice.routes.input is not None
             and voice.routes.output is not None
+            and audio.input_device == voice.routes.input
+            and audio.output_device == voice.routes.output
         )
 
     def _request(
@@ -80,7 +115,8 @@ class CallActions:
             return False
         self._operation = operation, call_id
         self.status = {'start': 'Calling…', 'accept': 'Accepting…'}.get(action, '')
-        self.visible = True
+        if action not in {'end', 'mute'}:
+            self.visible = True
         self.revision += 1
         return True
 
@@ -88,6 +124,8 @@ class CallActions:
         """Explicitly requests telephone audio without granting or switching LIVE chat."""
         controller = self.controller
         if controller.state.covered:
+            return False
+        if self._handover.pending is not None:
             return False
         if (
             controller.simulator
@@ -109,7 +147,7 @@ class CallActions:
             return False
         if not self.ready:
             self.visible = False
-            self.status = 'Choose and confirm a headset before calling'
+            self.status = 'Choose a microphone and audio output before calling'
             self.revision += 1
             return False
         self.current = None
@@ -133,7 +171,9 @@ class CallActions:
             self.revision += 1
             return False
         if not self.ready:
-            self.status = 'Unlock and choose a confirmed headset before accepting'
+            self.status = (
+                'Unlock and choose a microphone and audio output before accepting'
+            )
             self.revision += 1
             return False
         client = controller.client
@@ -155,19 +195,24 @@ class CallActions:
         current, client = self.current, self.controller.client
         if current is None or client is None or not current.owned:
             return False
-        self._media_failed_id = current.call_id
-        if self.worker is not None:
-            self.worker.stop()
+        call_id, active = current.call_id, current.state is CallState.ACTIVE
 
         def run() -> IpcEvent | None:
             """Ends only the immutable displayed Call identity."""
             return (
-                client.hangup_call(current.call_id)
-                if current.state is CallState.ACTIVE
-                else client.cancel_call(current.call_id)
+                client.hangup_call(call_id) if active else client.cancel_call(call_id)
             )
 
-        return self._request('end', current.call_id, run)
+        if not self._request('end', call_id, run):
+            return False
+        self._ending_id = call_id
+        if self.worker is not None:
+            self.worker.stop()
+        assert self._operation is not None
+        self._end_reconciliation.begin(
+            self._operation[0], call_id, current.peer, client
+        )
+        return True
 
     def mute(self) -> bool:
         """Changes only the accepted Call microphone and preserves it across App-Lock."""
@@ -185,9 +230,11 @@ class CallActions:
         """Installs lifecycle metadata; broadcasts never invent same-client authority."""
         if not isinstance(event, CallStateEvent):
             return
+        self._handover.observe(event)
+        self._end_reconciliation.observe(event)
         source = event.call
         if (
-            source.call_id == self._media_failed_id
+            source.call_id in {self._media_failed_id, self._ending_id}
             and source.state is not CallState.ENDED
         ):
             return
@@ -223,7 +270,11 @@ class CallActions:
         ):
             return
         self.current = source
-        self.visible = True
+        if source.state is CallState.INCOMING or (
+            not self.controller.state.covered
+            and (prior is None or prior.call_id != source.call_id)
+        ):
+            self.visible = True
         self.status = ''
         if source.state is not CallState.ACTIVE and self.worker is not None:
             self.worker.stop()
@@ -233,8 +284,16 @@ class CallActions:
 
     def install(self, update: Update) -> bool:
         """Installs correlated operations and projections without repeating unknown starts."""
+        if update.generation != self.controller.state.generation:
+            return False
+        if self._handover.install(update):
+            return True
+        if self._end_reconciliation.install(update):
+            return True
         if update.operation == 'call-snapshot':
             self._snapshot_pending = False
+            if self._handover.pending is not None or self._end_reconciliation.pending:
+                return True
             if isinstance(update.event, CallsStateEvent):
                 self._checking_id = None
                 source = next(
@@ -279,10 +338,14 @@ class CallActions:
             return True
         if not update.operation.startswith('call:'):
             return False
-        operation, self._operation = self._operation, None
+        operation = self._operation
         if operation is None or operation[0] != update.operation:
             return True
-        if isinstance(update.event, CallStateEvent):
+        self._operation = None
+        if (
+            isinstance(update.event, CallStateEvent)
+            and update.event.call.call_id == operation[1]
+        ):
             self.observe(update.event)
         elif isinstance(update.event, CallRejectedEvent):
             self.status = {
@@ -302,6 +365,8 @@ class CallActions:
             )
             self._snapshot_at = 0.0
             self.revision += 1
+        self._handover.end_result(update)
+        self._end_reconciliation.end_result(update)
         return True
 
     def poll(self) -> bool:
@@ -310,12 +375,15 @@ class CallActions:
         if self.worker is not None and self.worker.done.is_set():
             self.worker = None
             changed = True
+        changed = self._handover.poll() or changed
+        self._end_reconciliation.poll()
         if (
             self.active
             and self.worker is None
             and self.ready
             and self.current is not None
             and self.current.call_id != self._media_failed_id
+            and self.current.call_id != self._ending_id
         ):
             controller = self.controller
             if not controller.voice.running and not controller.playback.running:
@@ -338,6 +406,8 @@ class CallActions:
         controller, client = self.controller, self.controller.client
         if (
             client is not None
+            and self._handover.pending is None
+            and not self._end_reconciliation.pending
             and 'calls' in controller.state.capabilities
             and not self._snapshot_pending
             and now - self._snapshot_at >= GuiLimits.CALL_SNAPSHOT_SECONDS
@@ -354,6 +424,14 @@ class CallActions:
     def clear(self) -> None:
         """Stops native media and releases exact owned Call authority before client loss."""
         current, client = self.current, self.controller.client
+        ending = (
+            self._operation is not None
+            and self._operation[0].startswith('call:end:')
+            and current is not None
+            and self._operation[1] == current.call_id
+        )
+        self._handover.cancel()
+        self._end_reconciliation.clear()
         if current is not None:
             self._media_failed_id = current.call_id
         if self.worker is not None:
@@ -363,6 +441,7 @@ class CallActions:
             and current.owned
             and current.state is not CallState.ENDED
             and client is not None
+            and not ending
         ):
             call_id, active = current.call_id, current.state is CallState.ACTIVE
 

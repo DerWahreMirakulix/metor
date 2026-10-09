@@ -1,4 +1,4 @@
-"""Message history projection, consumption, and deletion."""
+"""Message history projection and consumption."""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ from typing import Dict, List, Optional, Tuple, cast
 
 from metor.core.api import ContentType, Delivery, is_valid_message_id
 from metor.data.message.models import (
-    MessageDeleteOutcome,
     MessageDirection,
     MessageStatus,
     UnreadInboxSummaryRecord,
@@ -20,7 +19,7 @@ from .receipts import MessageReceiptStore
 
 
 class MessageHistoryMixin(MessageReceiptStore):
-    """Owns visible history reads, read state, and scoped deletion."""
+    """Owns visible history reads and consume state."""
 
     def get_unread_counts(self) -> Dict[str, int]:
         """
@@ -88,10 +87,13 @@ class MessageHistoryMixin(MessageReceiptStore):
         """
         rows = self._sql.fetchall(
             'SELECT r.peer_onion, COALESCE(SUM(CASE WHEN r.direction = ? AND r.status = ? THEN 1 ELSE 0 END), 0), '
-            'COALESCE(SUM(CASE WHEN r.direction = ? AND r.status = ? THEN 1 ELSE 0 END), 0) '
+            'COALESCE(SUM(CASE WHEN r.direction = ? AND r.status = ? '
+            'AND EXISTS(SELECT 1 FROM outbox_spool AS o WHERE o.receipt_id = r.id) '
+            'THEN 1 ELSE 0 END), 0) '
             'FROM message_receipts AS r '
             'LEFT JOIN message_archive AS a ON a.receipt_id = r.id '
-            'WHERE r.delivery = ? AND (a.receipt_id IS NOT NULL OR r.status = ?) '
+            'WHERE r.delivery = ? AND (a.receipt_id IS NOT NULL OR (r.status = ? '
+            'AND EXISTS(SELECT 1 FROM outbox_spool AS o WHERE o.receipt_id = r.id))) '
             'GROUP BY r.peer_onion ORDER BY MAX(r.created_at) DESC, r.peer_onion ASC',
             (
                 MessageDirection.IN.value,
@@ -244,17 +246,19 @@ class MessageHistoryMixin(MessageReceiptStore):
         non_contacts_only: bool = False,
         msg_id: Optional[str] = None,
         direction: Optional[MessageDirection] = None,
+        include_pending: bool = False,
     ) -> List[str]:
         """Returns Voice metadata whose persistent blobs may be explicitly cleared.
 
-        Pending outbound DROP rows are deliberately excluded because their blobs
-        remain delivery-critical even after the visible conversation is cleared.
+        Pending outbound DROP rows are excluded unless cancellation is explicit.
+        Their blobs remain delivery-critical when only visible history is cleared.
 
         Args:
             onion (Optional[str]): The onion input.
             non_contacts_only (bool): The non contacts only input.
             msg_id (Optional[str]): The msg id input.
             direction (Optional[MessageDirection]): The direction input.
+            include_pending: Includes delivery-owned blobs during explicit cancellation.
 
         Returns:
             List[str]: The resulting value.
@@ -262,14 +266,14 @@ class MessageHistoryMixin(MessageReceiptStore):
         filters = [
             'r.delivery = ?',
             'r.content_type = ?',
-            'NOT (r.direction = ? AND r.status = ?)',
         ]
         params: list[SqlParam] = [
             Delivery.DROP.value,
             ContentType.VOICE.value,
-            MessageDirection.OUT.value,
-            MessageStatus.PENDING.value,
         ]
+        if not include_pending:
+            filters.append('NOT (r.direction = ? AND r.status = ?)')
+            params.extend((MessageDirection.OUT.value, MessageStatus.PENDING.value))
         if onion:
             filters.append('r.peer_onion = ?')
             params.append(clean_onion(onion))
@@ -287,12 +291,14 @@ class MessageHistoryMixin(MessageReceiptStore):
             params.append(direction.value)
         where = ' AND '.join(filters)
         rows = self._sql.fetchall(
-            'SELECT COALESCE(i.payload, a.payload) '
+            'SELECT COALESCE(i.payload, a.payload, o.payload) '
             'FROM message_receipts AS r '
             'LEFT JOIN inbound_spool AS i ON i.receipt_id = r.id '
             'LEFT JOIN message_archive AS a ON a.receipt_id = r.id '
-            f'WHERE {where} AND COALESCE(i.payload, a.payload) IS NOT NULL',
-            tuple(params),
+            'LEFT JOIN outbox_spool AS o ON o.receipt_id = r.id '
+            f'WHERE {where} AND COALESCE(i.payload, a.payload, o.payload) IS NOT NULL '
+            'AND r.status <> ? AND (r.direction <> ? OR a.receipt_id IS NOT NULL)',
+            (*params, MessageStatus.DRAFT.value, MessageDirection.IN.value),
         )
         return [str(row[0]) for row in rows]
 
@@ -313,148 +319,6 @@ class MessageHistoryMixin(MessageReceiptStore):
             (clean_onion(contact_onion), msg_id, Delivery.DROP.value),
         )
         return bool(rows)
-
-    def clear_messages(
-        self,
-        onion: Optional[str] = None,
-        non_contacts_only: bool = False,
-    ) -> None:
-        """
-        Clears only DROP payload/history state while retaining delivery receipts.
-
-        Args:
-            onion (Optional[str]): Optional peer onion filter.
-            non_contacts_only (bool): Whether only discovered peers should be affected.
-
-        Returns:
-            None
-        """
-        filters = ['delivery = ?']
-        params: list[SqlParam] = [Delivery.DROP.value]
-        if onion:
-            filters.append('peer_onion = ?')
-            params.append(clean_onion(onion))
-        if non_contacts_only:
-            filters.append(
-                "peer_onion NOT IN (SELECT onion FROM peers WHERE alias_state = 'saved')"
-            )
-        where = ' AND '.join(filters)
-        with self._sql.transaction() as cursor:
-            pin_rows = cursor.execute(
-                f'SELECT DISTINCT peer_onion FROM message_receipts WHERE {where}',
-                tuple(params),
-            ).fetchall()
-            removed = {str(row[0]) for row in pin_rows}
-            self._sql.metadata.prune_pins(cursor, removed)
-            rows = cast(
-                List[Tuple[SqlParam, ...]],
-                cursor.execute(
-                    f'SELECT id, direction, status FROM message_receipts WHERE {where} '
-                    'AND NOT (content_type = ? AND direction = ? '
-                    'AND NOT EXISTS (SELECT 1 FROM message_archive WHERE receipt_id = message_receipts.id))',
-                    (
-                        *params,
-                        ContentType.VOICE.value,
-                        MessageDirection.IN.value,
-                    ),
-                ).fetchall(),
-            )
-            if not rows:
-                return
-            receipt_ids = [int(str(row[0])) for row in rows]
-            block = self._placeholders(len(receipt_ids))
-            cursor.execute(
-                f'DELETE FROM message_archive WHERE receipt_id IN ({block})',
-                tuple(receipt_ids),
-            )
-            inbound_ids = [
-                int(str(row[0]))
-                for row in rows
-                if str(row[1]) == MessageDirection.IN.value
-            ]
-            if inbound_ids:
-                inbound_block = self._placeholders(len(inbound_ids))
-                cursor.execute(
-                    f'DELETE FROM inbound_spool WHERE receipt_id IN ({inbound_block})',
-                    tuple(inbound_ids),
-                )
-                cursor.execute(
-                    f'UPDATE message_receipts SET status = ?, visible_in_history = 0, updated_at = ? '
-                    f'WHERE id IN ({inbound_block})',
-                    (MessageStatus.READ.value, self._now(), *inbound_ids),
-                )
-            cursor.execute(
-                f'UPDATE message_receipts SET visible_in_history = 0, updated_at = ? '
-                f'WHERE id IN ({block})',
-                (self._now(), *receipt_ids),
-            )
-
-    def delete_drop_message(
-        self,
-        contact_onion: str,
-        msg_id: str,
-        direction: Optional[MessageDirection] = None,
-    ) -> MessageDeleteOutcome:
-        """Deletes one local DROP payload while preserving the logical receipt.
-
-        Args:
-            contact_onion (str): Expected peer onion identity.
-            msg_id (str): Stable logical message identifier.
-            direction (Optional[MessageDirection]): Exact local row direction.
-
-        Returns:
-            MessageDeleteOutcome: Typed operation outcome.
-        """
-        normalized_onion = clean_onion(contact_onion)
-        if not is_valid_message_id(msg_id):
-            return MessageDeleteOutcome.NOT_FOUND
-        with self._sql.transaction() as cursor:
-            direction_filter = ''
-            params: list[SqlParam] = [normalized_onion, msg_id]
-            if direction is not None:
-                direction_filter = ' AND r.direction = ?'
-                params.append(direction.value)
-            rows = cast(
-                List[Tuple[SqlParam, ...]],
-                cursor.execute(
-                    'SELECT r.id, r.delivery, r.direction, r.status, '
-                    'EXISTS(SELECT 1 FROM message_archive AS a WHERE a.receipt_id = r.id) '
-                    'FROM message_receipts AS r '
-                    f'WHERE peer_onion = ? AND msg_id = ?{direction_filter}',
-                    tuple(params),
-                ).fetchall(),
-            )
-            if not rows:
-                return MessageDeleteOutcome.NOT_FOUND
-            if len(rows) > 1:
-                return MessageDeleteOutcome.AMBIGUOUS_IDENTITY
-            receipt_id = int(str(rows[0][0]))
-            if str(rows[0][1]) != Delivery.DROP.value:
-                return MessageDeleteOutcome.NOT_DROP
-            if (
-                str(rows[0][2]) == MessageDirection.OUT.value
-                and str(rows[0][3]) == MessageStatus.PENDING.value
-            ):
-                return MessageDeleteOutcome.PENDING_DELIVERY
-            if int(str(rows[0][4])) != 1:
-                return MessageDeleteOutcome.NOT_FOUND
-            cursor.execute(
-                'DELETE FROM message_archive WHERE receipt_id = ?', (receipt_id,)
-            )
-            cursor.execute(
-                'DELETE FROM inbound_spool WHERE receipt_id = ?', (receipt_id,)
-            )
-            cursor.execute(
-                'UPDATE message_receipts SET visible_in_history = 0, status = CASE '
-                'WHEN direction = ? THEN ? ELSE status END, updated_at = ? WHERE id = ?',
-                (
-                    MessageDirection.IN.value,
-                    MessageStatus.READ.value,
-                    self._now(),
-                    receipt_id,
-                ),
-            )
-            return MessageDeleteOutcome.DELETED
 
     def dismiss_inbound_live(self, contact_onion: str) -> int:
         """Destroys inbound LIVE spool payloads while retaining dedupe receipts.

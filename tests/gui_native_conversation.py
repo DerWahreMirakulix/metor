@@ -49,6 +49,7 @@ from metor.ui.gui.views.feedback import FeedbackOverlay
 from metor.ui.gui.views.peer import PeerView
 from metor.ui.gui.views.shell import Shell
 from metor.ui.gui.widgets import Action, Label
+from metor.ui.gui.widgets.message import MessageBubble
 from metor.ui.gui.widgets.sheet import ActionSheet
 from metor.ui.gui.widgets.symbol import IconAction
 
@@ -90,7 +91,9 @@ class ConversationHarness(App):
             simulator=True,
         )
         self.controller.state.covered = False
-        self.controller.state.capabilities = frozenset({'qualified_live_control'})
+        self.controller.state.capabilities = frozenset(
+            {'qualified_live_control', 'drop_pending_cancellation'}
+        )
         self.controller.state.snapshot = RuntimeSnapshotEvent(
             'fixture',
             '',
@@ -169,6 +172,7 @@ class ConversationHarness(App):
         """Projects public fixture state without forcing nested layout settlement."""
         ActionSheet.reconcile()
         self.shell.render()
+        self.feedback.anchor_to(self.shell.feedback_anchor())
         self.feedback.render()
         if self._flip_pending and self.shell._peer_panel is not None:
             self._flip_pending = False
@@ -374,14 +378,37 @@ class ConversationHarness(App):
         self.refresh()
 
     def enter_send(self, _elapsed: float) -> None:
-        """Checks Enter repeat suppression and clearing only after typed acceptance."""
+        """Checks Enter repeat suppression before the first sending frame."""
         entry = self.peer().composer.entry
         assert entry.focus
         Window.dispatch('on_key_down', 13, 40, '\r', [])
         Window.dispatch('on_key_down', 13, 40, '\r', [])
         Window.dispatch('on_key_up', 13, 40)
         assert self.admission.call_count == 1
-        assert entry.text == 'Enter sends one Drop'
+        Clock.schedule_once(self.sending_visible, FRAME_SETTLE_SECONDS)
+
+    def sending_visible(self, _elapsed: float) -> None:
+        """Requires a cleared frozen composer and visible message before Core acceptance."""
+        entry = self.peer().composer.entry
+        assert not entry.text and entry.readonly
+        labels = [
+            widget.text
+            for widget in self.peer().timeline.walk()
+            if isinstance(widget, Label)
+        ]
+        assert 'Enter sends one Drop' in labels
+        assert any('Sending' in text for text in labels)
+        sending = next(
+            widget
+            for widget in self.peer().timeline._widgets.values()
+            if isinstance(widget, MessageBubble)
+            and widget._body.text == 'Enter sends one Drop'
+        )
+        assert not any(
+            isinstance(widget, Action) and widget.accessible_name == 'Message actions'
+            for widget in sending.walk(restrict=True)
+        )
+        self.records['sending_visible_before_core_acceptance'] = 'pass'
         self.accept_text()
         Clock.schedule_once(self.shift_enter, FRAME_SETTLE_SECONDS)
 
@@ -394,6 +421,16 @@ class ConversationHarness(App):
             for widget in self.peer().timeline.walk()
         ), 'Accepted Drop did not appear without leaving the conversation'
         self.records['accepted_drop_visible_without_reentering'] = 'pass'
+        accepted = next(
+            widget
+            for widget in self.peer().timeline._widgets.values()
+            if isinstance(widget, MessageBubble)
+            and widget._body.text == 'Enter sends one Drop'
+        )
+        assert any(
+            isinstance(widget, Action) and widget.accessible_name == 'Message actions'
+            for widget in accepted.walk(restrict=True)
+        )
         entry.text = 'First line'
         entry.cursor = (len(entry.text), 0)
         Window.dispatch('on_key_down', 13, 40, '\r', ['shift'])
@@ -414,23 +451,40 @@ class ConversationHarness(App):
         )
         self.accept_text()
         self.records['enter_shift_enter_and_pointer_send'] = 'pass'
-        live = next(
-            widget
-            for widget in self.peer().walk()
-            if isinstance(widget, Action) and widget.label.text == 'LIVE'
+        peer = self.peer()
+        assert not any(
+            isinstance(widget, Action) and widget.label.text in {'DROP', 'LIVE'}
+            for widget in peer.walk()
         )
-        self.click(live)
+        self.header_order(peer.connect)
+        self.controller.state.set_draft(PEER, Delivery.DROP, 'Keep this Drop draft')
+        peer.composer.update()
+        page = self.controller.messages
+        self.start_live.return_value = False
+        self.click(peer.connect)
+        assert self.controller.state.route == Route('V08', PEER, Delivery.DROP)
+        assert (
+            self.controller.state.drafts[PEER, Delivery.DROP] == 'Keep this Drop draft'
+        )
+        assert self.controller.messages is page
+        self.start_live.reset_mock()
+        self.start_live.return_value = True
+        self.click(peer.connect)
         self.refresh()
         Clock.schedule_once(self.live_start, FRAME_SETTLE_SECONDS)
 
     def live_start(self, _elapsed: float) -> None:
-        """Requires one conversation Back entry and Start before Call and More."""
+        """Requires explicit Start Live to open the correct peer with one Back entry."""
         peer = self.peer()
         assert peer.route.delivery is Delivery.LIVE
         assert self.controller.state.back_stack == [Route('V06')]
+        assert (
+            self.controller.state.drafts[PEER, Delivery.DROP] == 'Keep this Drop draft'
+        )
         self.header_order(peer.connect)
-        self.click(peer.connect)
         self.start_live.assert_called_once_with(PEER)
+        self.records['explicit_start_live_opens_peer_without_chat_tabs'] = 'pass'
+        self.records['start_live_preserves_drop_draft_and_rejection_stays_put'] = 'pass'
         snapshot = self.controller.state.snapshot
         assert snapshot is not None
         self.controller.state.snapshot = replace(
@@ -445,12 +499,23 @@ class ConversationHarness(App):
         Clock.schedule_once(self.live_cancel, FRAME_SETTLE_SECONDS)
 
     def header_order(self, control: Action) -> None:
-        """Checks stable action row ordering and real minimum-size hit targets."""
+        """Checks Call and More beside the measured title at compact and desktop widths."""
         peer = self.peer()
-        boxes = [rectangle(widget) for widget in (control, peer.call, peer.more)]
+        assert peer.name.parent is peer.call.parent is peer.more.parent
+        if control.accessible_name in {'Start Live', 'Cancel Live', 'End Live'}:
+            assert control.label.parent is control
+        boxes = [rectangle(widget) for widget in (peer.name, peer.call, peer.more)]
         assert boxes[0][0] + boxes[0][2] <= boxes[1][0]
         assert boxes[1][0] + boxes[1][2] <= boxes[2][0]
-        assert max(box[1] for box in boxes) - min(box[1] for box in boxes) <= 1
+        centers = [box[1] + box[3] / 2 for box in boxes]
+        assert max(centers) - min(centers) <= GEOMETRY_TOLERANCE
+        status, action = rectangle(peer.subtitle), rectangle(control)
+        assert abs(status[1] + status[3] / 2 - action[1] - action[3] / 2) <= 1
+        for widget in (control, peer.call, peer.more):
+            left, bottom, width, height = rectangle(widget)
+            assert width >= 48 and height >= 48
+            assert left >= 0 and left + width <= Window.width
+            assert bottom >= 0 and bottom + height <= Window.height
 
     def modal_title(self, sheet: ActionSheet, title: str) -> None:
         """Requires full measured audio headings instead of ellipsized recovery text."""
@@ -488,7 +553,7 @@ class ConversationHarness(App):
         self.header_order(peer.end)
         self.click(peer.end)
         assert self.end_live.call_args.args == (PEER, 7, None)
-        self.records['start_cancel_end_before_call_and_more'] = 'pass'
+        self.records['explicit_live_control_and_title_row_call_more'] = 'pass'
         self.controller.state.status = 'Feedback hidden by a deliberate modal'
         self.feedback.render()
         self.feedback.dismiss.focus = True
@@ -549,7 +614,9 @@ class ConversationHarness(App):
         assert len(sheet.column.children) == 20
         assert all(
             isinstance(widget, Action)
-            and widget.label.shorten
+            and not widget.label.shorten
+            and widget.height >= widget.label.height + dp(16)
+            and widget.label.height >= widget.label.texture_size[1]
             and widget.width <= sheet.scroll.width
             for widget in sheet.column.children
         )
@@ -612,7 +679,7 @@ class ConversationHarness(App):
         assert self.controller.voice.worker is None
         assert self.controller.playback.worker is None
         assert not self.controller.calls.media_active
-        self.records['back_after_drop_live_switch_exits_conversation'] = 'pass'
+        self.records['back_after_explicit_start_live_exits_conversation'] = 'pass'
         self.capture('-root')
         self.completed = True
         self.stop()

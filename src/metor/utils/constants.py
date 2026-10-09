@@ -20,6 +20,7 @@ class Constants(ContractConstants):
     SERVER_BACKLOG: int = 5  # Standard socket backlog for daemon IPC and listeners
     SERVER_BACKLOG_HEADLESS: int = 1  # Minimal socket backlog for ephemeral daemons
     PEER_WRITER_QUEUE_FRAMES: int = 256
+    DROP_SESSION_MAX_TRANSFERS: int = 64
     IPC_WRITER_QUEUE_FRAMES: int = 256
     PEER_WRITER_QUEUE_BYTES: int = 8 * ContractConstants.MAX_STREAM_BYTES
     IPC_WRITER_QUEUE_BYTES: int = 8 * ContractConstants.MAX_IPC_BYTES

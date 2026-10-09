@@ -35,13 +35,15 @@ from metor.core.api import (
     NotificationPrivacy,
 )
 from metor.ui.gui.constants import Geometry
+from metor.ui.gui.app import MetorApp
 from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.state import Route
 from metor.ui.gui.state.mailbox import Update
-from metor.ui.gui.views.calls import CallOverlay
+from metor.ui.gui.views.calls import CallBar, CallOverlay
 from metor.ui.gui.views.shell import Shell
 from metor.ui.gui.widgets import Action, Label, SecretInput
 from metor.ui.gui.widgets.keyboard import LocalKeyboard
+from metor.ui.gui.widgets.symbol import IconAction
 
 
 class LockedCallHarness(App):
@@ -104,9 +106,11 @@ class LockedCallHarness(App):
         )
         self.gui.calls.observe(CallStateEvent(self.call))
         self.shell = Shell(self.gui, lambda: None)
+        self.bar = CallBar(self.gui, lambda: None)
         self.overlay = CallOverlay(self.gui, lambda: None)
         self.viewport = BoxLayout(orientation='vertical')
         self.viewport.add_widget(self.shell)
+        self.viewport.add_widget(self.bar, index=1)
         if self.keyboard_visible:
             self.keyboard = LocalKeyboard(
                 lambda _value: None, lambda: None, pin=method is ClientUnlockMethod.PIN
@@ -116,12 +120,29 @@ class LockedCallHarness(App):
             self.overlay.bottom_inset = dp(Geometry.KEYBOARD)
         self.stage.add_widget(self.viewport)
         self.stage.add_widget(self.overlay)
+        privacy_owner = Mock(
+            controller=self.gui,
+            accessibility=None,
+            feedback_overlay=None,
+            call_bar=self.bar,
+            call_overlay=self.overlay,
+            invitation_overlay=None,
+            invitation_slot=None,
+            shell=self.shell,
+        )
+        self.gui.state.privacy_fence = lambda: MetorApp._revoke_native_privacy(
+            privacy_owner
+        )
+        self.gui.state.covered = True
         Clock.schedule_once(self.paint, 0.1)
         Clock.schedule_once(self.paint, 0.2)
         Clock.schedule_once(self.controls, 0.4)
 
     def paint(self, _elapsed: float) -> None:
         """Reserves the measured reduced Call area above the real auth ScrollView."""
+        self.bar.render()
+        self.shell.activity_inset = self.bar.height
+        self.viewport.do_layout()
         self.shell.render()
         self.overlay.render()
         self.shell.inset_locked_call(self.overlay.occupied_height)
@@ -153,26 +174,21 @@ class LockedCallHarness(App):
     def controls(self, _elapsed: float) -> None:
         """Checks reduced actions, status, duration and exact mute hit targets."""
         mute, hangup = (
-            self.action(self.overlay, 'Mute'),
-            self.action(self.overlay, 'Hang up'),
+            self.media_action('Mute microphone'),
+            self.media_action('Hang up'),
         )
         assert mute.height >= dp(48) and hangup.height >= dp(48)
+        assert self.bar._open is not None
+        assert self.bar.y + 0.5 >= self.shell.top
+        assert 'Call in progress' in self.bar._open.label.text
         assert mute.y == hangup.y and mute.right <= hangup.x
-        assert (
-            self.overlay._duration is not None
-            and self.overlay._duration.text.startswith('01:')
-        )
+        assert '01:' in self.bar._open.label.text
+        assert not self.overlay.children
         assert not any(
             isinstance(widget, Label) and 'Private Alias' in widget.text
-            for widget in self.overlay.walk()
+            for widget in self.stage.walk()
         )
-        title = next(
-            widget
-            for widget in self.overlay.walk()
-            if isinstance(widget, Label)
-            and (widget.text == 'Phone call' or widget.text.startswith('Call ·'))
-        )
-        assert title.parent.height >= title.texture_size[1]
+        assert self.bar._open.height >= self.bar._open.label.texture_size[1]
         self.stage.export_to_png(
             str(self.images / f'locked-call-{self.image_name}.png')
         )
@@ -230,7 +246,7 @@ class LockedCallHarness(App):
         self.click(unlock, 'unlock-' + self.method.value)
         self.gui.security.unlock.assert_called_once()
         assert self.gui.state.covered
-        self.click(self.action(self.overlay, 'Hang up'), 'hangup-' + self.method.value)
+        self.click(self.media_action('Hang up'), 'hangup-' + self.method.value)
         assert self.gui.calls._operation is not None
         assert self.gui.calls._operation[0].startswith('call:end:')
         self.results.append(
@@ -241,9 +257,18 @@ class LockedCallHarness(App):
                 'mute_hangup_clickable': True,
                 'unlock_scroll_clickable': True,
                 'private_identity_hidden': True,
+                'persistent_bar_visible': True,
             }
         )
         Clock.schedule_once(self.next_method, 0.1)
+
+    def media_action(self, label: str) -> IconAction:
+        """Resolves visible reduced Call bar intent independently of icon artwork."""
+        return next(
+            widget
+            for widget in self.bar.walk()
+            if isinstance(widget, IconAction) and widget.accessible_name == label
+        )
 
 
 def main() -> None:

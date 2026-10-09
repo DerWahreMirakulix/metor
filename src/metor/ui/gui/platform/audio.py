@@ -1,4 +1,4 @@
-"""Bounded PortAudio headset ports and the explicitly named PCM Voice codec."""
+"""Bounded explicitly selected PortAudio ports and the named PCM Voice codec."""
 
 from collections import deque
 import threading
@@ -152,12 +152,35 @@ class HeadsetAudio:
         for index, device in enumerate(devices[: GuiLimits.AUDIO_ENDPOINTS]):
             host = hosts[device['hostapi']]['name']
             name = f'{device["name"]} · {host}'[: GuiLimits.DEVICE_STRING]
+            input_available = device['max_input_channels'] > 0
+            output_available = device['max_output_channels'] > 0
+            errors: list[str] = []
+            for available, check in (
+                (input_available, sounddevice.check_input_settings),
+                (output_available, sounddevice.check_output_settings),
+            ):
+                error = ''
+                if available:
+                    try:
+                        check(
+                            device=index,
+                            samplerate=PcmVoice.SAMPLE_RATE,
+                            channels=PcmVoice.CHANNELS,
+                            dtype='int16',
+                        )
+                    except (sounddevice.PortAudioError, OSError, ValueError):
+                        error = 'Does not support 16 kHz mono audio'
+                errors.append(error)
             endpoints.append(
                 AudioEndpoint(
                     index,
                     name,
-                    device['max_input_channels'] > 0,
-                    device['max_output_channels'] > 0,
+                    input_available,
+                    output_available,
+                    errors[0],
+                    errors[1],
+                    str(device['name'])[: GuiLimits.DEVICE_STRING],
+                    str(host)[: GuiLimits.DEVICE_STRING],
                 )
             )
         return tuple(endpoints)
@@ -186,7 +209,7 @@ class HeadsetAudio:
         """Opens capture only after explicit admission and route confirmation.
 
         Args:
-            headset_confirmed: Explicitly selected supported headset route.
+            headset_confirmed: Explicitly selected compatible input route; not an AEC claim.
         Returns:
             None
         """
@@ -194,7 +217,7 @@ class HeadsetAudio:
 
         if not headset_confirmed or self._capture is not None:
             raise RuntimeError(
-                'A confirmed headset route and idle capture are required'
+                'An explicitly selected input route and idle capture are required'
             )
         self.failed = False
         self._capture_cancel.clear()
@@ -268,7 +291,7 @@ class HeadsetAudio:
 
         Args:
             frame: Valid complete PCM samples.
-            headset_confirmed: Explicit headset route confirmation.
+            headset_confirmed: Explicit compatible output admission; not an AEC claim.
         Returns:
             None
         """
@@ -293,10 +316,9 @@ class HeadsetAudio:
                 finally:
                     self._output = None
                 raise
-        if self._output.write(frame):
-            raise RuntimeError(
-                'Audio output underflow; playback coverage is unconfirmed'
-            )
+        # Blocking PortAudio writes accept the complete buffer. An underflow
+        # reports inserted silence before this buffer, not rejected samples.
+        self._output.write(frame)
 
     def stop(self) -> None:
         """Stops both directions and releases local buffers without any Core consume.

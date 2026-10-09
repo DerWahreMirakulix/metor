@@ -19,6 +19,7 @@ from kivy.uix.behaviors import FocusBehavior
 from frontend_e2e_runtime import FIXTURE_WAIT_SECONDS
 from gui_native_x11 import rectangle
 from metor.core.api import Delivery
+from metor.ui.gui.constants import Geometry
 from metor.ui.gui.widgets import Action, Label
 from metor.ui.gui.views.peer import PeerView
 
@@ -38,7 +39,7 @@ class NativeUxProbe:
         self.records: dict[str, object] = {}
         self._start: tuple[str, float] | None = None
         self._drop: float | None = None
-        self._live_tab: float | None = None
+        self._live_open: float | None = None
         self._cold_drop: float | None = None
         self._release_callbacks: list[tuple[Action, Callable[..., None]]] = []
         self.connect_entered = threading.Event()
@@ -109,23 +110,23 @@ class NativeUxProbe:
         action.bind(on_release=released)
 
     def arm_drop(self, action: Action) -> None:
-        """Requires a cached DROP page on the first draw after selecting its tab."""
+        """Checks the first DROP draw after selecting its master row or contact."""
 
         def released(*_args: object) -> None:
-            """Observes the user input that changes only the conversation projection."""
+            """Observes explicit archive navigation without communication admission."""
             action.unbind(on_release=released)
             self._drop = time.monotonic()
 
         self._release_callbacks.append((action, released))
         action.bind(on_release=released)
 
-    def arm_live_tab(self, action: Action) -> None:
-        """Times the opposite native mode selection without changing either route."""
+    def arm_live_open(self, action: Action) -> None:
+        """Times explicit Start Live opening its selected peer conversation."""
 
         def released(*_args: object) -> None:
-            """Observes only the native tab activation boundary."""
+            """Observes the deliberate Start Live activation boundary."""
             action.unbind(on_release=released)
-            self._live_tab = time.monotonic()
+            self._live_open = time.monotonic()
 
         self._release_callbacks.append((action, released))
         action.bind(on_release=released)
@@ -191,8 +192,8 @@ class NativeUxProbe:
             self._drop_panel = peer
             self._drop_editor = peer.composer.entry
             self._drop_timeline = peer.timeline
-        if self._live_tab is not None and peer.route.delivery is Delivery.LIVE:
-            started, self._live_tab = self._live_tab, None
+        if self._live_open is not None and peer.route.delivery is Delivery.LIVE:
+            started, self._live_open = self._live_open, None
             self.records['drop_to_live_first_draw'] = {
                 'release_to_first_draw_ms': round(
                     (time.monotonic() - started) * 1000, 3
@@ -231,24 +232,32 @@ class NativeUxProbe:
             }
             self.records['live_to_drop_first_draw'] = record
             print('NATIVE_GUI_ROUTE_TIMING ' + json.dumps(record), flush=True)
-            assert 'Existing Drop' in texts, (
-                'Cached DROP messages are absent on the first native draw',
-                record,
-            )
-            assert peer is self._drop_panel, (
-                'Adjacent same-peer mode switch rebuilt the native DROP pane',
-                record,
-            )
-            assert peer.composer.entry is self._drop_editor
-            assert peer.timeline is self._drop_timeline
-            assert next(iter(peer.timeline._widgets.values())) is self._first_drop
+            if app.args.width >= Geometry.BREAKPOINT:
+                assert 'Existing Drop' in texts, (
+                    'Cached DROP messages are absent after same-peer master selection',
+                    record,
+                )
+                assert peer is self._drop_panel
+                assert peer.composer.entry is self._drop_editor
+                assert peer.timeline is self._drop_timeline
+                assert next(iter(peer.timeline._widgets.values())) is self._first_drop
+                app.checks['master_open_drop_reuses_native_pane'] = True
+            else:
+                assert texts or peer.timeline.empty.text == 'Loading messages…', (
+                    'Reopened archive is blank before its read completes',
+                    record,
+                )
+                assert self._drop_panel is not None and peer is not self._drop_panel
+                assert self._drop_panel.name.text == ''
+                assert not self._drop_panel.timeline._widgets
+                self._drop_panel = peer
+                app.checks['back_and_picker_reopen_drop_truthful_first_draw'] = True
             assert self._live_panel is not None
             self._hidden(self._live_panel)
             assert peer.name.text == app.controller.contacts.alias(app.target)
             assert peer.name.get_root_window() is not None
             self.peer_header()
-            app.checks['live_to_drop_cached_first_draw'] = True
-            app.checks['live_to_drop_reuses_native_pane'] = True
+            app.checks['explicit_drop_navigation_first_draw'] = True
             app.capture('drop-reopened-first-draw')
 
     def _hidden(self, pane: PeerView) -> None:
@@ -275,13 +284,18 @@ class NativeUxProbe:
         self.app.checks['departed_peer_revokes_both_retained_panes'] = True
 
     def peer_header(self) -> None:
-        """Requires both peer identity and connection status centered beside actions."""
+        """Requires Call and More beside the title and status beside its LIVE control."""
         peer = self.app.peer()
         assert peer is not None
         back = self.app.action('Back', peer)
         assert back is not None
         self._centered('peer_title', peer.name, back)
-        self._centered('peer_status', peer.subtitle, peer.call)
+        self._centered('peer_call', peer.name, peer.call)
+        self._centered('peer_more', peer.name, peer.more)
+        assert peer.name.parent is peer.call.parent is peer.more.parent
+        control = peer.end if peer.end.parent is not None else peer.connect
+        if control.parent is not None:
+            self._centered('peer_status', peer.subtitle, control)
         left, bottom, width, height = rectangle(peer.name)
         assert left >= 0 and bottom >= 0
         assert left + width <= Window.width and bottom + height <= Window.height, (

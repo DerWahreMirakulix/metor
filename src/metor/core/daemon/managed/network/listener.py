@@ -87,6 +87,7 @@ class InboundListener:
         call_transport_callback: Optional[
             Callable[[str, socket.socket, TcpStreamReader], None]
         ] = None,
+        operation_lock: Optional[threading.RLock] = None,
     ) -> None:
         """
         Initializes the InboundListener.
@@ -127,6 +128,7 @@ class InboundListener:
         self._stop_flag: threading.Event = stop_flag
         self._config: 'Config' = config
         self._call_transport = call_transport_callback
+        self._operation_lock = operation_lock or threading.RLock()
         self._listener_thread: Optional[threading.Thread] = None
         self._startup_event: threading.Event = threading.Event()
         self._startup_lock: threading.Lock = threading.Lock()
@@ -562,6 +564,22 @@ class InboundListener:
         if not alias:
             self._state.retire_connection(conn)
             return
+        with self._operation_lock, self._state.snapshot_barrier():
+            self._admit_live_incoming(conn, stream, onion, alias, has_recovery_hint)
+
+    def _admit_live_incoming(
+        self,
+        conn: socket.socket,
+        stream: TcpStreamReader,
+        onion: str,
+        alias: str,
+        has_recovery_hint: bool,
+    ) -> None:
+        """Serializes inbound consent decisions with End and competing admission.
+
+        The caller holds the state barrier; socket writes are queued through
+        the sole bounded writer rather than physical I/O under this lock.
+        """
 
         is_outbound_attempt: bool = self._state.has_active_or_recent_outbound_attempt(
             onion
@@ -571,19 +589,29 @@ class InboundListener:
         )
 
         transport_state = self._state.get_peer_transport_state(onion)
-        grace_reconnect: bool = self._state.has_live_reconnect_grace(onion)
-        retunnel_reconnect: bool = transport_state.is_retunneling
-        scheduled_auto_reconnect: bool = self._state.has_scheduled_auto_reconnect(onion)
-        trusted_recovery_hint: bool = False
-        if has_recovery_hint:
-            trusted_recovery_hint = (
-                grace_reconnect
-                or retunnel_reconnect
-                or scheduled_auto_reconnect
-                or transport_state.live_state is SessionState.CONNECTED
-            )
+        accepted_generation = self._state.accepted_live_context_generation(onion)
+        grace_reconnect: bool = (
+            accepted_generation is not None
+            and self._state.has_live_reconnect_grace(onion)
+        )
+        retunnel_reconnect: bool = (
+            accepted_generation is not None and transport_state.is_retunneling
+        )
+        scheduled_auto_reconnect: bool = (
+            accepted_generation is not None
+            and self._state.has_scheduled_auto_reconnect(onion)
+        )
+        trusted_recovery_hint: bool = (
+            has_recovery_hint and accepted_generation is not None
+        )
 
-        if has_recovery_hint and self._state.has_local_recovery_opt_out(onion):
+        if has_recovery_hint and (
+            self._state.has_local_recovery_opt_out(onion)
+            or (
+                accepted_generation is None
+                and self._state.known_live_context_generation(onion) is not None
+            )
+        ):
             try:
                 self._state.finish_connection(
                     conn,
@@ -667,6 +695,7 @@ class InboundListener:
         contact_auto_accept: bool = (
             alias in self._cm.get_all_contacts()
             and self._config.get_bool(SettingKey.AUTO_ACCEPT_CONTACTS)
+            and not (has_recovery_hint and accepted_generation is None)
         )
         incoming_origin: ConnectionOrigin = ConnectionOrigin.INCOMING
         if grace_reconnect:
@@ -706,7 +735,13 @@ class InboundListener:
         if should_auto_accept_now and allow_immediate_accept:
             if grace_reconnect:
                 self._state.consume_live_reconnect_grace(onion)
-            self._state.add_active_connection(onion, conn)
+            if self._stop_flag.is_set() or not self._state.add_active_connection(
+                onion,
+                conn,
+                expected_context_generation=accepted_generation,
+            ):
+                self._state.retire_connection(conn)
+                return
             accepted_now = True
         else:
             try:
@@ -727,6 +762,7 @@ class InboundListener:
                 reason=pending_reason,
                 origin=incoming_origin,
                 expiry_deadline=pending_deadline,
+                expected_context_generation=accepted_generation,
             )
             if not pending_registered:
                 return

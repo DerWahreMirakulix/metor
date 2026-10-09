@@ -29,6 +29,7 @@ class _SessionControllerBaseProtocol(Protocol):
     _stop_flag: threading.Event
     _config: 'Config'
     _receiver: Optional['StreamReceiver']
+    _operation_lock: threading.RLock
 
     def _get_local_connection_actor(
         self,
@@ -63,6 +64,14 @@ class _SessionControllerBaseProtocol(Protocol):
 
 class ConnectControllerProtocol(_SessionControllerBaseProtocol, Protocol):
     """Surface required by the outbound connect helper."""
+
+    def _get_live_reconnect_delay(self) -> float:
+        """Returns the configured automatic retry delay; zero disables retry work."""
+        ...
+
+    def _enqueue_live_reconnect(self, onion: str) -> bool:
+        """Queues an exact current accepted scope once for delayed recovery."""
+        ...
 
     def _convert_unacked_live_to_drops(
         self,

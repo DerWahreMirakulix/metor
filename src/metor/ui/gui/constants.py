@@ -1,5 +1,7 @@
 """Finite GUI resource, input and layout limits from the approved v1.0 contracts."""
 
+from metor.shared import Constants
+
 
 class GuiLimits:
     """Central bounds for presentation resources and worker admission."""
@@ -29,6 +31,9 @@ class GuiLimits:
     LIFECYCLE_CAPTURE_SECONDS: float = 65.0
     PLAYBACK_POLL_SECONDS: float = 0.1
     CALL_SNAPSHOT_SECONDS: float = 1.0
+    CALL_HANDOVER_SECONDS: float = (
+        2 * Constants.DEFAULT_IPC_TIMEOUT + CAPTURE_DRAIN_SECONDS
+    )
     AUDIO_ENDPOINTS: int = 128
     HELD_KEYS: int = 256
     HARDWARE_INPUT_RECORDS: int = 64

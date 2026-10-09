@@ -42,7 +42,7 @@ def call_preferences(
             confirm(
                 controller,
                 'Accept calls without unlocking',
-                'An explicit acceptance allows only that phone call. Chat stays locked. A confirmed headset is required; Metor does not provide speaker echo cancellation.',
+                'An explicit acceptance allows only that phone call. Chat stays locked. Select a microphone and audio output in audio settings.',
                 change,
             )
 

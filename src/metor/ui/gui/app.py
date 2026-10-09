@@ -8,8 +8,10 @@ from kivy.clock import Clock
 from kivy.config import Config
 from kivy.core.window import Window
 from kivy.input.motionevent import MotionEvent
+from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
+from kivy.uix.widget import Widget
 
 from metor.client import FrontendLaunchContext
 from metor.ui.gui.accessibility import AccessibilityBridge
@@ -26,7 +28,7 @@ from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.runtime.voice import PressSource
 from metor.ui.gui.theme import color
 from metor.ui.gui.views import Shell
-from metor.ui.gui.views.calls import CallOverlay
+from metor.ui.gui.views.calls import CallBar, CallOverlay
 from metor.ui.gui.views.feedback import FeedbackOverlay
 from metor.ui.gui.views.input import InputDock
 from metor.ui.gui.views.live_invitation import LiveInvitationOverlay
@@ -68,8 +70,11 @@ class MetorApp(App):
         self.viewport: BoxLayout | None = None
         self.input_dock: InputDock | None = None
         self.call_overlay: CallOverlay | None = None
+        self.call_bar: CallBar | None = None
         self.feedback_overlay: FeedbackOverlay | None = None
         self.invitation_overlay: LiveInvitationOverlay | None = None
+        self.invitation_slot: BoxLayout | None = None
+        self.invitation_anchor: Widget | None = None
         self._prompt_identity: object = None
         self.accessibility: AccessibilityBridge | None = None
         self._lifecycle_source: DesktopLifecycleSource | None = None
@@ -97,6 +102,7 @@ class MetorApp(App):
             BoxLayout: Native application root.
         """
         Config.set('kivy', 'exit_on_escape', '0')
+        Config.set('input', 'mouse', 'mouse,disable_multitouch')
         self.accessibility = AccessibilityBridge(
             self.controller.state,
             self.controller.security.activity,
@@ -133,6 +139,15 @@ class MetorApp(App):
         self.shell = Shell(self.controller, self.refresh)
         self.viewport = BoxLayout(orientation='vertical')
         self.viewport.add_widget(self.shell)
+        self.invitation_slot = BoxLayout(
+            size_hint_y=None, height=0, padding=(dp(Geometry.EDGE), 0)
+        )
+        self.invitation_anchor = Widget()
+        self.invitation_slot.add_widget(self.invitation_anchor)
+        self.viewport.add_widget(self.invitation_slot, index=1)
+        self.call_bar = CallBar(self.controller, self.refresh)
+        self.call_bar.bind(height=lambda *_args: self.refresh())
+        self.viewport.add_widget(self.call_bar, index=2)
         stage = FloatLayout()
         self.stage = stage
         stage.add_widget(self.viewport)
@@ -234,6 +249,18 @@ class MetorApp(App):
             None
         """
         ActionSheet.reconcile()
+        call_height = 0.0
+        if self.call_bar is not None:
+            self.call_bar.render()
+            call_height = self.call_bar.height
+        if self.invitation_overlay is not None and self.invitation_slot is not None:
+            reserved = self.invitation_overlay.reserved_height()
+            if self.shell is not None:
+                self.shell.activity_inset = reserved + call_height
+            if self.invitation_slot.height != reserved:
+                self.invitation_slot.height = reserved
+                self._settle_viewport_layout()
+                self.invitation_slot.do_layout()
         if self.shell is not None:
             self.shell.render()
         keyboard_height = (
@@ -247,6 +274,8 @@ class MetorApp(App):
             )
             self.feedback_overlay.render()
         if self.invitation_overlay is not None:
+            self.invitation_overlay.anchor_to(self.invitation_anchor)
+            self.invitation_overlay.bottom_inset = keyboard_height
             self.invitation_overlay.render()
         if self.call_overlay is not None:
             self.call_overlay.bottom_inset = keyboard_height
@@ -274,6 +303,8 @@ class MetorApp(App):
             return
         if self.input_dock is not None:
             self.input_dock.poll()
+        if self.call_bar is not None:
+            self.call_bar.render()
         prompt = self.controller.interactions.prompt
         if prompt is not self._prompt_identity:
             self._prompt_identity = prompt
@@ -390,6 +421,15 @@ class MetorApp(App):
         PointerTooltip.clear_all()
         if self.feedback_overlay is not None:
             self.feedback_overlay.revoke()
+        self.controller.calls.cover()
+        if self.call_bar is not None:
+            self.call_bar.revoke()
+        if self.call_overlay is not None:
+            self.call_overlay.revoke()
+        if self.invitation_overlay is not None:
+            self.invitation_overlay.revoke()
+        if self.invitation_slot is not None:
+            self.invitation_slot.height = 0
         self.controller.native_departure()
         self.refresh()
 
@@ -441,6 +481,15 @@ class MetorApp(App):
         PointerTooltip.clear_all()
         if self.feedback_overlay is not None:
             self.feedback_overlay.revoke()
+        self.controller.calls.cover()
+        if self.call_bar is not None:
+            self.call_bar.revoke()
+        if self.call_overlay is not None:
+            self.call_overlay.revoke()
+        if self.invitation_overlay is not None:
+            self.invitation_overlay.revoke()
+        if self.invitation_slot is not None:
+            self.invitation_slot.height = 0
         if self.shell is not None:
             self.shell.revoke_peer_views()
 

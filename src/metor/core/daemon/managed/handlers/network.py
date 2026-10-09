@@ -389,6 +389,8 @@ class NetworkCommandHandler(RuntimeSnapshotProjectionMixin):
                             'local_text_acceptance',
                             'message_outcome',
                             'message_archive_state',
+                            'drop_pending_cancellation',
+                            'live_pending_cancellation',
                             'purge_safe_milestone',
                             'voice_content',
                             'voice_inbound_descriptor',
@@ -757,7 +759,10 @@ class NetworkCommandHandler(RuntimeSnapshotProjectionMixin):
                 )
                 return
             alias, onion = resolved
-            if self._network.is_connected_or_recovering(onion):
+            reason, removed_count = self._network.dismiss_live_context(
+                onion, cmd.cancel_pending
+            )
+            if reason is not None:
                 self._send_event(
                     conn,
                     create_event(
@@ -765,26 +770,11 @@ class NetworkCommandHandler(RuntimeSnapshotProjectionMixin):
                         {
                             'alias': alias,
                             'onion': onion,
-                            'reason': MessageOperationReason.ACTIVE_LIVE_CONTEXT.value,
+                            'reason': reason.value,
                         },
                     ),
                 )
                 return
-            if self._mm.get_pending_live_outbox(onion):
-                self._send_event(
-                    conn,
-                    create_event(
-                        EventType.LIVE_CONTEXT_DISMISS_REJECTED,
-                        {
-                            'alias': alias,
-                            'onion': onion,
-                            'reason': MessageOperationReason.OUTBOUND_PENDING_LIVE.value,
-                        },
-                    ),
-                )
-                return
-            removed_count = self._mm.dismiss_inbound_live(onion)
-            self._network.dismiss_inbound_voice(onion)
             self._send_event(
                 conn,
                 create_event(

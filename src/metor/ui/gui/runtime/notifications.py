@@ -8,7 +8,10 @@ from typing import TYPE_CHECKING
 
 from metor.core.api import (
     AutoFallbackQueuedEvent,
+    ConnectionActor,
+    ConnectionOrigin,
     ConnectionRetryEvent,
+    DisconnectedEvent,
     FallbackSuccessEvent,
     IpcEvent,
     RuntimeSnapshotEvent,
@@ -17,6 +20,7 @@ from metor.core.api import (
     Delivery,
     MessageReceivedEvent,
     VoiceIncomingStartedEvent,
+    PendingConnectionReasonCode,
 )
 from metor.ui.gui.constants import GuiLimits
 from metor.ui.gui.state import Route
@@ -158,7 +162,16 @@ class Notifications:
                     live.pending_outbound_count,
                 )
         for call in snapshot.pending:
-            if call.onion:
+            if (
+                call.onion
+                and call.reason is PendingConnectionReasonCode.USER_ACCEPT
+                and call.origin
+                not in {
+                    ConnectionOrigin.AUTO_RECONNECT,
+                    ConnectionOrigin.GRACE_RECONNECT,
+                    ConnectionOrigin.RETUNNEL,
+                }
+            ):
                 yield Notice(
                     NoticeKind.INVITATION,
                     call.onion,
@@ -226,7 +239,39 @@ class Notifications:
                     actionable=False,
                 )
             )
+        elif (
+            isinstance(event, DisconnectedEvent)
+            and event.onion
+            and event.actor is ConnectionActor.LOCAL
+        ):
+            self.store.dismiss({(NoticeKind.UNSTABLE, event.onion)})
         elif isinstance(event, ConnectionRetryEvent) and event.onion:
+            snapshot = self.controller.state.snapshot
+            live = (
+                next(
+                    (
+                        entry
+                        for entry in snapshot.live_contexts
+                        if entry.onion == event.onion
+                    ),
+                    None,
+                )
+                if snapshot is not None
+                else None
+            )
+            if (
+                event.origin
+                not in {
+                    ConnectionOrigin.AUTO_RECONNECT,
+                    ConnectionOrigin.GRACE_RECONNECT,
+                    ConnectionOrigin.RETUNNEL,
+                }
+                or live is None
+                or live.context_generation is None
+                or not (live.recovery_eligible or live.session_state == 'connected')
+                or self.controller.live.stop_status(event.onion)
+            ):
+                return
             source = fingerprint((event.epoch, event.revision))
             prior = self.store.items.get((NoticeKind.UNSTABLE, event.onion))
             if prior and prior.source == source:

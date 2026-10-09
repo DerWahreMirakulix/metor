@@ -21,6 +21,7 @@ from metor.data import (
     HistoryReasonCode,
     MessageManager,
     MessageDirection,
+    PendingLiveRecord,
 )
 
 # Local Package Imports
@@ -431,6 +432,13 @@ class MessageRouter:
         """
         if self._voice is not None and not self._purge_fence.is_set():
             self._voice.dismiss_inbound(onion)
+
+    def cancel_pending_live_voice(
+        self, onion: str, pending: list[PendingLiveRecord]
+    ) -> None:
+        """Releases Voice objects whose exact LIVE spools were already cancelled."""
+        if self._voice is not None and not self._purge_fence.is_set():
+            self._voice.cancel_pending_live(onion, pending)
 
     def process_voice_frame(
         self, conn: socket.socket, onion: str, command: str, encoded: str

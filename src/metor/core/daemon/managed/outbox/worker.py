@@ -90,18 +90,25 @@ class OutboxWorker:
         self._worker_thread: Optional[threading.Thread] = None
 
     def remember_message_request_id(
-        self, msg_id: str, request_id: Optional[str]
+        self, msg_id: str, request_id: Optional[str], peer: Optional[str] = None
     ) -> None:
         """Stores request correlation for one queued drop message.
 
         Args:
             msg_id (str): The logical message identifier.
             request_id (Optional[str]): The originating IPC request identifier.
+            peer: Exact DROP peer for cancellation-safe correlation ownership.
 
         Returns:
             None
         """
-        self._state.remember_message_request_id(msg_id, request_id)
+        self._state.remember_message_request_id(msg_id, request_id, drop_peer=peer)
+
+    def forget_cancelled_requests(
+        self, identities: tuple[tuple[str, str], ...]
+    ) -> None:
+        """Releases correlation metadata for precisely stopped durable DROP identities."""
+        self._state.forget_cancelled_drop_requests(identities)
 
     def start(self) -> None:
         """Starts the worker loop in a background thread.

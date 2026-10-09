@@ -26,7 +26,7 @@ from metor.core.api import (
 )
 from metor.data import MessageDirection, MessageStatus
 from metor.ui.gui.runtime import GuiController, conversation_rows
-from metor.ui.gui.runtime.live import LiveMutation
+from metor.ui.gui.runtime.live import LiveMutation, pending_fallback_count
 from metor.ui.gui.runtime.transcript import TranscriptItem
 from metor.ui.gui.runtime.voice.press import CaptureBinding, PressSource
 from metor.ui.gui.state import Route
@@ -484,6 +484,34 @@ class LiveCoreTests(unittest.TestCase):
         self.assertEqual(
             {item.msg_id for item in self.h.messages.get_chat_history(self.h.onion)},
             {'first', 'second'},
+        )
+
+    def test_bulk_footer_fallback_refreshes_drop_with_original_identities(self) -> None:
+        """Only explicit conversion moves all pending own items into the DROP view."""
+        self.queue('first', MessageDirection.OUT)
+        self.queue('second', MessageDirection.OUT)
+        self.queue('received', MessageDirection.IN)
+        route = Route('V09', self.h.onion, Delivery.LIVE)
+        self.gui.state.route = route
+        self.assertEqual(pending_fallback_count(self.gui, route), 2)
+        self.gui.refresh_state()
+        self.settle()
+        self.assertEqual(pending_fallback_count(self.gui, route), 2)
+        self.assertEqual(self.h.messages.get_chat_history(self.h.onion), [])
+        self.assertTrue(self.gui.live.fallback(self.h.onion))
+        self.assertFalse(self.gui.live.fallback(self.h.onion))
+        self.settle()
+        self.gui.state.snapshot = self.h.client.runtime_snapshot()
+        self.assertEqual(pending_fallback_count(self.gui, route), 0)
+        self.assertEqual(
+            self.gui.state.route, Route('V08', self.h.onion, Delivery.DROP)
+        )
+        self.assertEqual(
+            {item.msg_id for item in self.h.messages.get_chat_history(self.h.onion)},
+            {'first', 'second'},
+        )
+        self.assertEqual(
+            [item.msg_id for item in self.gui.transcript.items.values()], ['received']
         )
 
     def test_live_root_uses_core_recency_then_stable_peer_ties(self) -> None:

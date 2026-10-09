@@ -51,6 +51,7 @@ class WaveformSeek(ContextAction):
             focus=self._draw,
             minimum_height=self._measure,
         )
+        self.hint.bind(pos=self._draw, size=self._draw)
 
     def _measure(self, *_args: object) -> None:
         """Keeps the hit target at least 48 logical units and grows for wrapped metadata.

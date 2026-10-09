@@ -272,6 +272,10 @@ class MessageManager:
         """
         return self._messages.message_state(onion, msg_id, direction)
 
+    def drop_delivery_pending(self, receipt_id: int, onion: str, msg_id: str) -> bool:
+        """Checks exact durable DROP emission authority under the caller's Core barrier."""
+        return self._messages.drop_delivery_pending(receipt_id, onion, msg_id)
+
     def list_retained_messages(
         self,
         contact_onion: Optional[str] = None,
@@ -537,6 +541,7 @@ class MessageManager:
         contact_onion: str,
         msg_id: str,
         direction: Optional[MessageDirection] = None,
+        cancel_pending: bool = False,
     ) -> MessageDeleteOutcome:
         """Deletes one eligible local DROP payload without removing its receipt.
 
@@ -544,11 +549,14 @@ class MessageManager:
             contact_onion (str): The peer onion identity.
             msg_id (str): Stable logical message identifier.
             direction (Optional[MessageDirection]): Exact local row direction.
+            cancel_pending: Whether queued outbound delivery is explicitly cancelled.
 
         Returns:
             MessageDeleteOutcome: Typed domain result.
         """
-        return self._messages.delete_drop_message(contact_onion, msg_id, direction)
+        return self._messages.delete_drop_message(
+            contact_onion, msg_id, direction, cancel_pending
+        )
 
     def dismiss_inbound_live(self, contact_onion: str) -> int:
         """Shreds inbound LIVE payload state retained for one peer.
@@ -560,6 +568,12 @@ class MessageManager:
             int: Number of receipts whose payload state was dismissed.
         """
         return self._messages.dismiss_inbound_live(contact_onion)
+
+    def discard_pending_live(
+        self, contact_onion: str, msg_ids: list[str]
+    ) -> list[PendingLiveRecord] | None:
+        """Stops an exact pending LIVE selection under the caller's Core operation barrier."""
+        return self._messages.discard_pending_live(contact_onion, msg_ids)
 
     def update_message_status(self, msg_id: int, new_status: MessageStatus) -> None:
         """
@@ -757,6 +771,7 @@ class MessageManager:
         non_contacts_only: bool = False,
         msg_id: Optional[str] = None,
         direction: Optional[MessageDirection] = None,
+        include_pending: bool = False,
     ) -> List[str]:
         """Returns metadata for persistent Voice blobs eligible for local removal.
 
@@ -765,6 +780,7 @@ class MessageManager:
             non_contacts_only (bool): The non contacts only input.
             msg_id (Optional[str]): The msg id input.
             direction (Optional[MessageDirection]): The direction input.
+            include_pending: Includes queued payloads only for confirmed cancellation.
 
         Returns:
             List[str]: The resulting value.
@@ -774,6 +790,7 @@ class MessageManager:
             non_contacts_only=non_contacts_only,
             msg_id=msg_id,
             direction=direction,
+            include_pending=include_pending,
         )
 
     def has_drop_payload(self, contact_onion: str, msg_id: str) -> bool:
@@ -792,6 +809,7 @@ class MessageManager:
         self,
         onion: Optional[str] = None,
         non_contacts_only: bool = False,
+        cancel_pending: bool = False,
     ) -> MessageClearResult:
         """
         Clears persisted message state globally or for one peer.
@@ -799,23 +817,28 @@ class MessageManager:
         Args:
             onion (Optional[str]): The target onion identity.
             non_contacts_only (bool): If True, only deletes messages from unsaved peers.
+            cancel_pending: Whether queued DROP delivery is explicitly cancelled.
 
         Returns:
             MessageClearResult: The typed clear-messages result.
         """
         try:
-            self._messages.clear_messages(onion, non_contacts_only)
+            cancelled = self._messages.clear_messages(
+                onion, non_contacts_only, cancel_pending
+            )
             if non_contacts_only:
                 if onion:
                     return MessageClearResult(
                         True,
                         MessageClearOperationType.NON_CONTACTS_TARGET_CLEARED,
                         target_onion=onion,
+                        cancelled_drop_ids=cancelled,
                     )
                 return MessageClearResult(
                     True,
                     MessageClearOperationType.NON_CONTACTS_ALL_CLEARED,
                     profile=self._pm.profile_name,
+                    cancelled_drop_ids=cancelled,
                 )
 
             if onion:
@@ -823,12 +846,14 @@ class MessageManager:
                     True,
                     MessageClearOperationType.TARGET_CLEARED,
                     target_onion=onion,
+                    cancelled_drop_ids=cancelled,
                 )
 
             return MessageClearResult(
                 True,
                 MessageClearOperationType.ALL_CLEARED,
                 profile=self._pm.profile_name,
+                cancelled_drop_ids=cancelled,
             )
         except Exception:
             return MessageClearResult(

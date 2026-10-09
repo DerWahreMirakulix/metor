@@ -343,8 +343,9 @@ class GuiSecurityIntegrationTests(unittest.TestCase):
             action = 'A11:' + sent[0]
             self.assertFalse(self.controller.state.busy)
             self.assertEqual(
-                self.controller.state.drafts[(peer, Delivery.LIVE)], 'one logical send'
+                self.controller.text.operations[action][2], 'one logical send'
             )
+            self.assertNotIn((peer, Delivery.LIVE), self.controller.state.drafts)
             self.assertIn(action, self.controller.text.operations)
             self.assertIn(action, self.controller._unknown_actions)
             self.assertEqual(

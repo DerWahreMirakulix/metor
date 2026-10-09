@@ -87,7 +87,8 @@ def conversation_menu(
                     delete,
                     tone='danger',
                     disabled=controller.state.busy
-                    or controller.drop.pending is not None,
+                    or controller.drop.pending is not None
+                    or not controller.drop.can_clear(peer),
                 )
             )
         else:
@@ -101,7 +102,8 @@ def conversation_menu(
                     None
                 """
                 sheet.dismiss(animation=False)
-                controller.navigate(Route('V09', peer, Delivery.LIVE))
+                if not controller.live_invitations.show_peer(peer):
+                    controller.navigate(Route('V09', peer, Delivery.LIVE))
                 refresh()
 
             body.add_widget(Action('Open Live', open_live))
@@ -135,5 +137,6 @@ def conversation_menu(
         build,
         title=lambda: controller.contacts.alias(peer),
         compact_menu=True,
+        revision=lambda: controller.drop.can_clear(peer),
     )
     sheet.show()

@@ -11,9 +11,9 @@ from kivy.uix.scrollview import ScrollView
 
 from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.state.notifications import Notice, NoticeKind
-from metor.ui.gui.widgets import Action, Label
+from metor.ui.gui.widgets import Action, ActionRow, Label
 from metor.ui.gui.widgets.sheet import ActionSheet
-from metor.ui.gui.widgets.symbol import IconAction, Symbol
+from metor.ui.gui.widgets.symbol import IconAction
 from metor.ui.gui.widgets.context import ContextAction
 
 
@@ -41,8 +41,7 @@ def notification_center(
     store = controller.notifications.store
     store.mark_seen()
     panel = BoxLayout(orientation='vertical', spacing=dp(16))
-    header = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(12))
-    header.bind(minimum_height=header.setter('height'))
+    header = ActionRow(spacing=dp(12))
 
     def back() -> None:
         """Returns to the preceding presentation and clears local selection.
@@ -192,9 +191,6 @@ def notice_row(
     summary_label = Label(summary, role='support', tone='textSecondary')
     summary_row = BoxLayout(size_hint_y=None, height=dp(18), spacing=dp(8))
     summary_row.add_widget(summary_label)
-    summary_row.add_widget(
-        Symbol('chevron-right', tone='textSecondary', size_hint_x=None, width=dp(24))
-    )
     summary_label.bind(
         height=lambda _widget, height: setattr(
             summary_row, 'height', max(dp(18), height)

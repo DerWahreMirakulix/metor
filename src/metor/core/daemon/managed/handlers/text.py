@@ -111,6 +111,7 @@ class TextCommandHandler:
                 self._outbox.remember_message_request_id(
                     cmd.msg_id,
                     cmd.request_id,
+                    onion,
                 )
                 self._mm.queue_message(
                     contact_onion=str(onion),

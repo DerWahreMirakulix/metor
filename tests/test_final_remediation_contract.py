@@ -270,12 +270,20 @@ class FinalRemediationContractTests(unittest.TestCase):
         later = cast(socket.socket, Mock())
         state.add_active_connection('alice', first)
         original = state.get_live_context_generation('alice')
+        assert original is not None
 
         self.assertIs(state.pop_any_connection('alice'), first)
+        self.assertIsNotNone(state.begin_accepted_live_recovery('alice', 15.0))
+        self.assertEqual(state.accepted_live_context_generation('alice'), original)
         state.mark_scheduled_auto_reconnect('alice')
-        state.add_active_connection('alice', recovered)
+        self.assertTrue(
+            state.add_active_connection(
+                'alice', recovered, expected_context_generation=original
+            )
+        )
         self.assertEqual(state.get_live_context_generation('alice'), original)
 
+        self.assertEqual(state.revoke_accepted_live_context('alice'), original)
         self.assertIs(state.pop_any_connection('alice'), recovered)
         state.add_active_connection('alice', later)
         self.assertNotEqual(state.get_live_context_generation('alice'), original)

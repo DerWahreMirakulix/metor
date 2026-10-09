@@ -11,11 +11,11 @@ from kivy.input.motionevent import MotionEvent
 
 from metor.core.api import CallState, NotificationPrivacy
 from metor.ui.gui.runtime import GuiController
-from metor.ui.gui.widgets import Action, Label, Panel
+from metor.ui.gui.widgets import Action, ActionRow, Label, Panel
 from metor.ui.gui.widgets.symbol import IconAction
 
 # Local Package Imports
-from .audio import show_audio_unavailable
+from ..audio import show_audio_unavailable
 
 
 class CallPanel(Panel):
@@ -41,6 +41,21 @@ class CallOverlay(FloatLayout):
         self._duration: Label | None = None
         self._status: Label | None = None
         self.bind(size=lambda *_args: self.refresh())
+
+    def revoke(self) -> None:
+        """Clears caller content before cover without ending an accepted Call."""
+        for widget in self.walk(restrict=True):
+            if isinstance(widget, Action):
+                widget.cancel_input()
+                widget.focus = False
+                widget.disabled = True
+                widget.accessible_name = ''
+            if isinstance(widget, Label):
+                widget.text = ''
+        self.clear_widgets()
+        self._key = None
+        self._duration = self._status = None
+        self.occupied_height = 0.0
 
     def render(self) -> None:
         """Updates duration without replacing controls or exposing locked chat identity."""
@@ -100,20 +115,25 @@ class CallOverlay(FloatLayout):
         if current is None and not calls.status:
             return
         if not calls.visible:
-            if current is not None and current.state is not CallState.ENDED:
-                self.add_widget(
-                    Action(
-                        'Phone call',
-                        self._show,
-                        size_hint=(None, None),
-                        width=dp(160),
-                        pos_hint={'right': 1, 'top': 1},
-                    )
-                )
             return
         if state.covered and active and self.bottom_inset:
             self._keyboard_call_panel()
             return
+        hide_id = current.call_id if current is not None else None
+        hide_phase = current.state if current is not None else None
+        hide_generation = state.generation
+
+        def hide_controls() -> None:
+            """Does not dismiss a replacement Call through a retained close action."""
+            source = calls.current
+            if (
+                controller.state.generation != hide_generation
+                or (source.call_id if source is not None else None) != hide_id
+                or (source.state if source is not None else None) is not hide_phase
+            ):
+                return
+            self._hide()
+
         panel = CallPanel(
             orientation='vertical',
             padding=dp(20),
@@ -121,15 +141,10 @@ class CallOverlay(FloatLayout):
             size_hint=(None, None),
             width=min(dp(420), max(dp(48), self.width - dp(48))),
         )
-        header = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(12))
+        header = ActionRow(spacing=dp(12))
         title = Label('Phone call', role='title')
-        title.bind(
-            height=lambda _widget, height: setattr(
-                header, 'height', max(dp(48), height)
-            )
-        )
         header.add_widget(title)
-        header.add_widget(IconAction('x', 'Hide call controls', self._hide))
+        header.add_widget(IconAction('x', 'Hide call controls', hide_controls))
         panel.add_widget(header)
         scroll = ScrollView(do_scroll_x=False)
         body = BoxLayout(orientation='vertical', spacing=dp(12), size_hint_y=None)
@@ -143,7 +158,7 @@ class CallOverlay(FloatLayout):
                 CallState.INCOMING: 'Incoming phone call',
                 CallState.ACTIVE: 'Connected · microphone muted'
                 if current.muted
-                else 'Connected · headset audio',
+                else 'Connected',
                 CallState.ENDED: 'Call ended'
                 + (
                     ' · ' + current.reason.value.replace('_', ' ')
@@ -157,28 +172,18 @@ class CallOverlay(FloatLayout):
                 f'{seconds // 60:02d}:{seconds % 60:02d}', role='peer'
             )
             body.add_widget(self._duration)
-        elif not state.covered:
-            body.add_widget(
-                Label(
-                    'Headset operation · no speaker echo cancellation',
-                    role='support',
-                    tone='textSecondary',
-                )
-            )
         self._status = Label(calls.status, role='support', tone='textSecondary')
         body.add_widget(self._status)
         scroll.add_widget(body)
         panel.add_widget(scroll)
         compact = state.covered and active
-        actions = BoxLayout(
+        actions = ActionRow(
             orientation='horizontal' if compact else 'vertical',
-            size_hint_y=None,
-            height=dp(48) if compact else 0,
             spacing=dp(12),
         )
-        actions.bind(minimum_height=actions.setter('height'))
         if current is not None:
             call_id = current.call_id
+            generation, phase = state.generation, current.state
             if incoming:
                 can_locked = (
                     not state.covered or controller.security.accept_calls_locked
@@ -186,14 +191,16 @@ class CallOverlay(FloatLayout):
                 actions.add_widget(
                     Action(
                         'Decline',
-                        lambda: self._act(lambda: calls.reject(call_id)),
+                        lambda: self._act(
+                            lambda: calls.reject(call_id), call_id, generation, phase
+                        ),
                         disabled=state.busy,
                     )
                 )
                 actions.add_widget(
                     Action(
                         'Accept' if can_locked else 'Unlock to accept',
-                        lambda: self._accept(call_id),
+                        lambda: self._accept(call_id, generation),
                         disabled=state.busy,
                     )
                 )
@@ -205,14 +212,20 @@ class CallOverlay(FloatLayout):
                         else (
                             'Unmute microphone' if current.muted else 'Mute microphone'
                         ),
-                        lambda: self._act(calls.mute),
+                        lambda: self._act(
+                            calls.mute,
+                            call_id,
+                            generation,
+                            phase,
+                            muted=current.muted,
+                        ),
                         disabled=state.busy,
                     )
                 )
                 actions.add_widget(
                     Action(
                         'Hang up',
-                        lambda: self._act(calls.end),
+                        lambda: self._act(calls.end, call_id, generation, phase),
                         tone='danger',
                         disabled=state.busy,
                     )
@@ -221,12 +234,12 @@ class CallOverlay(FloatLayout):
                 actions.add_widget(
                     Action(
                         'Cancel call',
-                        lambda: self._act(calls.end),
+                        lambda: self._act(calls.end, call_id, generation, phase),
                         disabled=state.busy or not current.owned,
                     )
                 )
             else:
-                actions.add_widget(Action('Close', self._hide))
+                actions.add_widget(Action('Close', hide_controls))
         panel.add_widget(actions)
         self.add_widget(panel)
 
@@ -250,6 +263,7 @@ class CallOverlay(FloatLayout):
         calls = self.controller.calls
         current = calls.current
         assert current is not None
+        generation, call_id = self.controller.state.generation, current.call_id
         panel = CallPanel(
             orientation='vertical',
             padding=dp(12),
@@ -257,14 +271,9 @@ class CallOverlay(FloatLayout):
             size_hint=(None, None),
             width=min(dp(420), self.width - dp(48)),
         )
-        header = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(8))
+        header = ActionRow(spacing=dp(8))
         title = Label(
             'Call · muted' if current.muted else 'Call · connected', role='support'
-        )
-        title.bind(
-            height=lambda _widget, height: setattr(
-                header, 'height', max(dp(48), height)
-            )
         )
         header.add_widget(title)
         seconds = (
@@ -279,20 +288,32 @@ class CallOverlay(FloatLayout):
             width=dp(72),
         )
         header.add_widget(self._duration)
-        header.add_widget(IconAction('x', 'Hide call controls', self._hide))
+        header.add_widget(
+            IconAction(
+                'x',
+                'Hide call controls',
+                lambda: self._act(self._hide, call_id, generation, CallState.ACTIVE),
+            )
+        )
         panel.add_widget(header)
-        actions = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(8))
+        actions = ActionRow(spacing=dp(8))
         actions.add_widget(
             Action(
                 'Unmute' if current.muted else 'Mute',
-                lambda: self._act(calls.mute),
+                lambda: self._act(
+                    calls.mute,
+                    call_id,
+                    generation,
+                    CallState.ACTIVE,
+                    muted=current.muted,
+                ),
                 disabled=self.controller.state.busy,
             )
         )
         actions.add_widget(
             Action(
                 'Hang up',
-                lambda: self._act(calls.end),
+                lambda: self._act(calls.end, call_id, generation, CallState.ACTIVE),
                 tone='danger',
                 disabled=self.controller.state.busy,
             )
@@ -310,28 +331,52 @@ class CallOverlay(FloatLayout):
         header.bind(height=measure)
         measure()
 
-    def _accept(self, call_id: str) -> None:
+    def _accept(self, call_id: str, generation: int) -> None:
         """Offers explicit closed audio setup before accepting this incoming Call."""
+        current = self.controller.calls.current
+        if (
+            generation != self.controller.state.generation
+            or current is None
+            or current.call_id != call_id
+            or current.state is not CallState.INCOMING
+        ):
+            return
         if not self.controller.calls.ready and not self.controller.state.covered:
             show_audio_unavailable(self.controller, self.refresh, purpose='calls')
         else:
-            self._act(lambda: self.controller.calls.accept(call_id))
-
-    def _show(self) -> None:
-        """Explicitly restores phone controls without navigating or accepting a Call."""
-        calls = self.controller.calls
-        calls.visible = True
-        calls.revision += 1
-        self.refresh()
+            self._act(
+                lambda: self.controller.calls.accept(call_id),
+                call_id,
+                generation,
+                CallState.INCOMING,
+            )
 
     def _hide(self) -> None:
-        """Hides full controls; an active Call remains reachable through a compact badge."""
+        """Hides expanded controls while the persistent Call bar keeps the call reachable."""
         calls = self.controller.calls
         calls.visible = False
         calls.revision += 1
         self.refresh()
 
-    def _act(self, action: Callable[[], object]) -> None:
+    def _act(
+        self,
+        action: Callable[[], object],
+        call_id: str,
+        generation: int,
+        phase: CallState,
+        *,
+        muted: bool | None = None,
+    ) -> None:
         """Activates an exact displayed Call action and requests native repaint."""
+        current = self.controller.calls.current
+        if (
+            self.controller.state.generation != generation
+            or current is None
+            or current.call_id != call_id
+            or current.state is not phase
+            or muted is not None
+            and current.muted is not muted
+        ):
+            return
         action()
         self.refresh()

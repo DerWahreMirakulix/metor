@@ -8,12 +8,13 @@ from kivy.core.text import Label as CoreLabel
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.scrollview import ScrollView
+from kivy.uix.widget import Widget
 from kivy.input.motionevent import MotionEvent
 
 from metor.ui.gui.constants import Geometry
 from metor.ui.gui.theme import font_path, TYPE
 from metor.ui.gui.runtime import GuiController
-from metor.ui.gui.widgets import Action, Label, Panel
+from metor.ui.gui.widgets import Action, ActionRow, Label, Panel
 from metor.ui.gui.widgets.symbol import IconAction
 from metor.ui.gui.widgets.sheet import ActionSheet
 
@@ -22,7 +23,7 @@ class InvitationPanel(Panel):
     """Consumes touches inside its surface while leaving the surrounding view usable."""
 
     def on_touch_down(self, touch: MotionEvent) -> bool:
-        """Prevents a invitation-surface press from activating obscured underlying controls.
+        """Prevents an invitation-surface press from activating obscured underlying controls.
 
         Args:
             touch: Native pointer event.
@@ -51,8 +52,64 @@ class LiveInvitationOverlay(FloatLayout):
         self.controller = controller
         self.refresh = refresh
         self._key: tuple[object, ...] | None = None
+        self._anchor: Widget | None = None
         self.bottom_inset = 0.0
         self.bind(size=lambda *_args: self.refresh())
+
+    def anchor_to(self, anchor: Widget | None) -> None:
+        """Positions the pending browser within its reserved activity row."""
+        if anchor is self._anchor:
+            return
+        if self._anchor is not None:
+            self._anchor.unbind(pos=self._anchor_changed, size=self._anchor_changed)
+        self._anchor = anchor
+        if anchor is not None:
+            anchor.bind(pos=self._anchor_changed, size=self._anchor_changed)
+        self.refresh()
+
+    def _anchor_changed(self, *_args: object) -> None:
+        """Schedules measured indicator placement after foreground layout changes."""
+        self.refresh()
+
+    def reserved_height(self) -> float:
+        """Reserves a distinct activity row while the pending browser is discoverable."""
+        invitations = self.controller.live_invitations
+        if (
+            self.controller.state.covered
+            or invitations.visible
+            or not invitations.pending_handles()
+            or ActionSheet.current is not None
+            or self.controller.interactions.prompt is not None
+        ):
+            return 0.0
+        return self._indicator_size()[1]
+
+    def _indicator_size(self) -> tuple[float, float]:
+        """Measures the exact packaged font used by the pending browser's label."""
+        text = (
+            f'Pending Live · {len(self.controller.live_invitations.pending_handles())}'
+        )
+        button_size, _line, weight = TYPE['button']
+        indicator_measure = CoreLabel(
+            text=text,
+            font_name=font_path(weight, text),
+            font_size=sp(button_size),
+        )
+        indicator_measure.refresh()
+        return (
+            max(dp(160), indicator_measure.texture.size[0] + dp(24)),
+            max(dp(Geometry.TARGET), indicator_measure.texture.size[1] + dp(16)),
+        )
+
+    def revoke(self) -> None:
+        """Removes private invitation text and input ownership before a privacy cover."""
+        for widget in self.walk(restrict=True):
+            if isinstance(widget, Action):
+                widget.cancel_input()
+                widget.focus = False
+        self.clear_widgets()
+        self._key = None
+        self.anchor_to(None)
 
     def render(self) -> None:
         """Reconciles only permitted invitation content, retaining stable controls between updates.
@@ -64,6 +121,16 @@ class LiveInvitationOverlay(FloatLayout):
         """
         invitations = self.controller.live_invitations
         state = self.controller.state
+        anchor = self._anchor
+        bounds = (
+            (
+                *self.to_widget(*anchor.to_window(*anchor.pos)),
+                anchor.width,
+                anchor.height,
+            )
+            if anchor is not None
+            else (self.x, self.y, self.width, self.height)
+        )
         modal = (
             ActionSheet.current is not None
             or self.controller.interactions.prompt is not None
@@ -76,38 +143,61 @@ class LiveInvitationOverlay(FloatLayout):
             self.size[:],
             modal,
             self.bottom_inset,
+            bounds,
         )
         if key == self._key:
             return
         self._key = key
         self.clear_widgets()
-        entry = invitations.entries.get(invitations.selected or '')
-        if entry is None or entry.phase == 'ended':
+        if state.covered:
             return
-        if not invitations.visible or modal:
-            if not invitations.visible and not any(
-                item.phase != 'ended' for item in invitations.entries.values()
-            ):
+        handles = invitations.pending_handles()
+        if not handles or modal:
+            return
+        selected = (
+            invitations.selected if invitations.selected in handles else handles[0]
+        )
+        entry = invitations.entries[selected]
+        if not invitations.visible:
+            left, bottom, available_width, available_height = bounds
+            text = f'Pending Live · {len(handles)}'
+            indicator_width, height = self._indicator_size()
+            if available_height < height or available_width < dp(Geometry.TARGET):
                 return
             indicator = Action(
-                'Live chat invitation',
+                text,
                 self._show,
-                size_hint_x=None,
-                width=dp(160),
-                pos_hint={'right': 1, 'top': 1},
+                size_hint=(None, None),
+                width=min(available_width, indicator_width),
+            )
+            indicator.height = height
+            indicator.pos = (
+                left + available_width - indicator.width,
+                bottom + available_height - height,
             )
             self.add_widget(indicator)
             return
         width = min(dp(480), self.width - dp(48))
+        compact = self.height - self.bottom_inset < dp(480)
+        padding = dp(12 if compact else 24)
+        spacing = dp(8 if compact else 16)
         panel = InvitationPanel(
             orientation='vertical',
-            padding=dp(24),
-            spacing=dp(16),
+            padding=padding,
+            spacing=spacing,
             size_hint=(None, None),
             width=width,
         )
         header = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(12))
-        title = Label('Live chat invitation', role='title')
+        title = Label(
+            entry.label
+            if compact
+            else 'Accept Live chat?'
+            if invitations.presentation == 'chooser'
+            else 'Live chat invitation',
+            role='row' if compact else 'title',
+            wrap=not compact,
+        )
         title.bind(
             height=lambda _widget, height: setattr(
                 header, 'height', max(dp(48), height)
@@ -119,21 +209,10 @@ class LiveInvitationOverlay(FloatLayout):
         scroll = ScrollView(do_scroll_x=False)
         body = BoxLayout(orientation='vertical', size_hint_y=None, spacing=dp(12))
         body.bind(minimum_height=body.setter('height'))
-        if entry.label != 'Live chat invitation':
+        if entry.label != 'Live chat invitation' and not compact:
             body.add_widget(Label(entry.label))
-        body.add_widget(
-            Label(
-                'Accept opens Live chat access. Microphone and playback remain off. Open switches to Live.',
-                role='support',
-                tone='textSecondary',
-            )
-        )
-        if entry.status:
-            body.add_widget(Label(entry.status, role='support', tone='textSecondary'))
-        handles = [
-            key for key, item in invitations.entries.items() if item.phase != 'ended'
-        ]
-        if len(handles) > 1:
+        pager: BoxLayout | None = None
+        if len(handles) > 1 and invitations.presentation == 'banner':
             pager = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(12))
             pager.add_widget(
                 IconAction(
@@ -149,42 +228,51 @@ class LiveInvitationOverlay(FloatLayout):
             pager.add_widget(
                 IconAction('chevron-right', 'Next invitation', lambda: self._step(1))
             )
+            if compact:
+                body.add_widget(pager)
+        if invitations.presentation == 'banner':
+            body.add_widget(
+                Label(
+                    'Accept keeps your current view. Accept and open takes you to Live chat.',
+                    role='support',
+                    tone='textSecondary',
+                )
+            )
+        if entry.status:
+            body.add_widget(Label(entry.status, role='support', tone='textSecondary'))
+        if pager is not None and not compact:
             body.add_widget(pager)
         scroll.add_widget(body)
         panel.add_widget(scroll)
         button_size, _line, weight = TYPE['button']
         longest = CoreLabel(
-            text='Unlock to accept' if entry.denied else 'Open Live',
+            text='Unlock to accept' if entry.denied else 'Accept and open',
             font_name=font_path(weight),
             font_size=sp(button_size),
         )
         longest.refresh()
-        stacked = width - dp(48) < max(
-            dp(360), 3 * (longest.texture.size[0] + dp(24)) + dp(24)
+        action_count = 2 if invitations.presentation == 'chooser' else 3
+        stacked = width - padding * 2 < max(
+            dp(360), action_count * (longest.texture.size[0] + dp(24)) + dp(24)
         )
-        actions = BoxLayout(
+        actions = ActionRow(
             orientation='vertical' if stacked else 'horizontal',
-            size_hint_y=None,
-            height=dp(168 if stacked else 48),
             spacing=dp(12),
         )
-        if entry.phase == 'ended':
-            actions.height = dp(48)
-            actions.add_widget(Action('Close', self._dismiss))
-        else:
-            for label, intent in (
-                ('Decline', 'decline'),
-                ('Unlock to accept' if entry.denied else 'Accept', 'accept'),
-                ('Open Live', 'open'),
-            ):
-                handle = entry.handle
-                action = Action(
-                    label,
-                    partial(self._perform, handle, intent),
-                    disabled=state.busy
-                    or (entry.phase != 'pending' and intent != 'open'),
-                )
-                actions.add_widget(action)
+        choices = [
+            ('Reject', 'decline'),
+            ('Unlock to accept' if entry.denied else 'Accept', 'accept'),
+        ]
+        if invitations.presentation == 'banner':
+            choices.append(('Accept and open', 'open'))
+        for label, intent in choices:
+            handle = entry.handle
+            action = Action(
+                label,
+                partial(self._perform, handle, intent),
+                disabled=state.busy or entry.phase != 'pending',
+            )
+            actions.add_widget(action)
         panel.add_widget(actions)
         self.add_widget(panel)
 
@@ -198,7 +286,11 @@ class LiveInvitationOverlay(FloatLayout):
             """
             panel.height = min(
                 self.height - dp(48) - self.bottom_inset,
-                body.height + actions.height + header.height + dp(80),
+                body.height
+                + actions.height
+                + header.height
+                + padding * 2
+                + spacing * 2,
             )
             panel.x = self.x + (self.width - panel.width) / 2
             panel.y = (
@@ -211,10 +303,11 @@ class LiveInvitationOverlay(FloatLayout):
 
         body.bind(height=measure)
         header.bind(height=measure)
+        actions.bind(height=measure)
         measure()
 
     def _show(self) -> None:
-        """Switches from an explicitly dismissed modal to the current invitation surface.
+        """Opens current pending requests through their explicit activity browser.
 
         Args:
             None

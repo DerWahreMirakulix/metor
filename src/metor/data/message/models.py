@@ -164,3 +164,4 @@ class MessageClearResult:
     operation_type: MessageClearOperationType
     target_onion: Optional[str] = None
     profile: Optional[str] = None
+    cancelled_drop_ids: tuple[tuple[str, str], ...] = ()

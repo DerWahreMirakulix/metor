@@ -13,11 +13,23 @@ def clear_drops(controller: GuiController, peer: str | None) -> None:
     Returns:
         None
     """
+    if not controller.drop.can_clear(peer):
+        controller.state.status = (
+            'Update Core to cancel queued Drops when deleting.'
+            if 'drop_pending_cancellation' not in controller.state.capabilities
+            else 'Wait until the send result is confirmed before deleting.'
+        )
+        return
     confirm(
         controller,
         'Clear all Drops' if peer is None else 'Delete conversation',
         'Delete local Drops and their history'
         + (' for this conversation' if peer else '')
-        + '. Pending delivery is preserved. Saved contacts, Live and unsent voice reviews remain.',
+        + (
+            '. Queued Drops will be cancelled. A copy already transmitted may still arrive.'
+            if peer is not None
+            else '. Pending delivery is preserved.'
+        )
+        + ' Saved contacts, Live, text drafts and unsent voice reviews remain.',
         lambda: controller.drop.clear(peer),
     )

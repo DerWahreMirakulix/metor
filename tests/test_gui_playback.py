@@ -1,10 +1,13 @@
 """Playback safety tests with deterministic encoded sources and explicit synthetic output."""
 
 import base64
+from dataclasses import replace
+import sys
 import threading
 import struct
+from types import SimpleNamespace
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from metor.client import FrontendProfileState
 from metor.core.api import (
@@ -15,15 +18,17 @@ from metor.core.api import (
     LiveContextEntry,
     RuntimeSnapshotEvent,
     VoiceIncomingStartedEvent,
+    MessageStatusCode,
 )
 from metor.client import FrontendLaunchContext
 from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.state import Route
 from metor.ui.gui.constants import GuiLimits
-from metor.ui.gui.platform.audio import PcmVoice
+from metor.ui.gui.platform.audio import HeadsetAudio, PcmVoice
 from metor.ui.gui.runtime.playback.worker import PlaybackWorker
-from metor.ui.gui.state.mailbox import Mailbox
+from metor.ui.gui.state.mailbox import Mailbox, Update
 from metor.ui.gui.state.media import MediaCache, PlaybackTarget
+from metor.ui.gui.state.media.models import PlaybackProgress
 from metor.ui.gui.state.media.envelope import PcmEnvelope
 
 
@@ -118,6 +123,19 @@ class PlaybackTests(unittest.TestCase):
         self.audio.play_frame.assert_not_called()
         self.client.release_voice.assert_not_called()
 
+    def test_device_output_failure_publishes_actionable_route_state(self) -> None:
+        """Native failure remains distinguishable from invalid or unavailable source media."""
+        self.client.get_voice_chunk.return_value = self.event()
+        self.audio.play_frame.side_effect = OSError('Device disconnected')
+        self.run_worker()
+        states: list[str] = []
+        while (update := self.mailbox.take()) is not None:
+            if update.playback is not None:
+                states.append(update.playback.state)
+        self.assertEqual(states[-1], 'output_unavailable')
+        self.client.release_voice.assert_not_called()
+        self.assertFalse(self.cache.coverage.complete(self.target, len(self.payload)))
+
     def test_departure_during_sdk_read_cannot_start_output(self) -> None:
         """An in-flight read returning after navigation cannot make old audio audible."""
         entered, release = threading.Event(), threading.Event()
@@ -148,6 +166,47 @@ class PlaybackTests(unittest.TestCase):
             b''.join(call.args[0] for call in self.audio.play_frame.call_args_list),
             self.payload[PcmVoice.FRAME_BYTES :],
         )
+
+    def test_short_seek_suffix_drains_through_underflow_without_consuming_prefix(
+        self,
+    ) -> None:
+        """A seek near the end plays its complete suffix despite startup inserted silence."""
+        self.cache.append(self.target, 0, self.payload, complete=True)
+        output = Mock()
+        output.write.return_value = True
+        self.audio = HeadsetAudio(output_device=7)
+        sounddevice = SimpleNamespace(RawOutputStream=Mock(return_value=output))
+        offset = len(self.payload) - PcmVoice.SAMPLE_BYTES
+
+        with patch.dict(sys.modules, {'sounddevice': sounddevice}):
+            worker = self.run_worker(offset=offset)
+
+        output.write.assert_called_once_with(self.payload[offset:])
+        output.stop.assert_called_once()
+        output.close.assert_called_once()
+        self.assertEqual(worker.position, len(self.payload))
+        self.client.release_voice.assert_not_called()
+        states: list[str] = []
+        while (update := self.mailbox.take()) is not None:
+            if update.playback is not None:
+                states.append(update.playback.state)
+        self.assertEqual(states[-1], 'partial')
+
+    def test_successful_full_output_publishes_exact_confirmed_release(self) -> None:
+        """The local read state receives the same scoped positive Core release as playback."""
+        self.client.get_voice_chunk.return_value = self.event()
+        self.run_worker()
+        releases: list[Update] = []
+        while (update := self.mailbox.take()) is not None:
+            if update.operation == 'playback-released':
+                releases.append(update)
+        self.assertEqual(len(releases), 1)
+        release = releases[0]
+        self.assertIs(release.event, self.client.release_voice.return_value)
+        assert release.playback is not None
+        self.assertEqual(release.playback.target, self.target)
+        self.assertEqual(release.playback.position, len(self.payload))
+        self.assertEqual(release.playback.state, 'complete')
 
     def test_paused_prefix_and_later_tail_union_release_once(self) -> None:
         """A drained prefix survives pause; a later complete tail fills the actual coverage gap."""
@@ -368,6 +427,86 @@ class ManualPlaybackTests(unittest.TestCase):
                 )
                 self.assertFalse(self.gui.playback.play(target))
         self.gui.playback.audio.play_frame.assert_not_called()
+
+    def test_confirmed_listening_marks_only_exact_incoming_projection_read(
+        self,
+    ) -> None:
+        """A current full listen reconciles its IN message without affecting the other mode."""
+        for delivery in (Delivery.LIVE, Delivery.DROP):
+            self.gui.transcript.install(
+                VoiceIncomingStartedEvent(
+                    'Peer', 'received', delivery, PcmVoice.CODEC, 0, 'peer'
+                )
+            )
+        target = self.gui.playback.target(
+            'peer', Delivery.LIVE, MessageDirectionCode.IN, 'received'
+        )
+        assert target is not None
+        self.gui.playback._serial = 3
+        progress = PlaybackProgress(target, 3, 640, 640, True, 'complete')
+        update = Update(
+            target.generation,
+            'playback-released',
+            VoiceReleasedEvent('Peer', 'received', 'peer'),
+            playback=progress,
+        )
+
+        self.assertTrue(self.gui.playback.install(update))
+
+        self.assertIs(
+            self.gui.transcript.items[
+                ('peer', Delivery.LIVE, MessageDirectionCode.IN, 'received')
+            ].status,
+            MessageStatusCode.READ,
+        )
+        self.assertIs(
+            self.gui.transcript.items[
+                ('peer', Delivery.DROP, MessageDirectionCode.IN, 'received')
+            ].status,
+            MessageStatusCode.UNREAD,
+        )
+        self.assertTrue(self.gui._refresh_needed)
+
+    def test_stale_or_mismatched_release_never_marks_incoming_voice_read(self) -> None:
+        """Old output ownership and replaced profile/source identities cannot fabricate Read."""
+        self.gui.transcript.install(
+            VoiceIncomingStartedEvent(
+                'Peer', 'received', Delivery.LIVE, PcmVoice.CODEC, 0, 'peer'
+            )
+        )
+        target = self.gui.playback.target(
+            'peer', Delivery.LIVE, MessageDirectionCode.IN, 'received'
+        )
+        assert target is not None
+        self.gui.playback._serial = 3
+        event = VoiceReleasedEvent('Peer', 'received', 'peer')
+        candidates = (
+            (target, 2, event),
+            (replace(target, generation=target.generation + 1), 3, event),
+            (replace(target, epoch='previous'), 3, event),
+            (replace(target, profile_instance='previous'), 3, event),
+            (replace(target, direction=MessageDirectionCode.OUT), 3, event),
+            (target, 3, VoiceReleasedEvent('Peer', 'other', 'peer')),
+            (target, 3, VoiceReleasedEvent('Other', 'received', 'other')),
+        )
+        for source, serial, released in candidates:
+            with self.subTest(source=source, serial=serial, released=released):
+                self.gui.playback.install(
+                    Update(
+                        source.generation,
+                        'playback-released',
+                        released,
+                        playback=PlaybackProgress(
+                            source, serial, 640, 640, True, 'complete'
+                        ),
+                    )
+                )
+                self.assertIs(
+                    self.gui.transcript.items[
+                        ('peer', Delivery.LIVE, MessageDirectionCode.IN, 'received')
+                    ].status,
+                    MessageStatusCode.UNREAD,
+                )
 
 
 if __name__ == '__main__':

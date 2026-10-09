@@ -58,6 +58,8 @@ class StateTrackerPendingMixin:
     _live_reconnect_grace: Dict[str, float]
 
     _retunnel_in_progress: Set[str]
+    _accepted_live_contexts: Dict[str, int]
+    _accepted_live_context_deadlines: Dict[str, float]
 
     def retire_connection(
         self, conn: socket.socket, *, preserve_final: bool = False
@@ -81,6 +83,8 @@ class StateTrackerPendingMixin:
         reason: PendingConnectionReason = PendingConnectionReason.USER_ACCEPT,
         origin: ConnectionOrigin = ConnectionOrigin.INCOMING,
         expiry_deadline: Optional[float] = None,
+        *,
+        expected_context_generation: Optional[int] = None,
     ) -> bool:
         """
         Registers a socket connection awaiting local user acceptance.
@@ -100,6 +104,12 @@ class StateTrackerPendingMixin:
         replaced_pending: Optional[socket.socket] = None
         should_track: bool = True
         with self._lock:
+            if expected_context_generation is not None and (
+                self._accepted_live_contexts.get(onion) != expected_context_generation
+                or self._accepted_live_context_deadlines.get(onion, float('inf'))
+                <= time.monotonic()
+            ):
+                should_track = False
             active_conn = self._connections.get(onion)
             allow_recovery_replacement: bool = (
                 onion in self._retunnel_in_progress
@@ -110,7 +120,7 @@ class StateTrackerPendingMixin:
                     ConnectionOrigin.RETUNNEL,
                 }
             )
-            if (
+            if not should_track or (
                 active_conn is not None
                 and active_conn is not conn
                 and not allow_recovery_replacement

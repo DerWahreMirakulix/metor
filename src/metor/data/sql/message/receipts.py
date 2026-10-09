@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, List, Optional, Tuple, cast
 from metor.core.api import ContentType, Delivery
 from metor.data.message.models import MessageDirection, MessageStatus
 from metor.data.sql.backends import SqlCipherCursor, SqlParam
+from metor.shared import clean_onion
 
 if TYPE_CHECKING:
     from metor.data.sql.manager import SqlManager
@@ -34,6 +35,30 @@ class MessageReceiptStore:
     """Owns exact receipt lookup and common transaction primitives."""
 
     _sql: SqlManager
+
+    def drop_delivery_pending(self, receipt_id: int, onion: str, msg_id: str) -> bool:
+        """Checks exact durable authority immediately before DROP frame emission.
+
+        Callers serialize this read with cancellation using Core's operation lock.
+        A retained receipt without a spool records an unknown remote outcome but
+        has no authority to emit more frames or retry delivery.
+        """
+        return bool(
+            self._sql.fetchall(
+                'SELECT 1 FROM message_receipts AS r '
+                'INNER JOIN outbox_spool AS o ON o.receipt_id = r.id '
+                'WHERE r.id = ? AND r.peer_onion = ? AND r.msg_id = ? '
+                'AND r.direction = ? AND r.delivery = ? AND r.status = ?',
+                (
+                    receipt_id,
+                    clean_onion(onion),
+                    msg_id,
+                    MessageDirection.OUT.value,
+                    Delivery.DROP.value,
+                    MessageStatus.PENDING.value,
+                ),
+            )
+        )
 
     @staticmethod
     def _now() -> str:

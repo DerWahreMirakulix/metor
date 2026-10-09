@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from metor.core.api import Delivery
+from metor.core.api import ConnectionOrigin, Delivery, PendingConnectionReasonCode
 
 if TYPE_CHECKING:
     from .controller import GuiController
@@ -21,6 +21,7 @@ class ConversationRow:
     pending: int = 0
     pinned: bool = False
     local_only: bool = False
+    ended: bool = False
 
 
 def conversation_rows(
@@ -60,6 +61,26 @@ def conversation_rows(
             for _index, entry in indexed
         ]
     rows: list[ConversationRow] = []
+    retained = {
+        item.peer
+        for item in controller.transcript.items.values()
+        if item.delivery is Delivery.LIVE
+    }
+    retained.update(
+        turn.binding.peer
+        for turn in controller.voice.live_turns.values()
+        if turn.actual_delivery is Delivery.LIVE
+    )
+    retained.update(
+        peer
+        for (peer, projection), draft in state.drafts.items()
+        if projection is Delivery.LIVE and draft
+    )
+    retained.update(
+        peer
+        for peer, review in controller.voice.reviews.items()
+        if review.binding.delivery is Delivery.LIVE
+    )
     canonical = {item.onion for item in snapshot.live_contexts}
     ordered = list(enumerate(snapshot.live_contexts))
     ordered.sort(
@@ -72,6 +93,14 @@ def conversation_rows(
         )
     )
     for _index, entry in ordered:
+        if (
+            entry.session_state == 'disconnected'
+            and not entry.recovery_eligible
+            and not entry.pending_outbound_count
+            and not entry.unseen_count
+            and entry.onion not in retained
+        ):
+            continue
         status = (
             'Connected'
             if entry.session_state == 'connected'
@@ -91,8 +120,32 @@ def conversation_rows(
                 status,
                 entry.unseen_count,
                 entry.pending_outbound_count,
+                ended=entry.session_state == 'disconnected'
+                and not entry.recovery_eligible,
             )
         )
+    for invitation in snapshot.pending:
+        if (
+            invitation.onion is not None
+            and invitation.onion not in canonical
+            and invitation.action_handle is not None
+            and invitation.reason is PendingConnectionReasonCode.USER_ACCEPT
+            and invitation.origin
+            not in {
+                ConnectionOrigin.AUTO_RECONNECT,
+                ConnectionOrigin.GRACE_RECONNECT,
+                ConnectionOrigin.RETUNNEL,
+            }
+        ):
+            rows.append(
+                ConversationRow(
+                    invitation.onion,
+                    invitation.alias,
+                    Delivery.LIVE,
+                    'Live chat invitation',
+                )
+            )
+            canonical.add(invitation.onion)
     local: dict[str, int] = {}
     for item in controller.transcript.items.values():
         if item.delivery is Delivery.LIVE and item.peer not in canonical:
@@ -107,6 +160,7 @@ def conversation_rows(
             Delivery.LIVE,
             'Local conversation · Disconnected',
             local_only=True,
+            ended=True,
         )
         for peer in sorted(local, key=lambda peer: (-local[peer], peer))
     )

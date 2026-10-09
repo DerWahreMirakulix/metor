@@ -15,12 +15,16 @@ class AudioCapabilities:
 
 @dataclass(frozen=True)
 class AudioEndpoint:
-    """Native route descriptor that does not open a stream."""
+    """Native route descriptor with inert per-direction format compatibility results."""
 
     index: int
     name: str
     input_available: bool
     output_available: bool
+    input_error: str = ''
+    output_error: str = ''
+    device_name: str = ''
+    host_api: str = ''
 
 
 class CapturePort(Protocol):

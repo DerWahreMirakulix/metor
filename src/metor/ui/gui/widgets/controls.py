@@ -14,6 +14,7 @@ from kivy.uix.label import Label as KivyLabel
 from kivy.uix.scrollview import ScrollView
 from kivy.uix.textinput import TextInput
 
+from metor.ui.gui.constants import Geometry
 from metor.ui.gui.theme import TYPE, color, font_path
 
 
@@ -132,7 +133,7 @@ class Label(KivyLabel):
         self.height = max(dp(self._line_units), self.texture_size[1])
 
     def _single(self, *_args: object) -> None:
-        """Constrains header labels without reducing font size.
+        """Constrains explicit single-line previews without reducing font size.
 
         Args:
             _args: Geometry event.
@@ -144,7 +145,7 @@ class Label(KivyLabel):
 
 # Kivy's cooperative touch mixins infer incompatible return types for the same methods.
 class Action(FocusBehavior, ButtonBehavior, Panel):  # pyright: ignore[reportIncompatibleMethodOverride]
-    """Focus-scoped, keyboard-operable labelled action with fixed hit geometry."""
+    """Keyboard-operable action with readable measured text and a minimum hit target."""
 
     focus: bool
     state: str
@@ -185,8 +186,9 @@ class Action(FocusBehavior, ButtonBehavior, Panel):  # pyright: ignore[reportInc
         self._rectangle.radius = [dp(12)]
         self.is_focusable = True
         self._activate: Callable[[], object] = callback
-        self.label = Label(text, role='button', tone=tone, wrap=False)
+        self.label = Label(text, role='button', tone=tone)
         self.label.halign = 'center'
+        self.label.pos_hint = {'center_y': 0.5}
         self.add_widget(self.label)
         with cast(Canvas, self.canvas).after:
             self._focus_color = Color(*color('focus'), group='focus')
@@ -200,9 +202,15 @@ class Action(FocusBehavior, ButtonBehavior, Panel):  # pyright: ignore[reportInc
             pos=self._feedback,
             size=self._feedback,
             disabled=self._feedback,
+            minimum_height=self._measure,
         )
         self._feedback()
         Window.bind(mouse_pos=self._pointer)
+
+    def _measure(self, *_args: object) -> None:
+        """Grows the control to contain its complete label at the current text scale."""
+        if self.label.parent is self:
+            self.height = max(dp(Geometry.TARGET), self.minimum_height)
 
     def _pointer(self, _window: object, position: tuple[float, float]) -> None:
         """Shows pointer feedback only while attached to the native window.

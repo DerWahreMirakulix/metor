@@ -7,7 +7,7 @@ from kivy.uix.boxlayout import BoxLayout
 from metor.core.api import Delivery
 from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.widgets import Action, Label
-from metor.ui.gui.widgets.sheet import confirm
+from metor.ui.gui.widgets.sheet import ActionSheet, confirm
 
 
 def live_context_actions(
@@ -42,6 +42,7 @@ def live_context_actions(
         controller.state.busy
         or controller.live.pending is not None
         or bool(controller.live.stop_status(peer))
+        or controller.live.removing(peer)
     )
 
     def end() -> None:
@@ -136,6 +137,9 @@ def live_context_actions(
             None
         """
         dismiss()
+        if pending:
+            _show_pending_removal(controller, peer, refresh)
+            return
         if (
             entry is not None
             and entry.unseen_count
@@ -153,12 +157,6 @@ def live_context_actions(
 
     if pending:
         body.add_widget(Action('Send pending as Drop', fallback, disabled=busy))
-        body.add_widget(
-            Label(
-                'Complete pending items only. Ongoing recordings remain in Live.',
-                role='support',
-            )
-        )
     ended = (
         entry is None
         or entry.session_state == 'disconnected'
@@ -186,13 +184,78 @@ def live_context_actions(
                 'Remove Live conversation',
                 close,
                 tone='danger',
-                disabled=busy or bool(pending),
+                disabled=busy,
             )
         )
-        if pending:
-            body.add_widget(
-                Label(
-                    'Reconnect or send pending items as Drops before closing Live.',
-                    role='support',
-                )
+    if not body.children:
+        body.add_widget(
+            Label('Live controls are in the conversation header.', role='support')
+        )
+
+
+def _show_pending_removal(
+    controller: GuiController, peer: str, refresh: Callable[[], None]
+) -> None:
+    """Explains pending-work choices before an explicit ended-context removal."""
+
+    def choose(send_pending_as_drops: bool) -> None:
+        """Closes this confirmation before admitting its original peer's chosen action."""
+        sheet.dismiss()
+        controller.live.remove_context(
+            peer, send_pending_as_drops=send_pending_as_drops
+        )
+        refresh()
+
+    def build(body: BoxLayout) -> None:
+        """Keeps both choices guarded by current state while retaining the peer identity."""
+        body.add_widget(
+            Label(
+                'This ended conversation still has pending messages. Send them as Drops before removing it, or discard them. A copy already transmitted may still arrive. Unread Live items, the local transcript and unsent text draft are removed; Drops and saved contacts remain.',
+                role='support',
             )
+        )
+        state = controller.state
+        snapshot = state.snapshot
+        entry = (
+            next((row for row in snapshot.live_contexts if row.onion == peer), None)
+            if snapshot
+            else None
+        )
+        blocked = (
+            state.busy
+            or controller.live.pending is not None
+            or controller.live.removing(peer)
+            or controller.receipts.busy
+            or controller.live.starting(peer)
+            or bool(controller.live.stop_status(peer))
+            or entry is not None
+            and (
+                entry.session_state != 'disconnected'
+                or entry.recovery_eligible
+                or entry.outbound_attempt_id
+            )
+        )
+        body.add_widget(
+            Action(
+                'Send as Drops',
+                lambda: choose(True),
+                disabled=blocked,
+                surface='drop',
+                tone='onAccent',
+            )
+        )
+        body.add_widget(
+            Action(
+                'Discard pending',
+                lambda: choose(False),
+                disabled=blocked
+                or 'live_pending_cancellation' not in state.capabilities,
+                tone='danger',
+            )
+        )
+
+    sheet = ActionSheet(
+        controller, build, title='Remove Live conversation', wrap_title=True
+    )
+    sheet.cancel.label.text = sheet.cancel.accessible_name = 'Cancel'
+    sheet.show()

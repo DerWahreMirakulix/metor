@@ -1,6 +1,7 @@
 """Exact local DROP cleanup through GUI coordination and real encrypted Core IPC."""
 
 from dataclasses import replace
+import json
 import threading
 import unittest
 from unittest.mock import Mock, patch
@@ -19,6 +20,7 @@ from metor.core.api import (
     GetMessageOutcomeCommand,
     GuiPreferencesEvent,
     IpcEvent,
+    IpcCommand,
     MessageEntry,
     MessageOutcomeEvent,
     MessageDirectionCode,
@@ -28,11 +30,19 @@ from metor.core.api import (
     SetGuiPreferencesCommand,
     TextContent,
     VoiceContent,
+    CommitVoiceCommand,
+    MessageDeletedEvent,
+    MessageDeleteRejectedEvent,
+    MessageOperationReason,
+    VoiceCommittedEvent,
 )
 from metor.data import MessageDirection, MessageStatus
+from metor.data.blob import BlobLifecycle
 from metor.ui.gui.runtime import GuiController, conversation_rows
 from metor.ui.gui.constants import GuiLimits
 from metor.ui.gui.runtime.transcript import TranscriptItem
+from metor.ui.gui.runtime.voice.models import VoiceReview
+from metor.ui.gui.runtime.voice.press import CaptureBinding
 from metor.ui.gui.state import Route
 from metor.ui.gui.state.media import PlaybackTarget
 from metor.ui.gui.state.mailbox import Update
@@ -396,7 +406,7 @@ class DropCoreTests(unittest.TestCase):
         )
         self.assertEqual(len(self.h.messages.get_pending_outbox()), 1)
 
-    def test_lost_clear_reads_only_preexisting_targets_and_keeps_pending_delivery(
+    def test_lost_clear_reads_only_preexisting_targets_and_cancels_pending_delivery(
         self,
     ) -> None:
         """Readback of uncertain cleanup does not sweep a later arrival or a protected owner draft.
@@ -436,7 +446,7 @@ class DropCoreTests(unittest.TestCase):
         self.assertEqual(
             [item.msg_id for item in self.gui.transcript.items.values()], ['after']
         )
-        self.assertEqual(len(self.h.messages.get_pending_outbox()), 1)
+        self.assertEqual(len(self.h.messages.get_pending_outbox()), 0)
         self.assertIsNotNone(self.h.repository.get('review'))
 
     def test_direction_qualified_delete_preserves_same_id_outbound_pending(
@@ -466,11 +476,19 @@ class DropCoreTests(unittest.TestCase):
             self.gui.drop.delete(self.h.onion, 'shared', MessageDirectionCode.OUT)
         )
         self.settle()
-        self.assertEqual(self.gui.state.status, 'Pending delivery is preserved')
-        self.assertEqual(len(self.gui.transcript.items), 1)
+        self.assertEqual(self.gui.state.status, 'Drop deleted locally')
+        self.assertEqual(len(self.gui.transcript.items), 0)
+        self.assertEqual(self.h.messages.get_pending_outbox(), [])
+        outcome = self.h.client.request(
+            GetMessageOutcomeCommand(self.h.onion, 'shared'), MessageOutcomeEvent
+        )
+        self.assertEqual(outcome.status, MessageStatusCode.PENDING)
+        self.assertFalse(outcome.archive_available)
 
-    def test_clear_unpins_but_preserves_pending_and_owner_review(self) -> None:
-        """A confirmed clear drops only published local history and its GUI media copies.
+    def test_clear_unpins_cancels_queue_and_preserves_contact_drafts_and_review(
+        self,
+    ) -> None:
+        """A confirmed peer deletion clears its queue while preserving unsent work.
 
         Args:
             None
@@ -479,6 +497,8 @@ class DropCoreTests(unittest.TestCase):
         """
         self.item('pending', MessageDirection.OUT, MessageStatus.PENDING)
         self.item('received', MessageDirection.IN, MessageStatus.UNREAD)
+        self.h.contacts.add_contact('Saved contact', self.h.onion)
+        self.gui.state.set_draft(self.h.onion, Delivery.DROP, 'Unsent draft')
         self.h.capture('review')
         self.h.client.finalize_voice('review', owner_token=self.h.owner)
         current = self.gui.state.preferences
@@ -539,10 +559,224 @@ class DropCoreTests(unittest.TestCase):
         )
         self.gui.state.snapshot = self.h.client.runtime_snapshot()
         rows = conversation_rows(self.gui, Delivery.DROP)
+        self.assertEqual(rows, [])
+        self.assertEqual(self.h.messages.get_pending_outbox(), [])
         self.assertEqual(
-            [(row.peer, row.pending, row.unseen) for row in rows],
-            [(self.h.onion, 1, 0)],
+            self.gui.state.drafts[(self.h.onion, Delivery.DROP)], 'Unsent draft'
         )
+        self.assertTrue(
+            any(
+                item.onion == self.h.onion and item.saved
+                for item in self.gui.state.snapshot.contacts
+            )
+        )
+
+    def test_legacy_clear_and_delete_preserve_queued_delivery(self) -> None:
+        """Existing SDK/CLI default commands retain queued work and reject pending delete."""
+        self.item('pending', MessageDirection.OUT, MessageStatus.PENDING)
+        rejected = self.h.client.request(
+            DeleteMessageCommand(self.h.onion, 'pending', MessageDirectionCode.OUT),
+            MessageDeleteRejectedEvent,
+        )
+        self.assertIs(rejected.reason, MessageOperationReason.PENDING_DELIVERY)
+        self.assertIsNotNone(
+            self.h.client.request(ClearMessagesCommand(self.h.onion), IpcEvent)
+        )
+        self.assertEqual(len(self.h.messages.get_pending_outbox()), 1)
+        self.gui.state.snapshot = self.h.client.runtime_snapshot()
+        self.assertEqual(len(conversation_rows(self.gui, Delivery.DROP)), 1)
+
+    def test_pending_voice_delete_releases_blobs_and_preserves_unknown_receipt(
+        self,
+    ) -> None:
+        """Core cancellation atomically revokes delivery before releasing Voice objects."""
+        self.h.capture('queued-voice')
+        self.h.client.finalize_voice('queued-voice', owner_token=self.h.owner)
+        self.h.client.request(
+            CommitVoiceCommand(self.h.onion, 'queued-voice', self.h.owner),
+            VoiceCommittedEvent,
+        )
+        record = self.h.messages.get_voice_payload(
+            self.h.onion, 'queued-voice', MessageDirection.OUT
+        )
+        self.assertIsNotNone(record)
+        assert record is not None
+        metadata = json.loads(record.payload)
+        blob_ids = [metadata['blob_id'], *metadata['chunk_ids']]
+        self.h.client.request(ClearMessagesCommand(self.h.onion), IpcEvent)
+        self.assertEqual(self.h.messages.get_chat_history(self.h.onion), [])
+        self.assertTrue(
+            all(
+                self.h.blobs.exists(item, BlobLifecycle.PERSISTENT) for item in blob_ids
+            )
+        )
+        self.h.client.request(
+            DeleteMessageCommand(
+                self.h.onion,
+                'queued-voice',
+                MessageDirectionCode.OUT,
+                cancel_pending=True,
+            ),
+            MessageDeletedEvent,
+        )
+        self.assertEqual(self.h.messages.get_pending_outbox(), [])
+        self.assertTrue(
+            all(
+                not self.h.blobs.exists(item, BlobLifecycle.PERSISTENT)
+                for item in blob_ids
+            )
+        )
+        outcome = self.h.client.request(
+            GetMessageOutcomeCommand(self.h.onion, 'queued-voice'), MessageOutcomeEvent
+        )
+        self.assertEqual(outcome.status, MessageStatusCode.PENDING)
+        self.assertFalse(outcome.archive_available)
+        self.h.daemon._network._router.process_incoming_drop_ack(
+            self.h.onion, 'queued-voice'
+        )
+        outcome = self.h.client.request(
+            GetMessageOutcomeCommand(self.h.onion, 'queued-voice'), MessageOutcomeEvent
+        )
+        self.assertEqual(outcome.status, MessageStatusCode.PENDING)
+        self.assertEqual(self.h.messages.get_chat_history(self.h.onion), [])
+        self.assertEqual(self.h.messages.get_drop_conversation_summaries(), [])
+
+    def test_cancelled_receipt_does_not_count_pending_or_resurrect_on_late_ack(
+        self,
+    ) -> None:
+        """A stopped DROP has no queue count; a genuine late transport ACK restores no body."""
+        self.item('cancelled', MessageDirection.OUT, MessageStatus.PENDING)
+        self.h.client.request(
+            DeleteMessageCommand(
+                self.h.onion, 'cancelled', MessageDirectionCode.OUT, cancel_pending=True
+            ),
+            MessageDeletedEvent,
+        )
+        self.item('remaining', MessageDirection.IN, MessageStatus.UNREAD)
+        self.assertEqual(
+            self.h.messages.get_drop_conversation_summaries(), [(self.h.onion, 1, 0)]
+        )
+        self.h.daemon._network._router.process_incoming_drop_ack(
+            self.h.onion, 'cancelled'
+        )
+        self.assertEqual(
+            [item.msg_id for item in self.h.messages.get_chat_history(self.h.onion)],
+            ['remaining'],
+        )
+        outcome = self.h.client.request(
+            GetMessageOutcomeCommand(self.h.onion, 'cancelled'), MessageOutcomeEvent
+        )
+        self.assertEqual(outcome.status, MessageStatusCode.DELIVERED)
+        self.assertFalse(outcome.archive_available)
+
+    def test_unresolved_send_blocks_peer_deletion_and_preserves_intent(self) -> None:
+        """Sending and unknown admission are not mistaken for confirmed queued work."""
+        self.item('retained', MessageDirection.IN, MessageStatus.UNREAD)
+        self.gui.text.operations['A11:sending'] = (
+            self.h.onion,
+            Delivery.DROP,
+            'Sending text',
+        )
+        self.gui.state.reserved_drafts[(self.h.onion, Delivery.DROP)] = 'Sending text'
+        self.assertFalse(self.gui.drop.can_clear(self.h.onion))
+        self.assertFalse(self.gui.drop.clear(self.h.onion))
+        self.assertEqual(len(self.h.messages.get_chat_history(self.h.onion)), 1)
+        self.assertIn('A11:sending', self.gui.text.operations)
+        self.assertEqual(
+            self.gui.state.reserved_drafts[(self.h.onion, Delivery.DROP)],
+            'Sending text',
+        )
+
+    def test_unknown_voice_publication_blocks_peer_and_exact_message_deletion(
+        self,
+    ) -> None:
+        """Unconfirmed Voice commit cannot publish after a conversation's queue is cleared."""
+        self.item('retained', MessageDirection.IN, MessageStatus.UNREAD)
+        review = VoiceReview(
+            CaptureBinding(
+                'instance',
+                'epoch',
+                self.gui.state.generation,
+                self.h.onion,
+                Delivery.DROP,
+                'voice-intent',
+            ),
+            640,
+            20,
+            unknown=True,
+        )
+        self.gui.voice.reviews[self.h.onion] = review
+        self.assertFalse(self.gui.drop.can_clear(self.h.onion))
+        self.assertFalse(self.gui.drop.clear(self.h.onion))
+        self.assertFalse(self.gui.drop.can_delete(self.h.onion, 'voice-intent'))
+        self.assertFalse(
+            self.gui.drop.delete(self.h.onion, 'voice-intent', MessageDirectionCode.OUT)
+        )
+        self.assertIs(self.gui.voice.reviews[self.h.onion], review)
+        self.assertEqual(len(self.h.messages.get_chat_history(self.h.onion)), 1)
+        review.unknown = False
+        self.assertTrue(self.gui.drop.can_clear(self.h.onion))
+        self.gui.state.busy = True
+        self.assertFalse(self.gui.drop.can_clear(self.h.onion))
+
+    def test_cancelled_queue_releases_only_matching_drop_request_correlation(
+        self,
+    ) -> None:
+        """Cancellation frees request metadata while retaining other-direction and LIVE ownership."""
+        state = self.h.daemon._transport_state
+        other_peer = address(18)
+        self.item('outgoing', MessageDirection.OUT, MessageStatus.PENDING)
+        self.item('incoming', MessageDirection.IN, MessageStatus.UNREAD)
+        self.item('live-shared', MessageDirection.OUT, MessageStatus.PENDING)
+        self.item('other-peer', MessageDirection.OUT, MessageStatus.PENDING)
+        self.item('exact-shared', MessageDirection.OUT, MessageStatus.PENDING)
+        self.item('exact-shared', MessageDirection.IN, MessageStatus.UNREAD)
+        state.remember_message_request_id('outgoing', 'drop-request', self.h.onion)
+        state.remember_message_request_id('incoming', 'keep-live')
+        state.remember_message_request_id('live-shared', 'drop-old', self.h.onion)
+        state.remember_message_request_id('live-shared', 'keep-new-live')
+        state.remember_message_request_id('other-peer', 'keep-other-peer', other_peer)
+        state.remember_message_request_id('exact-shared', 'keep-outbound', self.h.onion)
+        self.h.client.request(
+            DeleteMessageCommand(
+                self.h.onion,
+                'exact-shared',
+                MessageDirectionCode.IN,
+                cancel_pending=True,
+            ),
+            MessageDeletedEvent,
+        )
+        self.assertEqual(state._message_request_ids['exact-shared'], 'keep-outbound')
+        self.h.client.request(
+            ClearMessagesCommand(self.h.onion, cancel_pending=True), IpcEvent
+        )
+        self.assertIsNone(state.pop_message_request_id('outgoing'))
+        self.assertIsNone(state.pop_message_request_id('exact-shared'))
+        self.assertEqual(state.pop_message_request_id('incoming'), 'keep-live')
+        self.assertEqual(state.pop_message_request_id('live-shared'), 'keep-new-live')
+        self.assertEqual(state.pop_message_request_id('other-peer'), 'keep-other-peer')
+        self.assertEqual(state._drop_message_request_peers, {})
+
+
+class DropCancellationContractTests(unittest.TestCase):
+    """Explicit additive cancellation remains opt-in for existing SDK clients."""
+
+    def test_cancellation_round_trips_and_legacy_default_preserves_delivery(
+        self,
+    ) -> None:
+        """Wire evolution retains old command defaults without coercing cancellation scope."""
+        for command in (
+            ClearMessagesCommand('peer', cancel_pending=True),
+            DeleteMessageCommand('peer', 'message', MessageDirectionCode.OUT, True),
+        ):
+            with self.subTest(command=type(command).__name__):
+                wire = json.loads(command.to_json())
+                self.assertTrue(IpcCommand.from_dict(wire).cancel_pending)
+                wire.pop('cancel_pending')
+                self.assertFalse(IpcCommand.from_dict(wire).cancel_pending)
+                wire['cancel_pending'] = 1
+                with self.assertRaises((TypeError, ValueError)):
+                    IpcCommand.from_dict(wire)
 
 
 class DropArchivePresentationTests(unittest.TestCase):

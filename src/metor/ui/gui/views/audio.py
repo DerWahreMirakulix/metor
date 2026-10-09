@@ -8,6 +8,7 @@ from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 
 from metor.ui.gui.runtime import GuiController
+from metor.ui.gui.runtime.voice import group_endpoints
 from metor.ui.gui.widgets import Action, Label
 from metor.ui.gui.widgets.sheet import ActionSheet
 
@@ -26,7 +27,7 @@ def show_audio_unavailable(
     Args:
         controller: Current presentation and local audio route owner.
         refresh: Native presentation refresh.
-        purpose: User action requiring a confirmed headset route.
+        purpose: User action requiring explicitly selected audio endpoints.
     Returns:
         None. No endpoint is probed and no capture, playback or call is started.
     """
@@ -35,17 +36,24 @@ def show_audio_unavailable(
     title, explanation = {
         'recording': (
             'Recording unavailable',
-            'Choose a microphone and headphone output in audio settings before recording a voice message.',
+            'Choose a microphone in audio settings before recording a voice message.',
         ),
         'playback': (
             'Playback unavailable',
-            'Choose a headphone output in audio settings before playing a voice message.',
+            'Choose an audio output in audio settings before playing a voice message.',
         ),
         'calls': (
             'Calls unavailable',
-            'Choose a microphone and headphone output in audio settings before starting or accepting a call.',
+            'Choose a microphone and audio output in audio settings before starting or accepting a call.',
         ),
     }[purpose]
+    progress = controller.playback.progress
+    if (
+        purpose == 'playback'
+        and progress is not None
+        and progress.state == 'output_unavailable'
+    ):
+        explanation = 'The selected output could not play audio. Choose a different output in audio settings.'
 
     def settings() -> None:
         """Moves from explanation to the closed settings modal without retrying media."""
@@ -94,14 +102,9 @@ def show_audio_routes(controller: GuiController, refresh: Callable[[], None]) ->
     if controller.state.covered:
         return
 
-    def changed() -> None:
-        """Closes settings after explicit confirmation without resuming media."""
-        sheet.dismiss(animation=False)
-        refresh()
-
     sheet = ActionSheet(
         controller,
-        lambda body: body.add_widget(audio_routes_body(controller, changed, refresh)),
+        lambda body: body.add_widget(audio_routes_body(controller, refresh)),
         title='Audio settings',
         stable_frame=True,
         revision=partial(_revision, controller),
@@ -115,7 +118,11 @@ def show_audio_routes(controller: GuiController, refresh: Callable[[], None]) ->
 
 
 def _choose_endpoint(
-    controller: GuiController, refresh: Callable[[], None], *, microphone: bool
+    controller: GuiController,
+    refresh: Callable[[], None],
+    *,
+    microphone: bool,
+    advanced: bool = False,
 ) -> None:
     """Opens a bounded keyboard-accessible device list inside its own closed modal."""
     if controller.state.covered:
@@ -124,51 +131,56 @@ def _choose_endpoint(
 
     def build(body: BoxLayout) -> None:
         """Projects current endpoints without keeping a stale device permission."""
-        choices = [
-            item
-            for item in routes.endpoints
-            if (item.input_available if microphone else item.output_available)
-        ]
-        for item in choices:
-            selected = routes.input if microphone else routes.output
-            action = Action(
-                item.name,
-                partial(select, item.index),
-                surface='liveSurface' if item.index == selected else 'raised',
-            )
-            action.label.text_size = (None, None)
-            action.label.shorten = True
-            action.label.shorten_from = 'right'
-            action.bind(
-                width=lambda widget, width: setattr(
-                    widget.label, 'text_size', (width - dp(24), None)
+        selected = routes.input if microphone else routes.output
+        groups = group_endpoints(
+            routes.endpoints, microphone=microphone, selected=selected
+        )
+        for group in groups:
+            for item in group.variants if advanced else (group.preferred,):
+                error = item.input_error if microphone else item.output_error
+                action = Action(
+                    item.name if advanced else group.name,
+                    partial(select, item.index),
+                    surface='liveSurface' if item.index == selected else 'raised',
+                    disabled=bool(error) or routes.blocked,
+                )
+                body.add_widget(action)
+                if error:
+                    body.add_widget(Label(error, role='caption', tone='textSecondary'))
+        if not advanced and any(len(group.variants) > 1 for group in groups):
+            body.add_widget(
+                Action(
+                    'Other device variants',
+                    partial(
+                        _choose_endpoint,
+                        controller,
+                        refresh,
+                        microphone=microphone,
+                        advanced=True,
+                    ),
                 )
             )
-            body.add_widget(action)
 
     def select(endpoint: int) -> None:
         """Stores an explicit currently enumerated choice, then returns to settings."""
-        valid = any(
-            item.index == endpoint
-            and (item.input_available if microphone else item.output_available)
-            for item in routes.endpoints
-        )
-        if not valid:
+        if not routes.select(endpoint, microphone=microphone):
+            refresh()
             return
-        if microphone:
-            routes.input = endpoint
-        else:
-            routes.output = endpoint
         show_audio_routes(controller, refresh)
 
     sheet = ActionSheet(
         controller,
         build,
-        title='Choose microphone' if microphone else 'Choose headphone output',
+        title=('Microphone variants' if microphone else 'Audio output variants')
+        if advanced
+        else ('Choose microphone' if microphone else 'Choose audio output'),
         stable_frame=True,
         revision=partial(_revision, controller),
         snapshot_updates=False,
         wrap_title=True,
+        back=partial(_choose_endpoint, controller, refresh, microphone=microphone)
+        if advanced
+        else partial(show_audio_routes, controller, refresh),
     )
     sheet.show()
     refresh()
@@ -176,30 +188,23 @@ def _choose_endpoint(
 
 def audio_routes_body(
     controller: GuiController,
-    confirmed: Callable[[], None],
     refresh: Callable[[], None],
 ) -> BoxLayout:
     """Builds the bounded contents of audio settings with explicit inert choices.
 
     Args:
         controller: Current GUI local audio configuration owner.
-        confirmed: Closes the modal only after confirmed route installation.
         refresh: Native repaint request for scans and selection.
     Returns:
         BoxLayout: Measured content intended only for a closed settings modal.
     """
-    voice, routes = controller.voice, controller.voice.routes
-    blocked = bool(
-        voice.running
-        or controller.playback.running
-        or controller.calls.active
-        or controller.calls.media_active
-    )
+    routes = controller.voice.routes
+    blocked = routes.blocked
     body = BoxLayout(orientation='vertical', spacing=dp(12), size_hint_y=None)
     body.bind(minimum_height=body.setter('height'))
     body.add_widget(
         Label(
-            'Use a headset. Speaker echo cancellation is unavailable.',
+            'Changes apply immediately. Speakers may cause echo during calls; headphones can help.',
             role='support',
             tone='textSecondary',
         )
@@ -223,7 +228,7 @@ def audio_routes_body(
     )
     for microphone, heading, selected in (
         (True, 'Microphone', routes.input),
-        (False, 'Headphone output', routes.output),
+        (False, 'Audio output', routes.output),
     ):
         endpoints = [
             item
@@ -231,13 +236,20 @@ def audio_routes_body(
             if (item.input_available if microphone else item.output_available)
         ]
         body.add_widget(Label(heading, role='support'))
-        name = next((item.name for item in endpoints if item.index == selected), None)
+        name = next(
+            (
+                item.device_name or item.name
+                for item in endpoints
+                if item.index == selected
+            ),
+            None,
+        )
         body.add_widget(
             Label(name or 'Not selected', role='caption', tone='textSecondary')
         )
         body.add_widget(
             Action(
-                'Choose microphone' if microphone else 'Choose headphone output',
+                'Choose microphone' if microphone else 'Choose audio output',
                 partial(_choose_endpoint, controller, refresh, microphone=microphone),
                 disabled=blocked or not endpoints,
             )
@@ -245,32 +257,8 @@ def audio_routes_body(
     if routes.scanned and not routes.endpoints:
         body.add_widget(
             Label(
-                'No audio devices found. Connect a headset and refresh.', role='support'
+                'No audio devices found. Connect a device and refresh.', role='support'
             )
         )
 
-    def confirm() -> None:
-        """Installs the explicit route while leaving every media stream stopped."""
-        if routes.confirm():
-            confirmed()
-        else:
-            refresh()
-
-    selected_input = any(
-        item.index == routes.input and item.input_available for item in routes.endpoints
-    )
-    selected_output = any(
-        item.index == routes.output and item.output_available
-        for item in routes.endpoints
-    )
-    body.add_widget(
-        Action(
-            'Use this headset',
-            confirm,
-            disabled=blocked
-            or controller.state.busy
-            or not selected_input
-            or not selected_output,
-        )
-    )
     return body

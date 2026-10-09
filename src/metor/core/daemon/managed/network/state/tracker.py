@@ -14,6 +14,8 @@ from metor.core.daemon.managed.network.state.connections import (
     StateTrackerConnectionsMixin,
 )
 from .pending import PendingConnectionSnapshot, StateTrackerPendingMixin
+from .drop_transfer import DropTransferAcknowledgements, StateTrackerDropTransferMixin
+from .context import StateTrackerContextMixin
 from metor.core.daemon.managed.network.state.messages import StateTrackerMessagesMixin
 from metor.core.daemon.managed.network.state.retunnel import StateTrackerRetunnelMixin
 from metor.core.daemon.managed.network.state.transport import StateTrackerTransportMixin
@@ -26,6 +28,8 @@ class StateTracker(
     StateTrackerMessagesMixin,
     StateTrackerTransportMixin,
     StateTrackerRetunnelMixin,
+    StateTrackerDropTransferMixin,
+    StateTrackerContextMixin,
 ):
     """Tracks active sockets, pending connections, queues, and UI focus states safely."""
 
@@ -58,6 +62,8 @@ class StateTracker(
         self._scheduled_auto_reconnects: Set[str] = set()
         self._unacked_messages: Dict[str, Dict[str, Tuple[str, str]]] = {}
         self._message_request_ids: Dict[str, str] = {}
+        self._drop_message_request_peers: Dict[str, str] = {}
+        self._live_message_request_peers: Dict[str, str] = {}
         self._recent_live_msg_ids: Dict[str, List[str]] = {}
         self._locally_terminated_sockets: WeakSet[socket.socket] = WeakSet()
         self._drop_tunnels: Dict[str, TunnelState] = {}
@@ -73,10 +79,13 @@ class StateTracker(
         self._last_disconnect_actors: Dict[str, ConnectionActor] = {}
         self._socket_write_locks: Dict[socket.socket, threading.Lock] = {}
         self._socket_writers: Dict[socket.socket, BoundedSocketWriter] = {}
+        self._drop_transfers: Dict[socket.socket, DropTransferAcknowledgements] = {}
         self._retired_sockets: WeakSet[socket.socket] = WeakSet()
         self._live_generations: Dict[Tuple[str, str], int] = {}
         self._next_live_generation = 1
         self._live_context_generations: Dict[str, int] = {}
+        self._accepted_live_contexts: Dict[str, int] = {}
+        self._accepted_live_context_deadlines: Dict[str, float] = {}
         self._next_live_context_generation = 1
         self._peer_writer_failure_callback: Optional[
             Callable[[str, socket.socket], None]
@@ -137,8 +146,11 @@ class StateTracker(
         """
         with self._lock:
             writer = self._socket_writers.get(conn)
+            drop_transfer = self._drop_transfers.pop(conn, None)
             self._retired_sockets.add(conn)
             self._socket_write_locks.pop(conn, None)
+        if drop_transfer is not None:
+            drop_transfer.close()
         if writer is not None:
             writer.close(preserve_final=preserve_final)
             return
@@ -414,6 +426,8 @@ class StateTracker(
                 tuple(sorted(self._session_last_activity.items())),
                 tuple(sorted(self._live_generations.items())),
                 tuple(sorted(self._live_context_generations.items())),
+                tuple(sorted(self._accepted_live_contexts.items())),
+                tuple(sorted(self._accepted_live_context_deadlines.items())),
             )
 
 

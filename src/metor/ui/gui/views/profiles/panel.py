@@ -13,7 +13,7 @@ from metor.client import (
 )
 from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.state import Route
-from metor.ui.gui.widgets import Action, Label
+from metor.ui.gui.widgets import Action, ActionRow, Label
 from metor.ui.gui.widgets.sheet import ActionSheet, confirm
 from metor.ui.gui.widgets.symbol import IconAction
 
@@ -59,7 +59,7 @@ def profiles_body(
         if not page.entries:
             body.add_widget(Label('No profiles exist yet.', role='peer'))
         for profile in page.entries:
-            row = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(12))
+            row = ActionRow(spacing=dp(12))
             label = profile.profile + (
                 ' · Unavailable'
                 if profile.issue

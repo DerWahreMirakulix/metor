@@ -184,10 +184,24 @@ Only selected unread text rows are consumed; Voice has its own handoff contract.
 `ClearMessagesCommand` and direction-qualified `DeleteMessageCommand` affect
 only eligible local DROP presentation/payload state; an omitted direction is
 rejected when inbound and outbound receipts share the same peer and `msg_id`.
-Pending DROP delivery and all LIVE state remain intact.
+Their default preserves pending DROP delivery and all LIVE state. With Core's
+`drop_pending_cancellation` capability, clients may explicitly set
+`cancel_pending=True` to atomically delete the selected local history and stop
+queued DROP retries. Exact durable emission claims fence cached text and Voice
+frames against cancellation. An already transmitted copy may still arrive;
+this operation never recalls remote content. Content-free receipts preserve an
+unknown remote outcome after the spool is removed. Saved contacts, LIVE state,
+and unsent Voice drafts remain intact.
 `DismissLiveContextCommand` is the explicit cleanup action for a disconnected,
-non-recovering LIVE context and is rejected while outbound pending LIVE content
-still needs reconnect or fallback.
+non-recovering LIVE context. Its default rejects outbound pending LIVE content
+that still needs reconnect or fallback. With Core's `live_pending_cancellation`
+capability, an explicit `cancel_pending=True` discards that peer's published
+pending LIVE messages and removes the ended context under the existing operation
+and transport barriers. It preserves DROP content and unpublished Voice drafts.
+Content-free receipts still fence late acknowledgments and duplicate delivery;
+discard cannot recall an already transmitted copy. Active, recovering, or calling
+contexts remain ineligible. Existing Terminal and CLI callers retain the default
+rejection behavior.
 
 ### Voice capture and transfer
 
@@ -347,19 +361,19 @@ an automatic reconnect intent when the profile is next opened.
 
 ## Public capability and failure map
 
-| Requirement family                 | Public owner and contract                                                                                         | Failure and reconciliation rule                                                                                                                 | Primary evidence                          |
-| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
-| Launch and graphical bootstrap     | `FrontendHost`, `FrontendInteractions`, `FrontendLaunchContext`                                                   | Typed cancellation, unavailable, missing-profile and retryable bootstrap outcomes; no terminal prompt or local substitute for a remote endpoint | GAT-31–42                                 |
-| Runtime projection                 | `register_live_consumer`, `RuntimeSnapshotEvent`, `RuntimeStateChangedEvent`                                      | Epoch/revision ordering applies only to projected state; media, request results and lifecycle reports are reconciled by their own identities    | GAT-42–45                                 |
-| Text admission and unknown outcome | `SendMessageCommand(local_acceptance=True)`, `TextAcceptedEvent`, `TextRejectedEvent`, `GetMessageOutcomeCommand` | Definite quota rejection is immediate; a lost result is checked by the original ID and never resent blindly                                     | GAT-01, GAT-30, GAT-46                    |
-| Retained Voice                     | `ListRetainedMessagesCommand`, `GetVoiceChunkCommand`, `ReleaseVoiceCommand`                                      | Inventory/read are bounded and non-consuming; only exact eligible finalized handoff releases content                                            | GAT-43, GAT-52–55                         |
-| Voice producer ownership           | owner-qualified register/release and Begin/Append/Finalize/Commit/Cancel                                          | Both-mode draft cleanup is owner-scoped; committed winners survive uncertainty; interrupted recordings retain protected unsent bytes            | GAT-10–12, GAT-49–55                      |
-| Protected GUI metadata             | `GetGuiPreferencesCommand`, `SetGuiPreferencesCommand`                                                            | Profile-instance scoped, bounded and revision-checked; stale writes reject rather than merge over another client                                | GAT-61, GAT-67                            |
-| Qualified LIVE controls            | Connect/Accept/Reject, qualified Disconnect/Retunnel, Fallback, Dismiss                                           | Attempt/context qualifiers reject stale controls; fallback is atomic and preserves IDs; dismissal refuses unresolved work                       | GAT-03–06, GAT-13–16, GAT-57, GAT-60      |
-| Restriction and unlock             | Restrict/Reauthorize/ConfigureQuickUnlock and restricted-state projection                                         | Immediate cover; exact lock-cycle policy and separately owned Call grants; failed restriction never becomes client-side success                 | GAT-20–23, GAT-56–60                      |
-| Contacts and activity              | typed contact validation/mutations and paged history metadata                                                     | Stable identity guards prevent stale rename/remove; pages are bounded and body-free; uncertain mutation uses readback                           | GAT-02, GAT-03, GAT-17–19, GAT-67, GAT-68 |
-| Profile lifecycle                  | `ProfileRuntimeCoordinator`, optional public host profile management                                              | Phase-aware result distinguishes source-active from source-prepared failure; target credentials and callbacks never cross profiles              | GAT-24–26, GAT-62–64                      |
-| Device lifecycle and purge         | frontend-neutral platform ports plus correlated SelfDestruct reports                                              | Physical input grants no authority; unconfirmed preparation or destruction never reaches shutdown                                               | GAT-27, GAT-40, GAT-65, GAT-66            |
+| Requirement family                 | Public owner and contract                                                                                         | Failure and reconciliation rule                                                                                                                          | Primary evidence                          |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| Launch and graphical bootstrap     | `FrontendHost`, `FrontendInteractions`, `FrontendLaunchContext`                                                   | Typed cancellation, unavailable, missing-profile and retryable bootstrap outcomes; no terminal prompt or local substitute for a remote endpoint          | GAT-31–42                                 |
+| Runtime projection                 | `register_live_consumer`, `RuntimeSnapshotEvent`, `RuntimeStateChangedEvent`                                      | Epoch/revision ordering applies only to projected state; media, request results and lifecycle reports are reconciled by their own identities             | GAT-42–45                                 |
+| Text admission and unknown outcome | `SendMessageCommand(local_acceptance=True)`, `TextAcceptedEvent`, `TextRejectedEvent`, `GetMessageOutcomeCommand` | Definite quota rejection is immediate; a lost result is checked by the original ID and never resent blindly                                              | GAT-01, GAT-30, GAT-46                    |
+| Retained Voice                     | `ListRetainedMessagesCommand`, `GetVoiceChunkCommand`, `ReleaseVoiceCommand`                                      | Inventory/read are bounded and non-consuming; only exact eligible finalized handoff releases content                                                     | GAT-43, GAT-52–55                         |
+| Voice producer ownership           | owner-qualified register/release and Begin/Append/Finalize/Commit/Cancel                                          | Both-mode draft cleanup is owner-scoped; committed winners survive uncertainty; interrupted recordings retain protected unsent bytes                     | GAT-10–12, GAT-49–55                      |
+| Protected GUI metadata             | `GetGuiPreferencesCommand`, `SetGuiPreferencesCommand`                                                            | Profile-instance scoped, bounded and revision-checked; stale writes reject rather than merge over another client                                         | GAT-61, GAT-67                            |
+| Qualified LIVE controls            | Connect/Accept/Reject, qualified Disconnect/Retunnel, Fallback, Dismiss                                           | Attempt/context qualifiers reject stale controls; fallback preserves IDs; ended dismissal rejects pending work unless explicit cancellation is requested | GAT-03–06, GAT-13–16, GAT-57, GAT-60      |
+| Restriction and unlock             | Restrict/Reauthorize/ConfigureQuickUnlock and restricted-state projection                                         | Immediate cover; exact lock-cycle policy and separately owned Call grants; failed restriction never becomes client-side success                          | GAT-20–23, GAT-56–60                      |
+| Contacts and activity              | typed contact validation/mutations and paged history metadata                                                     | Stable identity guards prevent stale rename/remove; pages are bounded and body-free; uncertain mutation uses readback                                    | GAT-02, GAT-03, GAT-17–19, GAT-67, GAT-68 |
+| Profile lifecycle                  | `ProfileRuntimeCoordinator`, optional public host profile management                                              | Phase-aware result distinguishes source-active from source-prepared failure; target credentials and callbacks never cross profiles                       | GAT-24–26, GAT-62–64                      |
+| Device lifecycle and purge         | frontend-neutral platform ports plus correlated SelfDestruct reports                                              | Physical input grants no authority; unconfirmed preparation or destruction never reaches shutdown                                                        | GAT-27, GAT-40, GAT-65, GAT-66            |
 
 All additions within the current IPC generation remain strict, registered, and
 defaulted where required. Generated wire shapes and capability names are

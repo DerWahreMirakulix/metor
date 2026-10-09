@@ -53,6 +53,8 @@ class StateTrackerConnectionsMixin:
     _last_disconnect_reasons: Dict[str, ConnectionReasonCode]
     _last_disconnect_actors: Dict[str, ConnectionActor]
     _live_context_generations: Dict[str, int]
+    _accepted_live_contexts: Dict[str, int]
+    _accepted_live_context_deadlines: Dict[str, float]
     _next_live_context_generation: int
 
     def set_last_disconnect_reason(
@@ -140,6 +142,7 @@ class StateTrackerConnectionsMixin:
                 | set(self._unacked_messages)
                 | set(self._last_disconnect_reasons)
                 | set(self._last_disconnect_actors)
+                | set(self._accepted_live_contexts)
             )
             return sorted(onions)
 
@@ -456,41 +459,66 @@ class StateTrackerConnectionsMixin:
         with self._lock:
             return self._outbound_sockets.get(onion) == sock
 
-    def add_active_connection(self, onion: str, conn: socket.socket) -> None:
+    def add_active_connection(
+        self,
+        onion: str,
+        conn: socket.socket,
+        *,
+        expected_context_generation: Optional[int] = None,
+        require_outbound_socket: bool = False,
+    ) -> bool:
         """
         Registers one fully authenticated live socket as the active connection.
 
         Args:
             onion (str): The peer onion identity.
             conn (socket.socket): The authenticated live socket.
+            expected_context_generation: Accepted scope captured before recovery work.
+            require_outbound_socket: Require exact current outbound socket ownership.
 
         Returns:
-            None
+            bool: Whether this socket still owns admission into the logical scope.
         """
         replaced_active: Optional[socket.socket] = None
         replaced_pending: Optional[socket.socket] = None
         with self._lock:
+            if expected_context_generation is not None and (
+                self._accepted_live_contexts.get(onion) != expected_context_generation
+                or self._accepted_live_context_deadlines.get(onion, float('inf'))
+                <= time.monotonic()
+            ):
+                return False
+            if (
+                require_outbound_socket
+                and self._outbound_sockets.get(onion) is not conn
+            ):
+                return False
+            recovery_origins = {
+                ConnectionOrigin.AUTO_RECONNECT,
+                ConnectionOrigin.GRACE_RECONNECT,
+                ConnectionOrigin.RETUNNEL,
+            }
+            is_recovery = onion in self._accepted_live_contexts and (
+                expected_context_generation is not None
+                or self._outbound_attempt_origins.get(onion) in recovery_origins
+                or self._pending_connection_origins.get(onion) in recovery_origins
+            )
+            if (
+                is_recovery
+                and self._accepted_live_context_deadlines.get(onion, float('inf'))
+                <= time.monotonic()
+            ):
+                return False
             replaced_active = self._connections.get(onion)
             replaced_pending = self._pending_connections.pop(onion, None)
             self._pending_connection_tokens.pop(onion, None)
-            pending_origin = self._pending_connection_origins.get(onion)
-            is_recovery = (
-                replaced_active is not None
-                or onion in self._scheduled_auto_reconnects
-                or onion in self._live_reconnect_grace
-                or onion in self._retunnel_in_progress
-                or pending_origin
-                in {
-                    ConnectionOrigin.AUTO_RECONNECT,
-                    ConnectionOrigin.GRACE_RECONNECT,
-                    ConnectionOrigin.RETUNNEL,
-                }
-            )
             if onion not in self._live_context_generations or not is_recovery:
                 self._live_context_generations[onion] = (
                     self._next_live_context_generation
                 )
                 self._next_live_context_generation += 1
+            self._accepted_live_contexts[onion] = self._live_context_generations[onion]
+            self._accepted_live_context_deadlines.pop(onion, None)
             self._connections[onion] = conn
             self._outbound_attempts.discard(onion)
             self._outbound_attempt_ids.pop(onion, None)
@@ -514,6 +542,7 @@ class StateTrackerConnectionsMixin:
 
         if replaced_pending is not None and replaced_pending is not conn:
             self.retire_connection(replaced_pending)
+        return True
 
     def get_connection(self, onion: str) -> Optional[socket.socket]:
         """
@@ -527,58 +556,6 @@ class StateTrackerConnectionsMixin:
         """
         with self._lock:
             return self._connections.get(onion)
-
-    def get_live_context_generation(self, onion: str) -> Optional[int]:
-        """Returns logical conversation ownership for an active LIVE peer.
-
-        Recognized reconnect and retunnel replacement sockets retain this value;
-        a later independent conversation with the same peer receives a new one.
-
-        Args:
-            onion (str): Stable peer identity.
-
-        Returns:
-            Optional[int]: Active logical context generation, if connected.
-        """
-        with self._lock:
-            if onion not in self._connections:
-                return None
-            return self._live_context_generations.get(onion)
-
-    def get_live_media_generation(self, onion: str) -> Optional[int]:
-        """Qualifies the existing context across active transport or recognized recovery.
-
-        Args:
-            onion: Canonical peer whose media authority is requested.
-        Returns:
-            Optional[int]: Existing logical generation, never a fresh manual call's old identity.
-        """
-        recovery_origins = {
-            ConnectionOrigin.AUTO_RECONNECT,
-            ConnectionOrigin.GRACE_RECONNECT,
-            ConnectionOrigin.RETUNNEL,
-        }
-        with self._lock:
-            eligible = (
-                onion in self._connections
-                or onion in self._scheduled_auto_reconnects
-                or onion in self._retunnel_in_progress
-                or self._live_reconnect_grace.get(onion, 0) > time.time()
-                or self._outbound_attempt_origins.get(onion) in recovery_origins
-                or self._pending_connection_origins.get(onion) in recovery_origins
-            )
-            return self._live_context_generations.get(onion) if eligible else None
-
-    def known_live_context_generation(self, onion: str) -> Optional[int]:
-        """Projects logical context identity across recovery and retained end state.
-
-        Args:
-            onion: Canonical peer whose presentation lifetime is being projected.
-        Returns:
-            Optional[int]: Known identity; this alone never grants active permission.
-        """
-        with self._lock:
-            return self._live_context_generations.get(onion)
 
     def pop_any_connection(
         self, onion: str, expected_socket: Optional[socket.socket] = None

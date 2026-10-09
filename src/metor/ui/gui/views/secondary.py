@@ -11,7 +11,7 @@ from metor.core.api import Delivery
 from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.constants import GuiLimits
 from metor.ui.gui.state import Route
-from metor.ui.gui.widgets import Label
+from metor.ui.gui.widgets import ActionRow, Label
 from metor.ui.gui.widgets.symbol import IconAction
 
 # Local Package Imports
@@ -52,8 +52,7 @@ def secondary_view(controller: GuiController, refresh: Callable[[], None]) -> Bo
         'V20': 'Profiles',
         'V18': 'Technical history' if route.history_raw else 'Activity history',
     }.get(route.view, 'Metor')
-    header = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(12))
-    header.bind(minimum_height=header.setter('height'))
+    header = ActionRow(spacing=dp(12))
 
     def back() -> None:
         """Restores caller presentation without a communication command.

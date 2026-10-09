@@ -168,6 +168,7 @@ class PlaybackWorker:
         size = 0
         complete = False
         failed = False
+        output_operation = False
         self._publish('buffering')
         try:
             while not self._stop.is_set():
@@ -178,8 +179,12 @@ class PlaybackWorker:
                     if self._stop.is_set():
                         break
                     frame = payload[offset : offset + PcmVoice.FRAME_BYTES]
+                    output_operation = True
                     self.audio.play_frame(frame, headset_confirmed=True)
+                    output_operation = False
                     self.position += len(frame)
+                    if self.position - self._start == len(frame):
+                        self._publish('playing', size, complete)
                 if self._stop.is_set():
                     break
                 self._publish('playing' if payload else 'buffering', size, complete)
@@ -187,7 +192,9 @@ class PlaybackWorker:
                     break
                 if not payload:
                     self._stop.wait(GuiLimits.PLAYBACK_POLL_SECONDS)
+            output_operation = True
             self.audio.stop_output()
+            output_operation = False
             self.cache.coverage.add(self.target, self._start, self.position)
             if complete and self.position == size and not self._stop.is_set():
                 covered = self.cache.coverage.complete(self.target, size)
@@ -207,6 +214,21 @@ class PlaybackWorker:
                         self._publish('played_unconfirmed', size, True)
                         return
                     self.cache.mark_released(self.target)
+                    self.mailbox.put(
+                        Update(
+                            self.target.generation,
+                            'playback-released',
+                            event=event,
+                            playback=PlaybackProgress(
+                                self.target,
+                                self.serial,
+                                self.position,
+                                size,
+                                True,
+                                'complete',
+                            ),
+                        )
+                    )
                 self._publish(
                     'complete'
                     if covered or self.cache.released(self.target)
@@ -218,12 +240,14 @@ class PlaybackWorker:
                 self._publish('paused', size, complete)
         except Exception:
             failed = True
-            self._publish('unavailable', size, False)
+            self._publish(
+                'output_unavailable' if output_operation else 'unavailable', size, False
+            )
         finally:
             try:
                 self.audio.stop_output()
             except Exception:
                 if not failed:
-                    self._publish('unavailable', size, False)
+                    self._publish('output_unavailable', size, False)
             self.done.set()
             self.mailbox.put(Update(self.target.generation, 'playback-done'))

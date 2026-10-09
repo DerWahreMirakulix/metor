@@ -14,6 +14,7 @@ _AUTH_ASYNC_FLAG: str = 'ASYNC'
 _AUTH_RECOVERY_FLAG: str = 'RECOVER'
 _RECOVERY_HINT_ORIGINS: tuple[ConnectionOrigin, ...] = (
     ConnectionOrigin.AUTO_RECONNECT,
+    ConnectionOrigin.GRACE_RECONNECT,
     ConnectionOrigin.RETUNNEL,
 )
 

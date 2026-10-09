@@ -39,18 +39,12 @@ class RootRow(BoxLayout):
             None
         """
         super().__init__(size_hint_y=None, height=dp(84), spacing=dp(8))
+        self.controller, self.navigate, self.refresh = controller, navigate, refresh
         self.entry = entry
-        route = Route(
-            'V08' if entry.delivery is Delivery.DROP else 'V09',
-            entry.peer,
-            entry.delivery,
-        )
         context = partial(
             conversation_menu, controller, entry.peer, entry.delivery, refresh
         )
-        self.action = ContextAction(
-            entry.label, partial(navigate, route), context, surface='surface'
-        )
+        self.action = ContextAction(entry.label, self._open, context, surface='surface')
         self.action.padding = (dp(12), dp(16))
         self.action.remove_widget(self.action.label)
         self.action.focus_key = ('peer', entry.delivery.value, entry.peer)
@@ -90,6 +84,7 @@ class RootRow(BoxLayout):
             height=max(dp(24), sp(16) + dp(8)),
             pos_hint={'center_y': 0.5},
         )
+        self.badge._rectangle.radius = [self.badge.height / 2]
         self.badge.add_widget(self.count)
         self.action.add_widget(self.group)
         self.add_widget(self.action)
@@ -106,6 +101,23 @@ class RootRow(BoxLayout):
         self.group.add_widget(more)
         self.detail.bind(height=self._measure)
         self.update(entry)
+
+    def _open(self) -> None:
+        """Resolves a pending sidebar invitation before ordinary conversation navigation."""
+        entry = self.entry
+        if (
+            entry.delivery is Delivery.LIVE
+            and self.controller.live_invitations.show_peer(entry.peer)
+        ):
+            self.refresh()
+            return
+        self.navigate(
+            Route(
+                'V08' if entry.delivery is Delivery.DROP else 'V09',
+                entry.peer,
+                entry.delivery,
+            )
+        )
 
     def _measure(self, *_args: object) -> None:
         """Grows metadata without changing canonical input controls.
@@ -156,7 +168,7 @@ class RootRow(BoxLayout):
                 font_size=self.count.font_size,
             )
             measure.refresh()
-            self.badge.width = measure.texture.size[0] + dp(12)
+            self.badge.width = max(self.badge.height, measure.texture.size[0] + dp(12))
             if self.badge.parent is None:
                 self.group.add_widget(
                     self.badge, index=self.group.children.index(self.more) + 1

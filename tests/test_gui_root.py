@@ -97,10 +97,44 @@ class RootProjectionTests(unittest.TestCase):
         self.gui.state.set_draft(address(8), Delivery.DROP, 'not a conversation')
         rows = conversation_rows(self.gui, Delivery.LIVE)
         self.assertEqual([row.peer for row in rows], [b, c, a, d])
+        self.assertEqual([row.peer for row in rows if row.ended], [a, d])
         self.assertTrue(rows[-1].local_only)
         self.assertEqual((rows[-1].unseen, rows[-1].pending), (0, 0))
         self.gui.transcript.discard(d, Delivery.LIVE)
         self.assertEqual(len(conversation_rows(self.gui, Delivery.LIVE)), 3)
+
+    def test_ended_live_facts_survive_local_clear_and_move_out_of_main_list(
+        self,
+    ) -> None:
+        """Unseen and retry-spooled facts remain accessible after local content clears."""
+        peer = address(2)
+        context = LiveContextEntry(
+            'Peer',
+            peer,
+            False,
+            'disconnected',
+            pending_outbound_count=2,
+            unseen_count=1,
+        )
+        self.gui.state.snapshot.live_contexts = [context]
+        rows = conversation_rows(self.gui, Delivery.LIVE)
+        self.assertEqual([(row.peer, row.ended) for row in rows], [(peer, True)])
+        context.pending_outbound_count = 0
+        rows = conversation_rows(self.gui, Delivery.LIVE)
+        self.assertEqual([(row.unseen, row.pending) for row in rows], [(1, 0)])
+        context.recovery_eligible = True
+        self.assertFalse(conversation_rows(self.gui, Delivery.LIVE)[0].ended)
+        context.recovery_eligible = False
+        context.unseen_count = 0
+        self.assertEqual(conversation_rows(self.gui, Delivery.LIVE), [])
+
+    def test_privacy_cover_resets_ended_section_and_page(self) -> None:
+        """Private retained-chat UI state cannot survive a privacy revocation."""
+        self.gui.state.ended_live_expanded = True
+        self.gui.state.ended_live_page = 3
+        self.gui.state.covered = True
+        self.assertFalse(self.gui.state.ended_live_expanded)
+        self.assertEqual(self.gui.state.ended_live_page, 0)
 
     def test_unknown_delete_never_repeats_or_discards_local_source(self) -> None:
         """Uncertain mutation requires a new snapshot and another explicit action.
@@ -111,6 +145,7 @@ class RootProjectionTests(unittest.TestCase):
             None
         """
         self.gui.client = Mock()
+        self.gui.state.capabilities = frozenset({'drop_pending_cancellation'})
         self.gui.submit = Mock(return_value=True)
         self.gui.refresh_state = Mock()
         self.gui.transcript.admit(

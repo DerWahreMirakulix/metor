@@ -23,7 +23,13 @@ from metor.core.api import (
 from metor.core.daemon.managed.crypto import Crypto
 from metor.core.daemon.managed.models import TunnelState, SessionState
 from metor.core.tor import TorManager
-from metor.data import HistoryManager, ContactManager, MessageDirection, MessageManager
+from metor.data import (
+    HistoryManager,
+    ContactManager,
+    MessageDirection,
+    MessageManager,
+    PendingLiveRecord,
+)
 from metor.data.blob import BlobStore
 
 # Local Package Imports
@@ -37,6 +43,7 @@ from metor.core.daemon.managed.network.controller.base import ConnectionControll
 from metor.core.daemon.managed.network.receiver import StreamReceiver
 from metor.core.daemon.managed.network.listener import InboundListener
 from metor.core.daemon.managed.notify import NotificationPayload
+from .removal import LiveContextRemoval
 
 if TYPE_CHECKING:
     from metor.data.profile import Config
@@ -87,6 +94,7 @@ class NetworkManager:
             None
         """
         self._cm: ContactManager = cm
+        self._operation_lock = operation_lock or threading.RLock()
         self._state: StateTracker = state or StateTracker()
         self.calls = CallController(
             tm, cm, crypto, self._state, broadcast_callback, stop_flag
@@ -104,7 +112,7 @@ class NetworkManager:
             config=config,
             blob_store=blob_store,
             purge_fence=purge_fence,
-            operation_lock=operation_lock,
+            operation_lock=self._operation_lock,
         )
 
         self._controller: ConnectionController = ConnectionController(
@@ -119,7 +127,7 @@ class NetworkManager:
             has_live_consumers_callback=has_live_consumers_callback,
             stop_flag=stop_flag,
             config=config,
-            operation_lock=operation_lock,
+            operation_lock=self._operation_lock,
             retain_call_transport=self.calls.retain_after_chat_end,
         )
         self.calls.chat_end = lambda onion, conn: self._controller.disconnect(
@@ -167,6 +175,15 @@ class NetworkManager:
             stop_flag=stop_flag,
             config=config,
             call_transport_callback=self.calls.accept_transport,
+            operation_lock=self._operation_lock,
+        )
+        self._removal = LiveContextRemoval(
+            mm,
+            self._state,
+            self._operation_lock,
+            self.is_connected_or_recovering,
+            self.cancel_pending_live_voice,
+            self.dismiss_inbound_voice,
         )
 
     def start_listener(self) -> None:
@@ -264,6 +281,7 @@ class NetworkManager:
         """
         self.calls.close()
         self._controller.disconnect_all()
+        self._router.finalize_pending_live_messages()
 
     def disconnect_qualified(
         self, target: str, context_generation: Optional[int], attempt_id: Optional[str]
@@ -290,7 +308,6 @@ class NetworkManager:
             Optional[str]: Current outbound attempt identity.
         """
         return self._state.get_outbound_attempt_id(onion)
-        self._router.finalize_pending_live_messages()
 
     def abort_all(self) -> None:
         """Preempts sockets without reconnect, fallback, or delivery finalization.
@@ -350,11 +367,18 @@ class NetworkManager:
         """
         return (
             self._state.is_connected_or_pending(onion)
+            or self._state.has_unrevoked_live_context(onion)
             or self._state.has_live_reconnect_grace(onion)
             or self._state.is_retunneling(onion)
             or self._state.has_outbound_attempt(onion)
             or self._state.has_scheduled_auto_reconnect(onion)
         )
+
+    def dismiss_live_context(
+        self, onion: str, cancel_pending: bool = False
+    ) -> tuple[MessageOperationReason | None, int]:
+        """Delegates exact ended-context destruction to its atomic lifecycle owner."""
+        return self._removal.dismiss(onion, cancel_pending)
 
     def has_drop_tunnel(self, onion: str) -> bool:
         """
@@ -638,6 +662,16 @@ class NetworkManager:
             None
         """
         self._router.dismiss_inbound_voice(onion)
+
+    def cancel_pending_live_voice(
+        self, onion: str, pending: list[PendingLiveRecord]
+    ) -> None:
+        """Releases published LIVE Voice only after exact SQL cancellation commits.
+
+        Callers hold the domain operation barrier and revoke replay/writer claims
+        first. This cleanup preserves logical receipts and unpublished drafts.
+        """
+        self._router.cancel_pending_live_voice(onion, pending)
 
     def get_active_onions(self) -> List[str]:
         """

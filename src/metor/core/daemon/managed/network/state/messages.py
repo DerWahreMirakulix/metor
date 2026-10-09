@@ -34,6 +34,8 @@ class StateTrackerMessagesMixin:
     _outbound_sockets: Dict[str, socket.socket]
     _unacked_messages: Dict[str, Dict[str, Tuple[str, str]]]
     _message_request_ids: Dict[str, str]
+    _drop_message_request_peers: Dict[str, str]
+    _live_message_request_peers: Dict[str, str]
     _recent_live_msg_ids: Dict[str, List[str]]
     _unauthenticated_connections: Set[socket.socket]
     _locally_terminated_sockets: WeakSet[socket.socket]
@@ -46,11 +48,15 @@ class StateTrackerMessagesMixin:
     _socket_writers: Dict[socket.socket, BoundedSocketWriter]
     _live_generations: Dict[Tuple[str, str], int]
     _next_live_generation: int
+    _accepted_live_contexts: Dict[str, int]
+    _accepted_live_context_deadlines: Dict[str, float]
 
     def remember_message_request_id(
         self,
         msg_id: str,
         request_id: Optional[str],
+        drop_peer: Optional[str] = None,
+        live_peer: Optional[str] = None,
     ) -> None:
         """
         Remembers which IPC request created one logical outbound message.
@@ -58,6 +64,8 @@ class StateTrackerMessagesMixin:
         Args:
             msg_id (str): The logical message identifier.
             request_id (Optional[str]): The originating IPC request identifier.
+            drop_peer: Exact DROP peer ownership; absent for LIVE or legacy callers.
+            live_peer: Exact LIVE peer ownership; absent for DROP or legacy callers.
 
         Returns:
             None
@@ -67,6 +75,14 @@ class StateTrackerMessagesMixin:
 
         with self._lock:
             self._message_request_ids[msg_id] = request_id
+            if drop_peer is None:
+                self._drop_message_request_peers.pop(msg_id, None)
+            else:
+                self._drop_message_request_peers[msg_id] = drop_peer
+            if live_peer is None:
+                self._live_message_request_peers.pop(msg_id, None)
+            else:
+                self._live_message_request_peers[msg_id] = live_peer
 
     def pop_message_request_id(self, msg_id: str) -> Optional[str]:
         """
@@ -79,6 +95,8 @@ class StateTrackerMessagesMixin:
             Optional[str]: The originating request identifier, if one was tracked.
         """
         with self._lock:
+            self._drop_message_request_peers.pop(msg_id, None)
+            self._live_message_request_peers.pop(msg_id, None)
             return self._message_request_ids.pop(msg_id, None)
 
     def clear_message_request_id(self, msg_id: str) -> None:
@@ -93,6 +111,26 @@ class StateTrackerMessagesMixin:
         """
         with self._lock:
             self._message_request_ids.pop(msg_id, None)
+            self._drop_message_request_peers.pop(msg_id, None)
+            self._live_message_request_peers.pop(msg_id, None)
+
+    def forget_cancelled_drop_requests(
+        self, identities: tuple[tuple[str, str], ...]
+    ) -> None:
+        """Releases only request correlation still owned by each cancelled DROP peer."""
+        with self._lock:
+            for peer, msg_id in identities:
+                if self._drop_message_request_peers.get(msg_id) == peer:
+                    self._message_request_ids.pop(msg_id, None)
+                    self._drop_message_request_peers.pop(msg_id, None)
+
+    def forget_cancelled_live_requests(self, onion: str, msg_ids: list[str]) -> None:
+        """Releases request correlation only while the cancelled LIVE peer owns it."""
+        with self._lock:
+            for msg_id in msg_ids:
+                if self._live_message_request_peers.get(msg_id) == onion:
+                    self._message_request_ids.pop(msg_id, None)
+                    self._live_message_request_peers.pop(msg_id, None)
 
     def pop_unacked_messages(self, onion: str) -> Dict[str, Tuple[str, str]]:
         """
@@ -342,5 +380,7 @@ class StateTrackerMessagesMixin:
             self._retunnel_in_progress.clear()
             self._socket_write_locks.clear()
             self._live_generations.clear()
+            self._accepted_live_contexts.clear()
+            self._accepted_live_context_deadlines.clear()
         for sock in sockets:
             self.retire_connection(sock)

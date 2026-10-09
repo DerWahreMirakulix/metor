@@ -6,7 +6,7 @@ from typing import ClassVar
 from kivy.clock import Clock
 from kivy.core.text import Label as TextMeasure
 from kivy.core.window import Window
-from kivy.metrics import dp, sp
+from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.modalview import ModalView
 from kivy.uix.scrollview import ScrollView
@@ -15,10 +15,11 @@ from kivy.uix.widget import Widget
 
 from metor.ui.gui.constants import Geometry
 from metor.ui.gui.runtime import GuiController
-from metor.ui.gui.theme import color, font_path
+from metor.ui.gui.theme import color
 
 # Local Package Imports
 from .controls import Action, Label, Panel
+from .layout import ActionRow
 from .symbol import IconAction
 from .tooltip import PointerTooltip
 
@@ -41,8 +42,9 @@ class ActionSheet(ModalView):
         footer: Label | None = None,
         revision: Callable[[], object] | None = None,
         snapshot_updates: bool = True,
-        wrap_title: bool = False,
+        wrap_title: bool = True,
         stable_frame: bool = False,
+        back: Callable[[], object] | None = None,
     ) -> None:
         """Creates current-state content with an explicit Close and persistent action area.
 
@@ -57,8 +59,9 @@ class ActionSheet(ModalView):
             footer: Optional persistent scope/help text above the fixed actions.
             revision: Optional bounded local eligibility key for contextual actions.
             snapshot_updates: False for local configuration independent of Core snapshots.
-            wrap_title: Measures multi-line audio headings instead of shortening them.
+            wrap_title: Measures full multi-line headings at the current text scale.
             stable_frame: Reserves available height so asynchronous content cannot move dismissal.
+            back: Optional parent surface to open after a deliberate Back action.
         Returns:
             None
         """
@@ -85,22 +88,31 @@ class ActionSheet(ModalView):
         self._disposed = False
         self.body = Panel(orientation='vertical', padding='24dp', spacing='16dp')
         self.add_widget(self.body)
-        header = BoxLayout(size_hint_y=None, height='48dp', spacing='12dp')
+        header = ActionRow(spacing='12dp')
         self.header = header
         self.title_label = Label(
             self.heading() if callable(self.heading) else self.heading,
             role='title',
             wrap=self.wrap_title,
         )
-        if self.wrap_title:
-            self.title_label.bind(height=self._title_height)
-        header.add_widget(self.title_label)
+        self.title_viewport = ScrollView(
+            do_scroll_x=False,
+            do_scroll_y=False,
+            size_hint_y=None,
+            height=dp(Geometry.TARGET),
+        )
+        self.title_viewport.add_widget(self.title_label)
+        header.add_widget(self.title_viewport)
         self.close_action = IconAction(
             'x', 'Close', self.dismiss, pos_hint={'center_y': 0.5}
         )
         header.add_widget(self.close_action)
         self.invitation_indicator = IconAction(
-            'bell', 'Incoming Live', self._open_invitation, tone='live', badge=True
+            'bell',
+            'Pending Live invitations',
+            self._open_invitation,
+            tone='live',
+            badge=True,
         )
         self._update_invitation_indicator()
         self.body.add_widget(header)
@@ -115,8 +127,8 @@ class ActionSheet(ModalView):
         self.body.add_widget(self.scroll)
         if self.footer is not None:
             self.body.add_widget(self.footer)
-        self.actions = BoxLayout(size_hint_y=None, height='48dp', spacing='12dp')
-        self.cancel = Action('Cancel' if self.primary else 'Back', self.dismiss)
+        self.actions = ActionRow(spacing='12dp')
+        self.cancel = Action('Cancel' if self.primary else 'Back', back or self.dismiss)
         self.actions.add_widget(self.cancel)
         self.primary_action: Action | None = None
         if self.primary:
@@ -125,6 +137,9 @@ class ActionSheet(ModalView):
             )
             self.actions.add_widget(self.primary_action)
         self.body.add_widget(self.actions)
+        self.title_label.bind(height=self._resize)
+        self.header.bind(height=self._resize)
+        self.actions.bind(height=self._resize)
         self._build()
         self.bind(on_dismiss=self._dismissed)
         Window.bind(size=self._resize)
@@ -157,20 +172,6 @@ class ActionSheet(ModalView):
             if isinstance(widget, (Label, TextInput)):
                 widget.text = ''
 
-    def _title_height(self, _widget: object, height: float) -> None:
-        """Keeps a wrapped heading fully visible beside its fixed close target.
-
-        Args:
-            _widget: Measured native heading.
-            height: Rendered title height at the current width and text scale.
-        Returns:
-            None.
-        """
-        if self._disposed:
-            return
-        self.header.height = max(dp(48), height)
-        self._resize()
-
     def _resize(self, *_args: object) -> None:
         """Measures action labels and keeps consequences scrollable above fixed controls.
 
@@ -182,14 +183,16 @@ class ActionSheet(ModalView):
         if self._disposed:
             return
         self.width = min(dp(320 if self.compact_menu else 480), Window.width - dp(48))
-        needed = dp(12 + 4 * 12)
-        if self.primary:
-            for text in ('Cancel', self.primary[0]):
+        needed = self.actions.spacing
+        if self.primary_action is not None:
+            for action in (self.cancel, self.primary_action):
                 label = TextMeasure(
-                    text=text, font_name=font_path(600, text), font_size=sp(14)
+                    text=action.label.text,
+                    font_name=action.label.font_name,
+                    font_size=action.label.font_size,
                 )
                 label.refresh()
-                needed += label.texture.size[0]
+                needed += label.texture.size[0] + action.padding[0] + action.padding[2]
         stacked = self.primary is not None and needed > self.width - dp(48)
         if self.primary and len(self.actions.children) == 2:
             correct = self.actions.children[0 if stacked else -1] is self.cancel
@@ -199,15 +202,22 @@ class ActionSheet(ModalView):
                     self.cancel, index=0 if stacked else len(self.actions.children)
                 )
         self.actions.orientation = 'vertical' if stacked else 'horizontal'
-        self.actions.height = dp(108 if stacked else 48)
-        desired_height = (
-            self.header.height
-            + dp(48 + 32)
-            + self.column.minimum_height
-            + self.actions.height
-            + (self.footer.height + dp(16) if self.footer is not None else 0)
-        )
         available = Window.height - self._bottom() - dp(Geometry.EDGE)
+        fixed_height = (
+            self.body.padding[1]
+            + self.body.padding[3]
+            + self.body.spacing * (len(self.body.children) - 1)
+            + self.actions.height
+            + (self.footer.height if self.footer is not None else 0)
+        )
+        self.title_viewport.height = min(
+            max(dp(Geometry.TARGET), self.title_label.height),
+            max(dp(Geometry.TARGET), available - fixed_height - dp(Geometry.TARGET)),
+        )
+        self.title_viewport.do_scroll_y = (
+            self.title_label.height > self.title_viewport.height
+        )
+        desired_height = self.header.height + fixed_height + self.column.minimum_height
         self.height = available if self.stable_frame else min(available, desired_height)
         self.scroll.do_scroll_y = self.height < desired_height
         self._align_center()
@@ -358,9 +368,8 @@ class ActionSheet(ModalView):
         Returns:
             None
         """
-        visible = any(
-            item.phase != 'ended'
-            for item in self.controller.live_invitations.entries.values()
+        visible = not self.compact_menu and bool(
+            self.controller.live_invitations.pending_handles()
         )
         if visible and self.invitation_indicator.parent is None:
             self.header.add_widget(self.invitation_indicator, index=1)

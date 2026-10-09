@@ -690,15 +690,10 @@ class NativeCoreApp(MetorApp):
             lambda: self.native.key('BackSpace'),
         )
         self.add(
-            'drop_to_live_projection',
-            lambda: self.entry().text == '',
-            self._switch_live,
-        )
-        self.add(
-            'live_projection_no_implicit_connect',
+            'explicit_start_live_from_drop',
             lambda: (
-                self.route('V09')
-                and self.peer().subtitle.text == 'No Live connection'
+                self.route('V08')
+                and self.entry().text == ''
                 and not self.peer().connect.disabled
             ),
             self._start_live,
@@ -790,14 +785,28 @@ class NativeCoreApp(MetorApp):
             self._live_failure_visible,
             self._verify_failed_live,
         )
+        if self.args.width < Geometry.BREAKPOINT:
+            self.add(
+                'live_leave_to_drop_picker',
+                lambda: not self.peer().connect.disabled,
+                lambda: self.click('Back', self.peer()),
+            )
         self.add(
-            'live_to_drop_projection',
-            lambda: not self.peer().connect.disabled,
-            self._switch_drop,
+            'open_drop_from_master_or_picker',
+            lambda: (
+                not self.peer().connect.disabled
+                if self.args.width >= Geometry.BREAKPOINT
+                else self.route('V11') and self.contact_list() is not None
+            ),
+            self._open_return_drop,
         )
         self.add(
             'missing_audio_call_action',
-            lambda: self.route('V08') and not self.peer().call.disabled,
+            lambda: (
+                self.route('V08')
+                and self.text_visible('Existing Drop')
+                and not self.peer().call.disabled
+            ),
             lambda: self.native.click(self.peer().call),
         )
         self.add(
@@ -834,11 +843,18 @@ class NativeCoreApp(MetorApp):
         self.add(
             'peer_back_leaves_conversation',
             lambda: (
-                self.route('V11')
+                self.route('V06' if self.args.width >= Geometry.BREAKPOINT else 'V11')
                 and self.peer() is None
-                and self.contact_list() is not None
+                and (
+                    self.args.width >= Geometry.BREAKPOINT
+                    or self.contact_list() is not None
+                )
             ),
-            self._leave_peer_picker,
+            lambda: (
+                self.ux.departed()
+                if self.args.width >= Geometry.BREAKPOINT
+                else self._leave_peer_picker()
+            ),
         )
         self.add(
             'picker_back_root',
@@ -1237,6 +1253,8 @@ class NativeCoreApp(MetorApp):
         self.live_start_count += 1
         if self.live_start_count == 1:
             self.ux.hold_first_connect()
+        if peer.route.delivery is Delivery.DROP:
+            self.ux.arm_live_open(peer.connect)
         self.ux.arm_start(f'live_start_{self.live_start_count}', peer.connect)
         self.native.click(peer.connect)
 
@@ -1324,18 +1342,16 @@ class NativeCoreApp(MetorApp):
             and not retry.disabled
         )
 
-    def _switch_drop(self) -> None:
-        """Arms a first-draw observation before actual native mode selection."""
-        action = self.action('DROP', self.peer())
+    def _open_return_drop(self) -> None:
+        """Opens DROP from its desktop master row or the originating contact picker."""
+        scope = (
+            self.shell._master
+            if self.args.width >= Geometry.BREAKPOINT
+            else self.contact_list()
+        )
+        action = self.action(self.controller.contacts.alias(self.target), scope)
         assert action is not None
         self.ux.arm_drop(action)
-        self.native.click(action)
-
-    def _switch_live(self) -> None:
-        """Observes the first opposite-mode draw after the real native tab activation."""
-        action = self.action('LIVE', self.peer())
-        assert action is not None
-        self.ux.arm_live_tab(action)
         self.native.click(action)
 
     def _verify_feedback(self) -> None:
@@ -1459,7 +1475,7 @@ class NativeCoreApp(MetorApp):
             not self.controller.voice.running and not self.controller.playback.running
         )
         assert self.action('Choose microphone') is not None
-        assert self.action('Choose headphone output') is not None
+        assert self.action('Choose audio output') is not None
         self.capture('audio-settings')
 
     def _rename_alias(self) -> TextField | None:

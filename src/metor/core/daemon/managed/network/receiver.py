@@ -119,7 +119,7 @@ class StreamReceiver:
         if self._state.is_current_outbound_socket(onion, conn):
             return False
 
-        return self._state.is_connected_or_pending(onion)
+        return True
 
     def __init__(
         self,
@@ -275,6 +275,7 @@ class StreamReceiver:
         remote_reject_intent: Optional[RejectIntent] = None
         remote_disconnected: bool = False
         remote_disconnect_is_fallback: bool = False
+        stale_outbound_response: bool = False
 
         idle_timeout: float = self._config.get_float(SettingKey.STREAM_IDLE_TIMEOUT)
         late_acceptance_timeout: float = self._config.get_float(
@@ -324,13 +325,26 @@ class StreamReceiver:
                     continue
 
                 if msg == TorCommand.ACCEPTED.value:
-                    effective_origin: ConnectionOrigin = (
-                        self._state.consume_outbound_connected_origin(onion)
-                        or connection_origin
-                    )
+                    with self._state.snapshot_barrier():
+                        if (
+                            not awaiting_acceptance
+                            or not self._state.is_current_outbound_socket(onion, conn)
+                        ):
+                            stale_outbound_response = True
+                            break
+                        effective_origin: ConnectionOrigin = (
+                            self._state.consume_outbound_connected_origin(onion)
+                            or connection_origin
+                        )
+                        if not self._state.add_active_connection(
+                            onion,
+                            conn,
+                            require_outbound_socket=True,
+                        ):
+                            stale_outbound_response = True
+                            break
                     awaiting_acceptance = False
                     conn.settimeout(idle_timeout)
-                    self._state.add_active_connection(onion, conn)
                     alias: str = cast(str, self._cm.ensure_alias_for_onion(onion))
                     self._hm.log_event(
                         HistoryEvent.CONNECTED,
@@ -368,6 +382,9 @@ class StreamReceiver:
                     self._router.replay_unacked_messages(onion)
 
                 elif msg == TorCommand.PENDING.value:
+                    if not self._state.is_current_outbound_socket(onion, conn):
+                        stale_outbound_response = True
+                        break
                     awaiting_acceptance = True
                     conn.settimeout(late_acceptance_timeout)
                     alias = cast(str, self._cm.ensure_alias_for_onion(onion))
@@ -391,6 +408,13 @@ class StreamReceiver:
                 elif msg == TorCommand.REJECT.value or msg.startswith(
                     f'{TorCommand.REJECT.value} '
                 ):
+                    if (
+                        not awaiting_acceptance
+                        and msg == f'{TorCommand.REJECT.value} drops_disabled'
+                        and self._state.get_connection(onion) is conn
+                    ):
+                        self._state.reject_drop_transfer(onion, conn, msg)
+                        continue
                     remote_rejected = True
                     remote_reject_intent = self._parse_reject_intent(msg)
                     break
@@ -475,7 +499,10 @@ class StreamReceiver:
                     elif msg.startswith(f'{TorCommand.VOICE_COMMIT_ACK.value} '):
                         parts = msg.split(' ')
                         if len(parts) == 2:
-                            self._router.process_voice_commit_ack(onion, parts[1])
+                            if not self._state.acknowledge_drop_transfer(
+                                onion, conn, parts[1], msg
+                            ):
+                                self._router.process_voice_commit_ack(onion, parts[1])
 
                     elif msg.startswith(f'{TorCommand.VOICE_ACK.value} '):
                         parts = msg.split(' ')
@@ -485,9 +512,12 @@ class StreamReceiver:
                             except ValueError:
                                 next_offset = -1
                             if next_offset >= 0:
-                                self._router.process_voice_ack(
-                                    onion, parts[1], next_offset
-                                )
+                                if not self._state.acknowledge_drop_transfer(
+                                    onion, conn, parts[1], msg
+                                ):
+                                    self._router.process_voice_ack(
+                                        onion, parts[1], next_offset
+                                    )
 
                     elif any(
                         msg.startswith(f'{command.value} ')
@@ -541,6 +571,12 @@ class StreamReceiver:
                 ):
                     return
                 if self._state.consume_locally_terminated_socket(conn):
+                    return
+                if stale_outbound_response:
+                    return
+                if not self._state.is_known_socket(
+                    onion, conn
+                ) and not self._state.is_current_outbound_socket(onion, conn):
                     return
 
                 if self._is_stale_pending_acceptance_socket(

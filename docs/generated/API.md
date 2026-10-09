@@ -563,13 +563,17 @@ Clears persisted history rows.
 
 ### `ClearMessagesCommand`
 
-Clears only local DROP conversation payload/history state.
+Clears local DROP history, optionally cancelling queued outbound delivery.
+
+Cancellation stops future emission and retries; transmitted copies may arrive.
+The default preserves queued delivery for existing clients.
 
 | Field               | Type               | Default |
 | ------------------- | ------------------ | ------- |
 | `request_id`        | `Union[str, None]` | `None`  |
 | `target`            | `Union[str, None]` | `None`  |
 | `non_contacts_only` | `bool`             | `False` |
+| `cancel_pending`    | `bool`             | `False` |
 
 **Wire Value:** `clear_messages`
 
@@ -678,14 +682,18 @@ Requests a live connection to a target peer.
 
 ### `DeleteMessageCommand`
 
-Deletes one eligible local DROP payload while retaining dedupe metadata.
+Deletes an exact local DROP, optionally stopping its queued delivery.
 
-| Field        | Type                                         | Default  |
-| ------------ | -------------------------------------------- | -------- |
-| `request_id` | `Union[str, None]`                           | `None`   |
-| `target`     | `str`                                        | Required |
-| `msg_id`     | `str`                                        | Required |
-| `direction`  | `Union[<enum 'MessageDirectionCode'>, None]` | `None`   |
+Cancellation preserves content-free receipt metadata and never recalls a copy
+already transmitted. The default rejects pending outbound Drops.
+
+| Field            | Type                                         | Default  |
+| ---------------- | -------------------------------------------- | -------- |
+| `request_id`     | `Union[str, None]`                           | `None`   |
+| `target`         | `str`                                        | Required |
+| `msg_id`         | `str`                                        | Required |
+| `direction`      | `Union[<enum 'MessageDirectionCode'>, None]` | `None`   |
+| `cancel_pending` | `bool`                                       | `False`  |
 
 **Wire Value:** `delete_message`
 
@@ -727,12 +735,16 @@ Requests disconnection from an active peer.
 
 ### `DismissLiveContextCommand`
 
-Destroys resolved inbound state for a disconnected LIVE context.
+Destroys ended LIVE state, optionally cancelling its pending outbound work.
 
-| Field        | Type               | Default  |
-| ------------ | ------------------ | -------- |
-| `request_id` | `Union[str, None]` | `None`   |
-| `target`     | `str`              | Required |
+The default preserves unresolved outbound work for existing clients. Explicit
+cancellation stops future emission; already transmitted copies may arrive.
+
+| Field            | Type               | Default  |
+| ---------------- | ------------------ | -------- |
+| `request_id`     | `Union[str, None]` | `None`   |
+| `target`         | `str`              | Required |
+| `cancel_pending` | `bool`             | `False`  |
 
 **Wire Value:** `dismiss_live_context`
 

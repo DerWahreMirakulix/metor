@@ -21,7 +21,7 @@ from metor.ui.gui.constants import GuiLimits
 from metor.ui.gui.platform.audio import PcmVoice
 from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.state import Route
-from metor.ui.gui.widgets import Action, Label
+from metor.ui.gui.widgets import Action, ActionRow, Label
 from metor.ui.gui.widgets.message import MessageBubble
 from metor.ui.gui.widgets.voice import VoiceCard
 
@@ -111,6 +111,29 @@ def projection(controller: GuiController, route: Route) -> list[TimelineRow]:
             timestamp,
         )
         rows[row.key] = replace(row, order=prior.order) if prior else row
+    for action, (entry, _size) in controller.text.reservations.items():
+        if (
+            entry.peer != route.peer
+            or entry.delivery is not route.delivery
+            or action not in controller.text.operations
+        ):
+            continue
+        prior = rows.get((entry.direction, entry.msg_id))
+        status = (
+            entry.status.value.capitalize()
+            if entry.status in {MessageStatusCode.DELIVERED, MessageStatusCode.READ}
+            else controller.text.pending_status(entry.peer, entry.delivery)
+        )
+        row = TimelineRow(
+            entry.direction,
+            entry.msg_id,
+            entry.order,
+            entry.text,
+            message_metadata(entry.timestamp, status),
+            status=entry.status,
+            timestamp=entry.timestamp,
+        )
+        rows[row.key] = replace(row, order=prior.order) if prior else row
     inventory = controller.inventory.page
     if inventory is not None and controller.archive.before is None:
         for retained in inventory.messages:
@@ -178,6 +201,7 @@ class Timeline(BoxLayout):
         self._widgets: dict[
             tuple[MessageDirectionCode, str], MessageBubble | VoiceCard
         ] = {}
+        self._context_keys: set[tuple[MessageDirectionCode, str]] = set()
         self._visible: list[tuple[MessageDirectionCode, str]] = []
         self._known: set[tuple[MessageDirectionCode, str]] = set()
         self._anchor: tuple[MessageDirectionCode, str] | None = None
@@ -195,7 +219,7 @@ class Timeline(BoxLayout):
         self.column.bind(height=self._layout_changed)
         self.scroll.bind(height=self._layout_changed)
         self.add_widget(self.scroll)
-        self.navigation = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(8))
+        self.navigation = ActionRow(spacing=dp(8))
         self.older = Action('Older', self._older)
         self.older.accessible_name = 'Older messages'
         self.newer = Action('Newer', self._newer)
@@ -208,14 +232,9 @@ class Timeline(BoxLayout):
             '', self._jump, size_hint_x=None, width=dp(160), pos_hint={'center_x': 0.5}
         )
         self.empty = Label('', role='support', tone='textSecondary')
-        self.archive_notice = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(12))
+        self.archive_notice = ActionRow(spacing=dp(12))
         self.archive_error = Label(
             '', role='support', tone='danger', pos_hint={'center_y': 0.5}
-        )
-        self.archive_error.bind(
-            height=lambda _widget, height: setattr(
-                self.archive_notice, 'height', max(dp(48), height)
-            )
         )
         self.retry_archive = Action(
             'Retry',
@@ -356,6 +375,7 @@ class Timeline(BoxLayout):
         self._revoked = True
         self._layout_trigger.cancel()
         self._widgets.clear()
+        self._context_keys.clear()
         self._rows.clear()
         self._visible.clear()
         self._known.clear()
@@ -414,11 +434,33 @@ class Timeline(BoxLayout):
         for key in list(self._widgets):
             if key not in visible:
                 self.column.remove_widget(self._widgets.pop(key))
+                self._context_keys.discard(key)
         widgets_changed = False
         for row in selected:
+            has_actions = self.route.delivery is Delivery.DROP or (
+                row.direction is MessageDirectionCode.OUT
+                and row.finalized
+                and row.status
+                in {
+                    MessageStatusCode.PENDING,
+                    MessageStatusCode.DELIVERED,
+                    MessageStatusCode.READ,
+                }
+            )
+            reservation = self.controller.text.reservations.get('A11:' + row.msg_id)
+            if reservation is not None:
+                item, _size = reservation
+                if (
+                    item.peer == self.route.peer
+                    and item.delivery is self.route.delivery
+                    and item.direction is row.direction
+                ):
+                    has_actions = False
+            context = partial(self._menu, row.key) if has_actions else None
             widget = self._widgets.get(row.key)
-            if widget is not None and (row.text is None) != isinstance(
-                widget, VoiceCard
+            if widget is not None and (
+                (row.text is None) != isinstance(widget, VoiceCard)
+                or has_actions != (row.key in self._context_keys)
             ):
                 self.column.remove_widget(widget)
                 self._widgets.pop(row.key)
@@ -438,10 +480,7 @@ class Timeline(BoxLayout):
                         self.controller,
                         target,
                         self.refresh,
-                        partial(self._menu, row.key)
-                        if self.route.delivery is Delivery.DROP
-                        or row.direction is MessageDirectionCode.OUT
-                        else None,
+                        context,
                         configure_audio=partial(
                             show_audio_unavailable,
                             self.controller,
@@ -455,12 +494,13 @@ class Timeline(BoxLayout):
                         row.metadata,
                         row.direction is MessageDirectionCode.IN,
                         self.route.delivery.value,
-                        partial(self._menu, row.key)
-                        if self.route.delivery is Delivery.DROP
-                        or row.direction is MessageDirectionCode.OUT
-                        else None,
+                        context,
                     )
                 self._widgets[row.key] = widget
+                if has_actions:
+                    self._context_keys.add(row.key)
+                else:
+                    self._context_keys.discard(row.key)
             if isinstance(widget, VoiceCard):
                 widget.update(row.size, row.finalized, row.codec, row.metadata)
             elif row.text is not None:

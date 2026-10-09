@@ -83,6 +83,13 @@ for PIN, password and no-local-secret methods, including the touch keyboard.
 Its result records that Core and physical audio hardware are absent; it proves
 layout and hit targets rather than call transport or acoustic continuation.
 
+`python tests/gui_native_call_bar.py --result RESULT.json` checks the persistent
+call bar, reopening controls, switching peers, Voice availability and privacy
+covering. `python tests/gui_native_peer_bounds.py --output RESULT.png` checks
+the combined call bar, pending Live control, long peer name and touch keyboard.
+Both run at 360×640 with 1.5× text scaling; `--width 1180 --height 760` checks
+the desktop layout. They use synthetic public state and no physical audio.
+
 The conversation fixture
 `python tests/gui_native_conversation.py --result RESULT.json` checks actual
 Kivy frame geometry and synthetic pointer/keyboard interactions at 360×640 with
@@ -94,6 +101,12 @@ local keyboard and preserves credential-field behavior. These fixtures use
 injected SDK results and no Core or audio streams. An offscreen SDL run proves
 these widget interactions only; it does not replace the installed native-window
 smoke, physical input, or acoustic acceptance.
+
+The waveform fixture
+`python tests/gui_native_voice_layout.py --output RESULT.png` checks a real Kivy
+timeline at 360×640 with 1.5× text scaling, then resizes it. It verifies that an
+arriving text message keeps the existing Voice waveform inside its card. Its
+media and Core state are synthetic; it opens no audio stream.
 
 The Core-backed conversation fixture runs the actual `MetorApp`, controller and
 SDK against two disposable encrypted Core runtimes. X11 XTest mouse and keyboard
@@ -272,11 +285,11 @@ Those actions require explicit controls and typed Core commands. The GUI does
 not infer online presence from a cached connection or change delivery semantics
 because a view changed.
 
-DROP and LIVE tabs within a peer replace the current projection in navigation
-history. Back returns to the view that opened that conversation, regardless of
-tab switches. The conversation header keeps one persistent status and the
-explicit Start/Cancel/End Live, Call, and More actions in the same order and
-location at narrow and wide widths. Short timelines align at the top from the
+Peers do not contain a DROP/LIVE mode switch. Start Live is an explicit action
+from DROP and opens the LIVE projection only after the action is admitted.
+Back returns to the view that opened that conversation. The conversation header
+places Call and More beside the contact name, with persistent status and the
+explicit Start/Cancel/End Live action below, at narrow and wide widths. Short timelines align at the top from the
 first layout; overflowing timelines follow the latest edge only while the user
 has chosen to follow it.
 
@@ -285,9 +298,27 @@ native frame, even while Core is still processing the request. Connection
 progress and failure stay in that header. Retry becomes available only after
 Core confirms an eligible state; repeated clicks cannot start another attempt.
 A connection failure for a conversation that is no longer visible produces one
-contact-scoped transient result. Recovery does not create a new call invitation.
+contact-scoped transient result. Initial connection retries do not create an
+unstable-connection notification, and Cancel removes retry notices for that
+attempt. Recovery does not create a new Live invitation. Pending invitations
+appear in the LIVE overview; selecting one offers Accept or Reject. Arrival
+creates a notification and updates the top-right pending-request control without
+opening a banner over the current task. The notification opens a banner with
+Reject, Accept, and Accept and open; the top-right control opens that banner and
+allows browsing all pending requests. Rejection removes the pending row.
+Accept retains the current view; Accept and open navigates to the peer's LIVE
+chat after Core confirms acceptance. Accepted sessions remain reachable through
+the LIVE overview rather than the pending-request selector.
 
-Switching between DROP and LIVE for the same peer retains its already-loaded
+The main LIVE list contains current connections, incoming requests, and recovery.
+Ended contexts appear in a collapsed Ended Live chats section with their pending
+or unseen counts and explicit Reconnect and Remove actions. Reconnect after a
+terminal End starts a new session under ordinary acceptance rules; mutual
+connect still auto-accepts. Reconnect keeps the client's bounded same-runtime
+transcript without creating permanent LIVE message history. A UI restart drops
+that local transcript; Core-owned pending and unseen content remains reachable.
+
+Opening DROP or LIVE for the same peer retains its already-loaded
 latest DROP page while refreshing it. The two native views are reused within
 that conversation; the inactive view releases focus and pending input. Leaving
 the conversation or covering the GUI revokes both views and their private text.
@@ -330,12 +361,42 @@ remote delivery, and a read receipt are different facts. Unknown operation
 outcomes are reconciled under the original identity before retry.
 
 Text drafts are separate per peer and DROP/LIVE projection and survive
-same-runtime navigation. They clear only after confirmed local acceptance;
-rejection or unknown result retains the draft. Current GUI drafts are
+same-runtime navigation. Send freezes the submitted content, clears the composer,
+and immediately shows a Sending item in the conversation. That composer remains
+read-only until the submitted result resolves. A definite rejection restores the
+text draft; an unknown result retains the same conversation item while its
+original identity is checked without resending. Current GUI drafts are
 disposable on GUI exit, restart, profile switch, hard lock, and purge. Core
 pending or unseen content is never discarded because a GUI cache evicts it.
 Peer-linked pins and preferences use the protected public profile boundary,
 not a plaintext address or content side store.
+
+Delivered LIVE transcripts are local, volatile presentation. Unacknowledged
+published LIVE messages already use Core's protected durable retry spool and
+remain reachable after a UI restart. An ended LIVE context with pending messages
+replaces its ordinary composer with Send all pending as Drops, using the existing
+explicit fallback command and original message IDs. Background recovery keeps
+the composer and accepted session intact. The GUI preserves Core's automatic
+fallback setting rather than changing it when a view opens. Unsent recording
+reviews remain separate from published pending messages.
+
+Remove Live with pending messages offers Send pending as Drops and remove,
+Discard pending and remove, and Cancel. The send choice waits for a confirmed
+bulk fallback and fresh zero-pending ended state before removal; an unknown
+conversion result keeps the context. Privacy covering cancels that subsequent
+automatic removal. The discard choice explicitly cancels Core's published
+pending LIVE queue; it cannot recall a transmitted copy. Both choices remove
+local transcript and eligible unread LIVE content without deleting Drops or
+saved contacts. An unsent Voice review must be resolved separately.
+
+Deleting a DROP conversation clears its local history and cancels queued Drops
+in one Core operation. The confirmation explains that a copy already transmitted
+may still arrive; deletion never recalls the remote copy. Saved contacts, LIVE,
+text drafts and unsent Voice reviews remain. Sending or checking unresolved
+admission disables conversation deletion until the result is reconciled. An
+individual queued Drop can also be deleted with explicit cancellation. Privacy's
+Clear all Drops retains its separate history-only scope and preserves queued
+delivery.
 
 Enter sends the focused message draft; Shift+Enter inserts a newline. Both the
 physical and local keyboard follow this rule. A pending send remains tied to
@@ -411,17 +472,36 @@ Owner loss freezes uncommitted drafts; a later authenticated client must explici
 
 Playback and range reads do not implicitly consume Voice. Release follows the
 public safe handoff contract. Scroll and playback positions are separate; the
-waveform is not a redundant keyboard focus target. Headset selection remains
-distinct from proven speaker echo cancellation.
+waveform is not a redundant keyboard focus target. Selecting audio endpoints
+does not establish speaker echo cancellation. Fully heard inbound Voice changes
+to Read only after Core confirms release of that exact source; seeking or failed
+playback cannot imply that the whole message was heard. Voice cards have no Go
+live action; telephone calls use their separate Call control.
 
 Telephone calls use a separate Call action in contacts and DROP/LIVE chats.
 A direct call requires one call acceptance and keeps the selected message mode.
 A call from LIVE requests additional audio permission; rejection or hangup keeps
 the accepted chat. The call view offers status/duration, mute/unmute, cancel,
 reject/accept and hangup according to Core state. Only accepted calls start
-local duplex audio, using the explicitly configured headset endpoints. Calls
+local duplex audio, using the explicitly configured microphone and output. Calls
 have no replayable Voice card, conversation recording or Send as Drop action.
 Transport loss ends the call; reconnecting a chat never reopens or accepts it.
+
+A persistent call bar identifies the current call and its duration while
+browsing chats or settings. It opens the existing call controls; hiding those
+controls leaves the call running. Mute and Hang up remain reachable. The peer
+Call button exists in both DROP and LIVE and opens that peer's current call when
+one is already running. Another call cannot start while a call is in progress.
+The current peer's button visibly shows In call. Calling another peer opens a
+confirmation offering End current call and call that peer, or Cancel. The
+continuation uses the original call ID and canonical target, waits for confirmed
+termination and fresh Call state, and starts once after local audio cleanup.
+Failure, uncertainty, privacy covering or a replacement call cancels continuation.
+After an uncertain end outcome, a fresh qualified read can restore the original
+ongoing call; it never resumes the cancelled switch to another peer.
+Call audio owns the microphone and output. Voice messages can arrive and remain
+unread, but playback, preview and recording show Available after call instead of
+an audio-device failure or retry suggestion. Text messaging remains usable.
 
 No microphone or camera starts on boot, navigation, reattach, or unlock.
 Permissions are requested at explicit use. Missing optional media capability
@@ -430,9 +510,19 @@ media execution stays unavailable until its requirements are satisfied.
 
 Missing audio is explained only after a deliberate record, play, or call action,
 in a closed dialog with **Go to audio settings**. Settings → Device → Audio
-settings opens the same closed configuration dialog. Microphone and headphone
+settings opens the same closed configuration dialog. Microphone and audio output
 selection each open a separate device chooser and return to configuration;
-closing the dialog removes the chooser completely. The composer has no permanent
+Back from either chooser returns to Audio settings, while Close leaves
+configuration. Device selections apply immediately while media is idle, without
+an extra confirmation. Playback needs only an output, recording needs only a
+microphone, and calls need both. Speakers may cause echo during calls; the lack
+of echo cancellation does not itself disable calling. The primary chooser groups
+device variants by name; Other device variants exposes their individual host APIs.
+Endpoint enumeration checks the fixed Voice PCM format without
+opening a stream. Incompatible directions remain visible with a reason and
+cannot be selected. An output startup or write failure stays visible on the
+playback control and offers Audio settings before another explicit Play.
+Closing the dialog removes the chooser completely. The composer has no permanent
 setup banner, and call readiness does not create action feedback or notifications.
 Audio dialogs keep a bounded stable frame while device results update inside
 their scrolling content. Refreshing a dialog preserves Close and Back/Cancel
@@ -452,8 +542,10 @@ playback stop for every delivery mode; accepted prefixes remain protected,
 unsent drafts. A held PTT must be released and freshly pressed after unlock.
 Unlock restores the preview but never starts capture, playback or sending.
 An already accepted call continues through application/screen lock with its
-mute state intact. Its reduced view contains status/duration, mute and hangup,
-with identity filtered by notification privacy. Accept calls without unlocking
+mute state intact. The persistent bar contains status/duration, mute and hangup,
+with identity filtered by notification privacy. Expanded controls close on
+covering and reopen only through the bar, leaving room for the unlock form.
+Accept calls without unlocking
 allows explicit acceptance of only that exact call; the rest stays covered.
 Hard profile lock, profile switch, client loss and purge end the call. System
 suspend ends real-time audio rather than replaying a backlog after resume.
@@ -584,10 +676,18 @@ keyboard targets.
 Required controls stay visible or reachable at the minimum viewport and text
 scale. Buttons and touch targets use at least 48 logical units where the
 current component permits it; labels wrap or controls stack when necessary.
+Button labels and headings use concise wording and show their complete meaning
+at the default layout. Longer labels wrap with measured control and row heights.
+Ellipsis is a fallback for constrained content rather than the default for
+actions or headings.
 Conversation names and secondary navigation headings share the peer-title
 typography. Titles, status text and adjacent actions stay vertically centered
 within their row; wrapped text grows the row rather than shifting its controls
 or shrinking the font.
+When the touch keyboard constrains a conversation header, its initial scroll
+position shows the complete Back, Call and More controls. The name and connection
+actions remain scrollable; ordinary refreshes preserve the user's scroll position.
+Closing the keyboard restores the full header when space permits.
 
 The packaged Inter Tight face is the visual baseline. The current core palette
 uses background `#101619`, surface `#171F22`, primary text `#F3F7F6`, DROP

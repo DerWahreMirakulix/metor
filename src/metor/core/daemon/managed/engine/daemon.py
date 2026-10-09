@@ -398,6 +398,8 @@ class Daemon(DaemonLifecycleMixin):
             self._session_maintenance.send_read_receipts,
             self._network.release_consumed_voice,
             delete_persistent_blob,
+            operation_lock=self._domain_operation_lock,
+            cancel_drop_requests_cb=self._outbox.forget_cancelled_requests,
         )
 
         def profile_metadata() -> ProfileMetadataRepository:

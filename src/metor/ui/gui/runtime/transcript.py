@@ -19,8 +19,11 @@ from metor.core.api import (
     VoiceChunkReceivedEvent,
     VoiceFinalizedEvent,
     VoiceIncomingStartedEvent,
+    VoiceReleasedEvent,
+    VoiceContent,
 )
 from metor.ui.gui.constants import GuiLimits
+from metor.ui.gui.state.media import PlaybackTarget
 
 if TYPE_CHECKING:
     from .controller import GuiController
@@ -260,6 +263,65 @@ class Transcript:
                     )
             return True
         return False
+
+    def confirm_voice_release(
+        self, target: PlaybackTarget, event: VoiceReleasedEvent
+    ) -> bool:
+        """Marks only a confirmed inbound source read within its original activation.
+
+        Args:
+            target: Playback source carrying the original profile and delivery scope.
+            event: Positive Core acknowledgment of the fully heard inbound source.
+        Returns:
+            bool: Whether the acknowledgment matches current presentation authority.
+        """
+        controller = self.controller
+        state, snapshot = controller.state, controller.state.snapshot
+        if (
+            state.covered
+            or snapshot is None
+            or target.generation != state.generation
+            or target.profile_instance != snapshot.profile_instance_id
+            or target.epoch != snapshot.epoch
+            or target.direction is not MessageDirectionCode.IN
+            or event.onion != target.peer
+            or event.msg_id != target.msg_id
+        ):
+            return False
+        key = (target.peer, target.delivery, target.direction, target.msg_id)
+        item = self.items.get(key)
+        if item is not None:
+            self.admit(replace(item, status=MessageStatusCode.READ))
+        page = controller.messages
+        if page is not None and page.onion == target.peer:
+            controller.messages = replace(
+                page,
+                messages=[
+                    replace(entry, status=MessageStatusCode.READ)
+                    if entry.delivery is target.delivery
+                    and entry.direction is MessageDirectionCode.IN
+                    and entry.msg_id == target.msg_id
+                    and isinstance(entry.content, VoiceContent)
+                    else entry
+                    for entry in page.messages
+                ],
+            )
+        inventory = controller.inventory.page
+        if inventory is not None:
+            controller.inventory.page = replace(
+                inventory,
+                messages=[
+                    replace(entry, status=MessageStatusCode.READ)
+                    if entry.onion == target.peer
+                    and entry.delivery is target.delivery
+                    and entry.direction is MessageDirectionCode.IN
+                    and entry.msg_id == target.msg_id
+                    and entry.content_type is ContentType.VOICE
+                    else entry
+                    for entry in inventory.messages
+                ],
+            )
+        return True
 
     def discard(
         self,

@@ -9,6 +9,7 @@ import threading
 from typing import Callable, Optional, TYPE_CHECKING
 
 from metor.core.api import (
+    ContentType,
     Delivery,
     IpcEvent,
     MessageOperationReason,
@@ -16,7 +17,9 @@ from metor.core.api import (
 )
 from metor.core.daemon.managed.models import TorCommand
 from metor.data import (
+    MessageDirection,
     MessageStatus,
+    PendingLiveRecord,
 )
 from metor.data.blob import BlobLifecycle, BlobStore
 from metor.utils import Constants
@@ -240,7 +243,13 @@ class VoiceOutboundMixin:
             if self._purge_fence.is_set():
                 return
             turn = self._outbound.get(msg_id)
-            if turn is None or turn.onion != onion or not turn.published:
+            if (
+                turn is None
+                or turn.onion != onion
+                or turn.delivery is not Delivery.LIVE
+                or not turn.published
+                or self._state.get_live_generation(onion, msg_id) is None
+            ):
                 return
             if next_offset < turn.acknowledged_offset or next_offset > turn.size_bytes:
                 return
@@ -324,6 +333,7 @@ class VoiceOutboundMixin:
                 or turn.delivery is not Delivery.LIVE
                 or not turn.finalized
                 or not turn.published
+                or self._state.get_live_generation(onion, msg_id) is None
             ):
                 return
             try:
@@ -348,6 +358,57 @@ class VoiceOutboundMixin:
             except Exception:
                 pass
             self._outbound.pop(msg_id, None)
+
+    def cancel_pending_live(self, onion: str, pending: list[PendingLiveRecord]) -> None:
+        """Releases exact published LIVE Voice ownership after durable cancellation.
+
+        The caller first removes the selected LIVE spools and emission generations
+        under the shared transition lock. Receipt tombstones, drafts, inbound turns
+        and already-promoted DROP content remain owned by their existing lifecycle.
+        Retained metadata covers cold state whose turn could not be restored.
+        """
+        if self._purge_fence.is_set():
+            return
+        with self._lock:
+            if self._purge_fence.is_set():
+                return
+            for record in pending:
+                if (
+                    record.peer_onion != onion
+                    or record.content_type != ContentType.VOICE.value
+                ):
+                    continue
+                receipt = self._messages.message_state(
+                    onion, record.msg_id, MessageDirection.OUT
+                )
+                if (
+                    receipt != (Delivery.LIVE, MessageStatus.PENDING, False)
+                    or self._messages.get_voice_payload(
+                        onion, record.msg_id, MessageDirection.OUT
+                    )
+                    is not None
+                ):
+                    continue
+                turn = self._outbound.get(record.msg_id)
+                if turn is not None and (
+                    turn.onion != onion
+                    or turn.delivery is not Delivery.LIVE
+                    or not turn.published
+                ):
+                    continue
+                blob_ids = set(self._metadata_blob_ids(record.payload) or ())
+                if turn is not None:
+                    blob_ids.update((turn.blob_id, *turn.chunk_ids))
+                    self._outbound.pop(record.msg_id, None)
+                for blob_id in blob_ids:
+                    for lifecycle in (
+                        BlobLifecycle.TEMPORARY,
+                        BlobLifecycle.PERSISTENT,
+                    ):
+                        try:
+                            self._blobs.delete(blob_id, lifecycle)
+                        except (OSError, TypeError, ValueError):
+                            continue
 
     def release_consumed(self, onion: str, msg_ids: list[str]) -> None:
         """Releases Core-owned inbound LIVE Voice payloads after explicit consume.

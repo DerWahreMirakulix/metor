@@ -61,6 +61,7 @@ class DatabaseCommandMessagesMixin(DatabaseCommandHandlerSupportMixin):
     _send_read_receipt_cb: Optional[Callable[[str, List[str]], None]]
     _release_consumed_voice_cb: Optional[Callable[[str, List[str]], None]]
     _delete_persistent_blob_cb: Optional[Callable[[str], None]]
+    _cancel_drop_requests_cb: Optional[Callable[[tuple[tuple[str, str], ...]], None]]
 
     def _delete_voice_payloads(self, payloads: List[str]) -> None:
         """Best-effort deletes persistent Voice objects after metadata commits.
@@ -246,13 +247,17 @@ class DatabaseCommandMessagesMixin(DatabaseCommandHandlerSupportMixin):
         voice_payloads = self._mm.get_drop_voice_payloads(
             onion=onion,
             non_contacts_only=cmd.non_contacts_only,
+            include_pending=cmd.cancel_pending,
         )
         result: MessageClearResult = self._mm.clear_messages(
             onion,
             cmd.non_contacts_only,
+            cmd.cancel_pending,
         )
         if result.success:
             self._delete_voice_payloads(voice_payloads)
+            if self._cancel_drop_requests_cb is not None:
+                self._cancel_drop_requests_cb(result.cancelled_drop_ids)
         params: Dict[str, str] = {}
         if (
             result.operation_type
@@ -371,10 +376,19 @@ class DatabaseCommandMessagesMixin(DatabaseCommandHandlerSupportMixin):
             onion=onion,
             msg_id=cmd.msg_id,
             direction=direction,
+            include_pending=cmd.cancel_pending,
         )
-        outcome = self._mm.delete_drop_message(onion, cmd.msg_id, direction)
+        outcome = self._mm.delete_drop_message(
+            onion, cmd.msg_id, direction, cmd.cancel_pending
+        )
         if outcome is MessageDeleteOutcome.DELETED:
             self._delete_voice_payloads(voice_payloads)
+            if (
+                cmd.cancel_pending
+                and direction is not MessageDirection.IN
+                and self._cancel_drop_requests_cb is not None
+            ):
+                self._cancel_drop_requests_cb(((onion, cmd.msg_id),))
             self._broadcast(RuntimeStateChangedEvent(scope='messages', onion=onion))
             return create_event(
                 EventType.MESSAGE_DELETED,

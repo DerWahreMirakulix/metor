@@ -7,7 +7,7 @@ from metor.ui.gui.constants import GuiLimits
 from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.state import Route
 from metor.ui.gui.theme import TYPE
-from metor.ui.gui.widgets import Action, Label
+from metor.ui.gui.widgets import Action, ActionRow, Label
 from metor.ui.gui.widgets.sheet import ActionSheet
 
 # Local Package Imports
@@ -150,7 +150,7 @@ def history_body(controller: GuiController, body: BoxLayout) -> None:
                 details.append(entry.trigger.value.replace('_', ' '))
             row.add_widget(Label(' · '.join(details), role='support'))
             body.add_widget(row)
-    navigation = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(12))
+    navigation = ActionRow(spacing=dp(12))
     navigation.add_widget(
         Action(
             'Newer',

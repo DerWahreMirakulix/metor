@@ -340,9 +340,63 @@ class TextAdmissionTests(unittest.TestCase):
             self.assertTrue(self.gui.text.pending('peer', Delivery.DROP))
             self.assertFalse(self.gui.text.pending('other', Delivery.DROP))
             self.assertIn(action, self.gui._unknown_actions)
-        self.assertEqual(
-            self.gui.state.drafts[('peer', Delivery.DROP)], 'one logical message'
-        )
+        self.assertEqual(self.gui.text.operations[action][2], 'one logical message')
+        self.assertNotIn(('peer', Delivery.DROP), self.gui.state.drafts)
+
+    def test_admitted_text_moves_out_of_composer_before_core_acceptance(self) -> None:
+        """Submission freezes its content and reserves recovery capacity immediately."""
+        for delivery in (Delivery.DROP, Delivery.LIVE):
+            with self.subTest(delivery=delivery):
+                self.gui.state.set_draft('peer', delivery, 'frozen submission')
+                self.gui.send_text('peer', delivery)
+                action = next(
+                    key
+                    for key, (peer, mode, _text) in self.gui.text.operations.items()
+                    if peer == 'peer' and mode is delivery
+                )
+                item, _size = self.gui.text.reservations[action]
+                self.assertEqual(item.text, 'frozen submission')
+                self.assertNotIn(('peer', delivery), self.gui.state.drafts)
+                self.assertEqual(
+                    self.gui.state.reserved_drafts['peer', delivery],
+                    'frozen submission',
+                )
+                self.assertEqual(
+                    self.gui.text.pending_status('peer', delivery), 'Sending…'
+                )
+                self.gui.send_text('peer', delivery)
+        self.assertEqual(self.gui.command.call_count, 2)
+
+    def test_rejection_recovers_frozen_text_after_other_context_fills_budget(
+        self,
+    ) -> None:
+        """Other composers cannot spend the bytes required to recover rejected content."""
+        with patch.object(GuiLimits, 'TEXT_BYTES', 32):
+            action, identity = self.admit()
+            self.assertFalse(self.gui.state.set_draft('other', Delivery.DROP, 'x' * 32))
+            remaining = 32 - len('keep the exact text')
+            self.assertTrue(
+                self.gui.state.set_draft('other', Delivery.DROP, 'x' * remaining)
+            )
+            self.gui.text.install(
+                Update(0, action, TextRejectedEvent('peer', identity))
+            )
+            self.assertEqual(
+                self.gui.state.drafts['peer', Delivery.LIVE], 'keep the exact text'
+            )
+            self.assertFalse(self.gui.state.reserved_drafts)
+
+    def test_pending_submission_reserves_its_recoverable_composer_context(self) -> None:
+        """A departed sending composer keeps its bounded recovery slot until resolved."""
+        with patch.object(GuiLimits, 'TEXT_CONTEXTS', 1):
+            action, identity = self.admit()
+            self.assertFalse(self.gui.state.set_draft('other', Delivery.DROP, 'next'))
+            self.gui.text.install(
+                Update(0, action, TextRejectedEvent('peer', identity))
+            )
+            self.assertEqual(
+                self.gui.state.drafts['peer', Delivery.LIVE], 'keep the exact text'
+            )
 
     def test_reserved_capacity_survives_arrivals_until_positive_acceptance(
         self,

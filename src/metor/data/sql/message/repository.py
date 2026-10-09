@@ -24,13 +24,18 @@ from .history import MessageHistoryMixin
 from .archive import MessageArchiveMixin
 from .inbound import MessageInboundMixin
 from .outbox import MessageOutboxMixin
+from .mutations import MessageMutationMixin
 
 if TYPE_CHECKING:
     from metor.data.sql.manager import SqlManager
 
 
 class MessageRepository(
-    MessageInboundMixin, MessageOutboxMixin, MessageHistoryMixin, MessageArchiveMixin
+    MessageInboundMixin,
+    MessageOutboxMixin,
+    MessageHistoryMixin,
+    MessageArchiveMixin,
+    MessageMutationMixin,
 ):
     """Centralized durable message spool, archive, and receipt helpers."""
 
@@ -543,7 +548,10 @@ class MessageRepository(
             )
             if receipt is None:
                 return None
-            if receipt.delivery is not Delivery.DROP:
+            if (
+                receipt.delivery is not Delivery.DROP
+                or receipt.content_type is not ContentType.TEXT
+            ):
                 return None
             if receipt.status is not MessageStatus.PENDING:
                 return None
@@ -580,6 +588,11 @@ class MessageRepository(
                 or receipt.content_type is not ContentType.TEXT
                 or receipt.status is not MessageStatus.PENDING
             ):
+                return None
+            if not cursor.execute(
+                'SELECT 1 FROM outbox_spool WHERE receipt_id = ?',
+                (receipt.receipt_id,),
+            ).fetchone():
                 return None
             self._apply_message_status_update(
                 cursor, receipt.receipt_id, MessageStatus.DELIVERED

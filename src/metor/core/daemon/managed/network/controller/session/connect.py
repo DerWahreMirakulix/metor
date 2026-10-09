@@ -1,6 +1,7 @@
 """Outbound connection setup helpers for the connection controller."""
 
 import socket
+import time
 from typing import Optional, Tuple
 
 from metor.core.api import (
@@ -31,12 +32,15 @@ from metor.core.daemon.managed.network.controller.session.protocols import (
     ConnectControllerProtocol,
 )
 from metor.core.daemon.managed.network.stream import TcpStreamReader
+from .recovery import _expire_accepted_recovery, schedule_accepted_recovery
 
 
 def connect_to(
     controller: ConnectControllerProtocol,
     target: str,
     origin: ConnectionOrigin = ConnectionOrigin.MANUAL,
+    *,
+    expected_context_generation: Optional[int] = None,
 ) -> None:
     """
     Initiates one outbound live connection attempt with retry and retunnel handling.
@@ -55,24 +59,48 @@ def connect_to(
     if not resolved or resolved[1] == controller._tm.onion:
         return
     alias, onion = resolved
+    recovery_deadline = controller._state.accepted_live_recovery_deadline(onion)
+    if recovery_deadline is not None and recovery_deadline <= time.monotonic():
+        if origin is not ConnectionOrigin.MANUAL:
+            return
+        previous_generation = controller._state.known_live_context_generation(onion)
+        if previous_generation is not None:
+            _expire_accepted_recovery(
+                controller, alias, onion, previous_generation, recovery_deadline
+            )
+    with controller._state.snapshot_barrier():
+        accepted_generation = controller._state.accepted_live_context_generation(onion)
+        if (
+            expected_context_generation is not None
+            and accepted_generation != expected_context_generation
+        ):
+            return
+        if accepted_generation is not None and origin is ConnectionOrigin.MANUAL:
+            origin = ConnectionOrigin.GRACE_RECONNECT
     retunnel_reconnect: bool = (
         origin is ConnectionOrigin.RETUNNEL and controller._state.is_retunneling(onion)
     )
 
-    if origin is ConnectionOrigin.MANUAL:
-        controller._state.clear_local_recovery_opt_out(onion)
-
-    if origin is not ConnectionOrigin.AUTO_RECONNECT:
-        controller._state.clear_scheduled_auto_reconnect(onion)
-
-    if controller._state.get_connection(onion) and not retunnel_reconnect:
-        return
-
-    implicit_accept: bool = False
-    if onion in controller._state.get_pending_connections_keys():
-        implicit_accept = True
-    else:
-        controller._state.add_outbound_attempt(onion, origin=origin)
+    with controller._state.snapshot_barrier():
+        if (
+            accepted_generation is not None
+            and controller._state.accepted_live_context_generation(onion)
+            != accepted_generation
+        ):
+            return
+        if origin is ConnectionOrigin.MANUAL:
+            controller._state.clear_local_recovery_opt_out(onion)
+        if origin is not ConnectionOrigin.AUTO_RECONNECT:
+            controller._state.clear_scheduled_auto_reconnect(onion)
+        if controller._state.get_connection(onion) and not retunnel_reconnect:
+            return
+        implicit_accept: bool = (
+            onion in controller._state.get_pending_connections_keys()
+        )
+        if not implicit_accept:
+            if controller._state.has_outbound_attempt(onion):
+                return
+            controller._state.add_outbound_attempt(onion, origin=origin)
 
     if implicit_accept:
         controller._broadcast(
@@ -93,7 +121,9 @@ def connect_to(
     tracked_socket_count: int = controller._state.get_tracked_live_socket_count()
     if tracked_socket_count >= max_conn and not retunnel_reconnect:
         controller._state.discard_outbound_attempt(onion, attempt_id)
-        if origin is ConnectionOrigin.AUTO_RECONNECT:
+        if accepted_generation is not None:
+            schedule_accepted_recovery(controller, alias, onion, accepted_generation)
+        elif origin is ConnectionOrigin.AUTO_RECONNECT:
             controller._state.clear_scheduled_auto_reconnect(onion)
         controller._broadcast(
             MaxConnectionsReachedEvent(
@@ -235,6 +265,11 @@ def connect_to(
                                 onion,
                                 failure_reason,
                             )
+                    elif accepted_generation is not None:
+                        controller._state.discard_outbound_attempt(onion, attempt_id)
+                        schedule_accepted_recovery(
+                            controller, alias, onion, accepted_generation
+                        )
                     else:
                         if origin is ConnectionOrigin.AUTO_RECONNECT:
                             controller._state.clear_scheduled_auto_reconnect(onion)

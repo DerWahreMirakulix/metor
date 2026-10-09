@@ -32,6 +32,7 @@ from metor.ui.gui.state.mailbox import Update
 # Local Package Imports
 from ..receipts import ReceiptTarget
 from .progress import LiveProgress, startable_context
+from .removal import LiveRemovalFlow
 
 if TYPE_CHECKING:
     from ..controller import GuiController
@@ -48,6 +49,7 @@ class LiveMutation:
     context_generation: int | None = None
     attempt_id: str | None = None
     retained: tuple[ReceiptTarget, ...] = ()
+    cancel_pending: bool = False
 
 
 class LiveActions:
@@ -67,6 +69,7 @@ class LiveActions:
         self._uncertain_snapshot: RuntimeSnapshotEvent | None = None
         self._awaiting_snapshot = False
         self._progress = LiveProgress(controller)
+        self._removal = LiveRemovalFlow(controller)
 
     def starting(self, peer: str) -> bool:
         """Reports whether the explicit start still awaits authoritative transport state."""
@@ -84,6 +87,15 @@ class LiveActions:
         """Drops private snapshot references without releasing in-flight or uncertain actions."""
         self._uncertain_snapshot = None
         self._progress.cover()
+        self._removal.cover()
+
+    def removing(self, peer: str) -> bool:
+        """Reports a confirmed conversion awaiting its separate ended-context dismissal."""
+        return self._removal.pending is not None and self._removal.pending.peer == peer
+
+    def remove_context(self, peer: str, *, send_pending_as_drops: bool) -> bool:
+        """Applies the explicit send-or-discard choice for an ended conversation."""
+        return self._removal.request(peer, send_pending_as_drops=send_pending_as_drops)
 
     def idle(self, peer: str) -> bool:
         """Reports whether public context facts permit a fresh explicit connection request."""
@@ -228,7 +240,7 @@ class LiveActions:
             return False
         return self._request(peer, 'route', context_generation=context_generation)
 
-    def close_context(self, peer: str) -> bool:
+    def close_context(self, peer: str, *, cancel_pending: bool = False) -> bool:
         """Closes only ended contexts, preserving unresolved outbound work.
 
         Args:
@@ -236,38 +248,18 @@ class LiveActions:
         Returns:
             bool: Whether local close or a Core dismissal request was admitted.
         """
-        controller, state = self.controller, self.controller.state
-        if state.covered or state.snapshot is None or state.busy or self.pending:
+        state = self.controller.state
+        if cancel_pending and 'live_pending_cancellation' not in state.capabilities:
+            state.status = 'This Core does not support discarding pending Live messages'
             return False
-        if any(
-            p == peer and d is Delivery.LIVE
-            for p, d, _text in controller.text.operations.values()
-        ):
-            state.status = 'Confirm the pending send before closing Live'
+        if not self._removal.ready(peer, allow_pending=cancel_pending):
             return False
-        review = controller.voice.reviews.get(peer)
-        if review is not None and review.binding.delivery is Delivery.LIVE:
-            state.status = (
-                'Send or discard the unsent voice recording before closing this chat'
-            )
-            return False
-        binding = controller.voice.press.binding
-        if binding is not None and binding.peer == peer:
-            state.status = 'Finish recording before closing Live'
-            return False
+        assert state.snapshot is not None
         entry = next(
             (item for item in state.snapshot.live_contexts if item.onion == peer), None
         )
         if entry is not None:
-            if entry.session_state != 'disconnected' or entry.recovery_eligible:
-                state.status = 'End Live before closing this conversation'
-                return False
-            if entry.pending_outbound_count:
-                state.status = (
-                    'Reconnect or send pending items as Drops before closing Live'
-                )
-                return False
-            return self._request(peer, 'close')
+            return self._request(peer, 'close', cancel_pending=cancel_pending)
         self._discard_context(peer)
         state.status = 'Local Live conversation closed'
         return True
@@ -279,6 +271,7 @@ class LiveActions:
         msg_ids: tuple[str, ...] | None = None,
         context_generation: int | None = None,
         attempt_id: str | None = None,
+        cancel_pending: bool = False,
     ) -> bool:
         """Admits one captured action without automatic retries.
 
@@ -316,6 +309,7 @@ class LiveActions:
             )
             if kind == 'fallback'
             else (),
+            cancel_pending=cancel_pending,
         )
         command = (
             FallbackCommand(peer, list(msg_ids) if msg_ids is not None else None)
@@ -326,7 +320,7 @@ class LiveActions:
             if kind == 'start'
             else RetunnelCommand(peer, context_generation)
             if kind == 'route'
-            else DismissLiveContextCommand(peer)
+            else DismissLiveContextCommand(peer, cancel_pending)
         )
         if not controller.submit(
             mutation.operation, lambda: client.request(command, IpcEvent)
@@ -352,6 +346,7 @@ class LiveActions:
         if mutation is None or update.operation != mutation.operation:
             return False
         controller, event = self.controller, update.event
+        self._removal.observe(update.operation, event)
         if mutation.kind == 'end':
             self._progress.resolve_stop(mutation.peer, event)
         if event is None:
@@ -542,3 +537,4 @@ class LiveActions:
         if snapshot is None or controller.state.covered:
             return
         self._progress.poll()
+        self._removal.poll()

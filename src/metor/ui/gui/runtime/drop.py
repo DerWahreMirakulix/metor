@@ -33,6 +33,7 @@ class DropMutation:
     msg_id: str | None = None
     direction: MessageDirectionCode | None = None
     retained: tuple[ReceiptTarget, ...] = ()
+    cancel_pending: bool = False
 
 
 class DropActions:
@@ -52,7 +53,7 @@ class DropActions:
         self._uncertain_snapshot: int | None = None
 
     def clear(self, peer: str | None) -> bool:
-        """Requests an explicitly confirmed DROP-only clear; Core preserves pending delivery.
+        """Deletes a peer's history and queued Drops; all-profile clear preserves delivery.
 
         Args:
             peer: Exact canonical peer, or None for explicitly confirmed all-DROP cleanup.
@@ -60,6 +61,33 @@ class DropActions:
             bool: Whether this exact operation was admitted.
         """
         return self._request(peer, None, None)
+
+    def can_clear(self, peer: str | None) -> bool:
+        """Requires supported cancellation and resolved text and Voice publication."""
+        return peer is None or (
+            'drop_pending_cancellation' in self.controller.state.capabilities
+            and not self.controller.text.pending(peer, Delivery.DROP)
+            and not self.controller.state.busy
+            and not self._unknown_voice(peer)
+        )
+
+    def _unknown_voice(self, peer: str, msg_id: str | None = None) -> bool:
+        """Keeps unconfirmed Voice publication outside confirmed queued deletion scope."""
+        review = self.controller.voice.reviews.get(peer)
+        return bool(
+            review
+            and review.unknown
+            and (msg_id is None or review.binding.msg_id == msg_id)
+        )
+
+    def can_delete(self, peer: str, msg_id: str) -> bool:
+        """Keeps exact unresolved send intents unavailable for queued-message deletion."""
+        return (
+            'drop_pending_cancellation' in self.controller.state.capabilities
+            and not self.controller.state.busy
+            and 'A11:' + msg_id not in self.controller.text.reservations
+            and not self._unknown_voice(peer, msg_id)
+        )
 
     def delete(self, peer: str, msg_id: str, direction: MessageDirectionCode) -> bool:
         """Requests deletion using the complete displayed local message identity.
@@ -93,9 +121,30 @@ class DropActions:
         if (
             controller.state.covered
             or client is None
+            or controller.state.busy
             or self.pending is not None
             or controller.receipts.busy
         ):
+            return False
+        cancel_pending = peer is not None
+        if (
+            cancel_pending
+            and 'drop_pending_cancellation' not in controller.state.capabilities
+        ):
+            controller.state.status = (
+                'Update Core to cancel queued Drops when deleting.'
+            )
+            return False
+        if peer is not None and (
+            msg_id is None
+            and controller.text.pending(peer, Delivery.DROP)
+            or msg_id is not None
+            and 'A11:' + msg_id in controller.text.reservations
+            or self._unknown_voice(peer, msg_id)
+        ):
+            controller.state.status = (
+                'Wait until the send result is confirmed before deleting.'
+            )
             return False
         self._serial += 1
         mutation = DropMutation(
@@ -104,11 +153,12 @@ class DropActions:
             msg_id,
             direction,
             controller.receipts.capture(Delivery.DROP, peer, msg_id, direction),
+            cancel_pending,
         )
         command = (
-            DeleteMessageCommand(peer, msg_id, direction)
+            DeleteMessageCommand(peer, msg_id, direction, cancel_pending=True)
             if peer is not None and msg_id is not None
-            else ClearMessagesCommand(peer)
+            else ClearMessagesCommand(peer, cancel_pending=cancel_pending)
         )
         if not controller.submit(
             mutation.operation, lambda: client.request(command, IpcEvent)
@@ -158,6 +208,8 @@ class DropActions:
                 controller.state.status = (
                     'Drop deleted locally'
                     if mutation.msg_id
+                    else 'Conversation deleted. Queued Drops cancelled.'
+                    if mutation.cancel_pending
                     else 'Local Drops cleared. Pending delivery is preserved.'
                 )
         elif not controller.state.covered:

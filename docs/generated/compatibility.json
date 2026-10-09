@@ -2948,6 +2948,9 @@
         "ClearMessagesCommand": {
           "additionalProperties": false,
           "properties": {
+            "cancel_pending": {
+              "type": "boolean"
+            },
             "command_type": {
               "const": "clear_messages",
               "type": "string"
@@ -5135,6 +5138,9 @@
         "DeleteMessageCommand": {
           "additionalProperties": false,
           "properties": {
+            "cancel_pending": {
+              "type": "boolean"
+            },
             "command_type": {
               "const": "delete_message",
               "type": "string"
@@ -5382,6 +5388,9 @@
         "DismissLiveContextCommand": {
           "additionalProperties": false,
           "properties": {
+            "cancel_pending": {
+              "type": "boolean"
+            },
             "command_type": {
               "const": "dismiss_live_context",
               "type": "string"

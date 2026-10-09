@@ -64,6 +64,7 @@ class Shell(BoxLayout):
         self._detail: BoxLayout | None = None
         self._security_panel: AnchorLayout | None = None
         self.keyboard_inset: float = 0
+        self.activity_inset: float = 0
         self._pixel_scale = dp(1)
         with self.canvas.before:
             Color(*color('background'))
@@ -96,7 +97,9 @@ class Shell(BoxLayout):
             self._root_context = None
         if self.width < dp(
             Geometry.MIN_WIDTH
-        ) or self.height + self.keyboard_inset < dp(Geometry.MIN_HEIGHT):
+        ) or self.height + self.keyboard_inset + self.activity_inset < dp(
+            Geometry.MIN_HEIGHT
+        ):
             self._private_render_key = None
             self.revoke_peer_views()
             self._peer_key = None
@@ -578,6 +581,8 @@ class Shell(BoxLayout):
             self.controller.notifications.store.revision,
             state.preferences.preferences_revision if state.preferences else None,
             state.root_pages.get(state.root_delivery, 0),
+            state.ended_live_expanded,
+            state.ended_live_page,
             tuple(conversation_rows(self.controller, state.root_delivery)),
         )
 

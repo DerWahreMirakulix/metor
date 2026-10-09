@@ -1,4 +1,4 @@
-"""Explicit volatile headset endpoint selection with deferred native enumeration."""
+"""Explicit volatile audio endpoint selection with deferred native enumeration."""
 
 from typing import TYPE_CHECKING
 
@@ -37,7 +37,7 @@ class AudioRoutes:
             bool: Whether the bounded scan operation was admitted.
         """
         controller = self.voice.controller
-        if controller.simulator or controller.state.covered or self.voice.running:
+        if controller.simulator or controller.state.covered or self.blocked:
             return False
         generation = controller.state.generation
 
@@ -64,40 +64,50 @@ class AudioRoutes:
 
         return controller.submit('audio-scan', probe)
 
-    def confirm(self) -> bool:
-        """Selects actual enumerated endpoints after the user confirms headset routing.
+    @property
+    def blocked(self) -> bool:
+        """Reports media owners that must finish before a route can be replaced."""
+        controller = self.voice.controller
+        return bool(
+            self.voice.running
+            or self.voice.press.active
+            or controller.playback.running
+            or controller.calls.active
+            or controller.calls.media_active
+        )
+
+    def select(self, endpoint: int, *, microphone: bool) -> bool:
+        """Applies one explicit compatible direction without opening either stream.
 
         Args:
-            None
+            endpoint: Current native endpoint index selected in the chooser.
+            microphone: Whether this selection replaces input rather than output.
         Returns:
-            bool: Whether the current supported route was configured.
+            bool: Whether the idle route was installed; playback needs only output.
         """
         controller = self.voice.controller
-        if controller.state.covered:
+        if controller.state.covered or self.blocked:
             return False
-        if controller.calls.active or controller.calls.media_active:
-            controller.state.status = 'End the call before changing audio devices'
-            return False
-        inputs = {item.index for item in self.endpoints if item.input_available}
-        outputs = {item.index for item in self.endpoints if item.output_available}
-        if self.input not in inputs or self.output not in outputs:
-            self.voice.controller.state.status = (
-                'Choose a headset microphone and output'
-            )
-            return False
-        if self.voice.controller.playback.running:
-            self.voice.controller.state.status = (
-                'Stop playback before changing the headset'
-            )
-            return False
-        accepted = self.voice.configure(
-            HeadsetAudio(self.input, self.output), headset_confirmed=True
+        valid = any(
+            item.index == endpoint
+            and (item.input_available if microphone else item.output_available)
+            and not (item.input_error if microphone else item.output_error)
+            for item in self.endpoints
         )
-        if accepted:
-            assert self.output is not None
-            self.voice.controller.playback.configure(self.output)
-            self.voice.controller.state.status = 'Headset selected. Hold PTT to record.'
-        return accepted
+        if not valid:
+            return False
+        selected_input = endpoint if microphone else self.input
+        selected_output = self.output if microphone else endpoint
+        if not self.voice.configure(
+            HeadsetAudio(selected_input, selected_output),
+            headset_confirmed=selected_input is not None,
+        ):
+            return False
+        if not microphone:
+            assert selected_output is not None
+            controller.playback.configure(selected_output)
+        self.input, self.output = selected_input, selected_output
+        return True
 
     def install(self, update: Update) -> bool:
         """Installs only the generation-validated native endpoint result.

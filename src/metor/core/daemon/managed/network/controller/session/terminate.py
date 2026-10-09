@@ -32,6 +32,7 @@ from metor.utils import Constants
 from metor.core.daemon.managed.network.controller.session.protocols import (
     TerminateControllerProtocol,
 )
+from .recovery import recover_accepted_transport, start_accepted_recovery_timer
 
 
 def _get_local_recovery_opt_out_timeout(
@@ -242,6 +243,17 @@ def reject(
             controller._broadcast(PeerNotFoundEvent(target=target))
         return
     alias, onion = resolved
+    accepted_generation = controller._state.accepted_live_context_generation(onion)
+    if (
+        accepted_generation is not None
+        and socket_to_close is not None
+        and not (
+            controller._state.is_known_socket(onion, socket_to_close)
+            or controller._state.is_current_outbound_socket(onion, socket_to_close)
+        )
+    ):
+        controller._state.retire_connection(socket_to_close)
+        return
 
     if expected_pending is not None:
         pending_conn, _, _, _ = controller._state.pop_pending_connection(
@@ -249,6 +261,7 @@ def reject(
         )
         if pending_conn is None:
             return
+        controller._state.revoke_accepted_live_context(onion)
         _mark_local_recovery_opt_out(controller, onion)
         controller._state.clear_scheduled_auto_reconnect(onion)
         controller._state.discard_outbound_attempt(onion)
@@ -289,6 +302,20 @@ def reject(
             controller._discard_outbound_attempt_if_idle(onion)
             controller._state.retire_connection(socket_to_close)
             return
+
+    if accepted_generation is not None:
+        if (
+            not initiated_by_self
+            and reject_intent is not RejectIntent.MANUAL
+            and inflight_outbound
+        ):
+            recover_accepted_transport(
+                controller, alias, onion, accepted_generation, socket_to_close
+            )
+            return
+        controller._state.revoke_accepted_live_context(onion)
+        controller._state.mark_live_reconnect_grace(onion, 0.0)
+        controller._state.clear_scheduled_auto_reconnect(onion)
 
     status: HistoryEvent = HistoryEvent.REJECTED
     reject_actor: HistoryActor = (
@@ -456,6 +483,38 @@ def disconnect(
         ):
             controller._state.retire_connection(socket_to_close)
             return
+    accepted_generation = controller._state.accepted_live_context_generation(onion)
+    if (
+        accepted_generation is not None
+        and socket_to_close is not None
+        and not (
+            controller._state.is_known_socket(onion, socket_to_close)
+            or controller._state.is_current_outbound_socket(onion, socket_to_close)
+        )
+    ):
+        controller._state.retire_connection(socket_to_close)
+        return
+    if accepted_generation is not None and is_fallback:
+        recover_accepted_transport(
+            controller,
+            alias,
+            onion,
+            accepted_generation,
+            socket_to_close,
+            suppress_events=suppress_events,
+        )
+        return
+    ended_accepted_context = accepted_generation is not None and (
+        not initiated_by_self
+        or origin is not ConnectionOrigin.RETUNNEL
+        or system_reason is not None
+    )
+    if ended_accepted_context:
+        controller._state.revoke_accepted_live_context(onion)
+        controller._state.mark_live_reconnect_grace(onion, 0.0)
+        controller._state.clear_scheduled_auto_reconnect(onion)
+    elif accepted_generation is not None and origin is ConnectionOrigin.RETUNNEL:
+        start_accepted_recovery_timer(controller, alias, onion, accepted_generation)
     if (
         initiated_by_self
         and origin is ConnectionOrigin.MANUAL
@@ -609,6 +668,7 @@ def disconnect(
         and not inflight_outbound
         and not held_unacked_messages
         and not cancel_retunnel_flow
+        and not ended_accepted_context
     ):
         if not initiated_by_self and is_fallback:
             controller._mark_live_reconnect_grace(onion)

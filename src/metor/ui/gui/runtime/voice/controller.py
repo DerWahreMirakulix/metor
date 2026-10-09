@@ -65,11 +65,11 @@ class VoiceController:
         return self.worker is not None and not self.worker.done.is_set()
 
     def configure(self, audio: CapturePort, *, headset_confirmed: bool) -> bool:
-        """Installs an explicitly chosen supported headset route while idle.
+        """Installs an explicitly selected compatible input route while idle.
 
         Args:
             audio: Inert native route adapter.
-            headset_confirmed: User confirmation of headset routing, never inferred AEC.
+            headset_confirmed: Explicit input route admission, never inferred speaker AEC.
         Returns:
             bool: Whether the route was safely installed.
         """

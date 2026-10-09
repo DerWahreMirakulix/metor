@@ -9,14 +9,16 @@ from kivy.uix.widget import Widget
 from metor.core.api import Delivery, MessageDirectionCode
 from metor.ui.gui.platform.audio import PcmVoice
 from metor.ui.gui.runtime import GuiController
+from metor.ui.gui.runtime.live import pending_fallback_count
 from metor.ui.gui.state import Route
 from metor.ui.gui.theme import color, font_path
-from metor.ui.gui.widgets import Action, Label, Panel, TextField
+from metor.ui.gui.widgets import Action, ActionRow, Label, Panel, TextField
 from metor.ui.gui.widgets.ptt import PttAction
 from metor.ui.gui.widgets.symbol import IconAction
 
 # Local Package Imports
 from ..audio import show_audio_unavailable
+from .pending import PendingLiveFooter
 
 
 class Composer(BoxLayout):
@@ -91,7 +93,7 @@ class Composer(BoxLayout):
         self.review.add_widget(self.preview)
         self.duration = Label('', role='caption', tone='textSecondary')
         self.review.add_widget(self.duration)
-        actions = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(12))
+        actions = ActionRow(spacing=dp(12))
         self.delete = Action(
             'Discard', lambda: self._review_action(False), tone='danger'
         )
@@ -104,7 +106,7 @@ class Composer(BoxLayout):
         actions.add_widget(self.delete)
         actions.add_widget(self.commit)
         self.review.add_widget(actions)
-        self.alternatives = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(12))
+        self.alternatives = ActionRow(spacing=dp(12))
         self.as_drop = Action(
             'Send as Drop',
             lambda: self._review_action(True, Delivery.DROP),
@@ -119,6 +121,11 @@ class Composer(BoxLayout):
             'Recheck recording',
             self._recheck,
         )
+        self.pending_footer = PendingLiveFooter(controller, route, refresh)
+
+    def has_pending_footer(self) -> bool:
+        """Reports ended-context work while preserving active recording ownership."""
+        return bool(pending_fallback_count(self.controller, self.route))
 
     def _recheck(self) -> None:
         """Shows readback progress immediately without publishing the recording again."""
@@ -151,6 +158,7 @@ class Composer(BoxLayout):
                 self.reconnect,
                 self.recheck,
                 self.as_drop,
+                self.pending_footer,
             )
             for widget in fragment.walk(restrict=True)
         }
@@ -260,7 +268,14 @@ class Composer(BoxLayout):
         if review is None:
             return
         playback = self.controller.playback
-        if playback.audio is None:
+        progress = playback.progress
+        output_failed = (
+            progress is not None
+            and progress.target.peer == peer
+            and progress.target.msg_id == review.binding.msg_id
+            and progress.state == 'output_unavailable'
+        )
+        if playback.audio is None or output_failed:
             show_audio_unavailable(self.controller, self.refresh, purpose='playback')
             return
         target = playback.target(
@@ -292,6 +307,7 @@ class Composer(BoxLayout):
         if self._revoked:
             return
         voice, state = self.controller.voice, self.controller.state
+        call_audio = self.controller.calls.active or self.controller.calls.media_active
         review = (
             voice.reviews.get(self.route.peer or '')
             if voice.reviews.get(self.route.peer or '') is not None
@@ -299,11 +315,30 @@ class Composer(BoxLayout):
             is self.route.delivery
             else None
         )
-        mode = 'review' if review is not None else 'composer'
+        ended_pending = self.has_pending_footer() and not voice.press.active
+        mode = (
+            'review'
+            if review is not None
+            else 'pending'
+            if ended_pending
+            else 'composer'
+        )
         if mode != self._mode:
             self.clear_widgets()
-            self.add_widget(self.review if review is not None else self.bar)
+            self.entry.focus = False
+            self.add_widget(
+                self.review
+                if mode == 'review'
+                else self.pending_footer
+                if mode == 'pending'
+                else self.bar
+            )
             self._mode = mode
+        if mode == 'pending':
+            self.pending_footer.update()
+            self.note.text = ''
+            self._notice()
+            return
         if review is not None:
             playback = self.controller.playback
             progress = playback.progress
@@ -312,23 +347,25 @@ class Composer(BoxLayout):
                 and progress.target.msg_id == review.binding.msg_id
                 and progress.target.peer == self.route.peer
             )
-            self.preview.disabled = (
-                state.covered
-                or review.unknown
-                or self.controller.calls.active
-                or self.controller.calls.media_active
-            )
+            self.preview.disabled = state.covered or review.unknown or call_audio
             self.preview.label.text = (
-                'Pause' if matching and playback.running else 'Play'
+                'Available after call'
+                if call_audio
+                else 'Pause'
+                if matching and playback.running
+                else 'Play'
             )
             if (
-                matching
+                not call_audio
+                and matching
                 and progress is not None
-                and progress.state in {'buffering', 'unavailable'}
+                and progress.state in {'buffering', 'unavailable', 'output_unavailable'}
             ):
                 self.preview.label.text = (
                     'Buffering…'
                     if progress.state == 'buffering'
+                    else 'Choose audio output'
+                    if progress.state == 'output_unavailable'
                     else 'Audio unavailable · Retry'
                 )
             self.duration.text = (
@@ -387,8 +424,12 @@ class Composer(BoxLayout):
             self.entry.text = draft
             self._editing = False
         phase = voice.press.phase.value
-        self.entry.readonly = voice.press.active
+        sending = self.controller.text.pending(
+            self.route.peer or '', self.route.delivery
+        )
+        self.entry.readonly = voice.press.active or sending
         self.entry.disabled = voice.press.active
+        self.entry.hint_text = 'Sending…' if sending else 'Message'
         action = (
             self.ptt if voice.press.active else self.send if draft.strip() else self.ptt
         )
@@ -423,7 +464,9 @@ class Composer(BoxLayout):
             )
         )
         self.ptt.label.text = (
-            'Release to finish'
+            'Available after call'
+            if call_audio
+            else 'Release to finish'
             if phase == 'recording'
             else 'Starting…'
             if phase == 'starting'

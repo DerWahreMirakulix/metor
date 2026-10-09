@@ -298,6 +298,7 @@ class GestureHarness(App):
         self.gui.live_invitations.observe(
             IncomingConnectionEvent('Peer', 'peer', 'exact-call')
         )
+        self.gui.live_invitations.show('exact-call')
         self.overlay = LiveInvitationOverlay(self.gui, lambda: None)
         self.panel.add_widget(self.overlay)
         self.gui.state.busy = True

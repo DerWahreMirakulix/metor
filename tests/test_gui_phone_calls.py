@@ -17,7 +17,7 @@ from metor.core.api import (
     CallStateEvent,
     CallsStateEvent,
 )
-from metor.ui.gui.platform.audio import PcmVoice
+from metor.ui.gui.platform.audio import HeadsetAudio, PcmVoice
 from metor.ui.gui.platform.call_audio import CallHeadsetAudio
 from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.runtime.calls.media import CallMediaWorker
@@ -38,7 +38,7 @@ class PhonePresentationTests(unittest.TestCase):
         self.gui.state.route = Route('V08', 'bob')
         self.gui.state.capabilities = frozenset({'calls'})
         self.gui.client = Mock()
-        self.gui.voice.headset_confirmed = True
+        self.gui.voice.configure(HeadsetAudio(1, 2), headset_confirmed=True)
         self.gui.voice.routes.input = 1
         self.gui.voice.routes.output = 2
         self.operations: list[tuple[str, object]] = []
@@ -192,7 +192,7 @@ class PhonePresentationTests(unittest.TestCase):
         self,
     ) -> None:
         """Audio setup remains an explicit view-level modal without a phantom phone call."""
-        self.gui.voice.headset_confirmed = False
+        self.gui.voice.routes.input = None
         before = self.gui.state.feedback.revision
         self.assertFalse(self.calls.start('bob'))
         self.assertIsNone(self.calls.current)
@@ -201,6 +201,20 @@ class PhonePresentationTests(unittest.TestCase):
         self.assertEqual(self.operations, [])
         self.assertEqual(self.gui.state.feedback.revision, before)
         self.gui.client.start_call.assert_not_called()
+
+    def test_endpoint_edits_require_installation_before_call_readiness(self) -> None:
+        """Changing a chooser field cannot silently grant the edited route audio readiness."""
+        self.assertTrue(self.calls.ready)
+        for field in ('input', 'output'):
+            with self.subTest(field=field):
+                original = getattr(self.gui.voice.routes, field)
+                setattr(self.gui.voice.routes, field, 3)
+                self.assertFalse(self.calls.ready)
+                self.assertFalse(self.calls.start('bob'))
+                self.assertEqual(self.operations, [])
+                self.gui.client.start_call.assert_not_called()
+                setattr(self.gui.voice.routes, field, original)
+        self.assertTrue(self.calls.ready)
 
     def test_call_specific_failure_is_visible_without_duplicate_app_feedback(
         self,

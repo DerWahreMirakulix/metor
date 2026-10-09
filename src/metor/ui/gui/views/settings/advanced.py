@@ -57,11 +57,17 @@ def advanced_body(controller: GuiController) -> BoxLayout:
                 'Architecture: ' + platform.machine(),
                 'Python: ' + platform.python_version(),
                 'Mode: ' + ('Simulator' if controller.simulator else 'Native GUI'),
-                'Headset route: '
+                'Microphone route: '
                 + (
-                    'Confirmed'
-                    if controller.voice.headset_confirmed
-                    else 'Not confirmed'
+                    'Selected'
+                    if controller.voice.routes.input is not None
+                    else 'Not selected'
+                ),
+                'Audio output route: '
+                + (
+                    'Selected'
+                    if controller.voice.routes.output is not None
+                    else 'Not selected'
                 ),
                 'Audio input worker: '
                 + ('Active' if controller.voice.running else 'Idle'),

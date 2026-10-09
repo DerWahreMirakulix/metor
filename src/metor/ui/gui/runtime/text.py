@@ -120,7 +120,7 @@ class TextController:
         return ''
 
     def send(self, peer: str, delivery: Delivery) -> None:
-        """Captures one message ID and text intent, rejecting duplicate activation.
+        """Moves one frozen text intent into sending presentation after worker admission.
 
         Args:
             peer: Canonical peer identity.
@@ -195,6 +195,16 @@ class TextController:
             DropQueuedEvent if delivery is Delivery.DROP else TextAcceptedEvent,
         ):
             self.operations[action] = (peer, delivery, value)
+            controller.state.drafts.pop((peer, delivery), None)
+            controller.state.reserved_drafts[peer, delivery] = value
+            if (
+                delivery is Delivery.DROP
+                and not controller.state.covered
+                and controller.state.route.view == 'V08'
+                and controller.state.route.peer == peer
+                and controller.archive.before is not None
+            ):
+                controller.archive.reset()
         else:
             self.reservations.pop(action, None)
             if not controller.state.covered:
@@ -312,6 +322,7 @@ class TextController:
             if state.drafts.get((peer, delivery)) == text:
                 state.drafts.pop((peer, delivery), None)
             del self.operations[action]
+            state.reserved_drafts.pop((peer, delivery), None)
             self.reservations.pop(action, None)
             self._checks.discard(action)
             self._check_at.pop(action, None)
@@ -331,6 +342,9 @@ class TextController:
                 self.controller.archive.reset()
             self.controller.refresh_state()
         elif rejected:
+            state.reserved_drafts.pop((peer, delivery), None)
+            if not state.drafts.get((peer, delivery)):
+                state.set_draft(peer, delivery, text)
             del self.operations[action]
             self.reservations.pop(action, None)
             self._checks.discard(action)
@@ -349,7 +363,7 @@ class TextController:
             revision = self.report_error(
                 peer,
                 delivery,
-                'Checking send result… Your draft is kept until the result is known.',
+                'Checking send result… Your message is kept in the conversation.',
             )
             if revision is not None:
                 self._feedback_revisions[action] = revision
@@ -404,6 +418,7 @@ class TextController:
             None
         """
         self.operations.clear()
+        self.controller.state.reserved_drafts.clear()
         self.reservations.clear()
         self._checks.clear()
         self._check_at.clear()

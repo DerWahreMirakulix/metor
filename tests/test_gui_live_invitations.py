@@ -249,6 +249,93 @@ class InvitationPresentationTests(unittest.TestCase):
         )
         self.invitations.poll()
 
+    def test_incoming_waits_for_explicit_notification_or_sidebar_intent(self) -> None:
+        """Arrival creates a reachable request without interrupting the current chat."""
+        self.invitations.observe(IncomingConnectionEvent('Bob', 'bob', 'one'))
+        self.assertFalse(self.invitations.visible)
+        self.assertTrue(self.invitations.show_peer('bob'))
+        self.assertTrue(self.invitations.visible)
+        self.assertEqual(self.invitations.presentation, 'chooser')
+        self.assertEqual(self.gui.state.route.peer, 'alice')
+        self.gui.client.request.assert_not_called()
+        self.invitations.dismiss()
+        self.invitations.show('one')
+        self.assertEqual(self.invitations.presentation, 'banner')
+        self.assertTrue(self.invitations.visible)
+        self.gui.client.request.assert_not_called()
+
+    def test_pending_sidebar_membership_ends_with_rejection(self) -> None:
+        """Only explicit inbound invitation facts add pending sidebar rows."""
+        from metor.core.api import (
+            ConnectionOrigin,
+            Delivery,
+            PendingConnectionEntry,
+            PendingConnectionReasonCode,
+        )
+        from metor.ui.gui.runtime import conversation_rows
+
+        self.snapshot(
+            pending=[
+                PendingConnectionEntry(
+                    'Bob',
+                    'bob',
+                    ConnectionOrigin.INCOMING,
+                    PendingConnectionReasonCode.USER_ACCEPT,
+                    action_handle='one',
+                ),
+                PendingConnectionEntry(
+                    'Carol',
+                    'carol',
+                    ConnectionOrigin.GRACE_RECONNECT,
+                    PendingConnectionReasonCode.CONSUMER_ABSENT,
+                    action_handle='recovery',
+                ),
+            ]
+        )
+        self.assertFalse(self.invitations.visible)
+        self.assertEqual(
+            [item.peer for item in conversation_rows(self.gui, Delivery.LIVE)], ['bob']
+        )
+        self.snapshot()
+        self.assertEqual(conversation_rows(self.gui, Delivery.LIVE), [])
+
+    def test_ended_transcript_is_local_but_durable_pending_stays_reachable(
+        self,
+    ) -> None:
+        """Ended metadata cannot restore cleared transcripts; pending receipts remain listed."""
+        from metor.core.api import (
+            Delivery,
+            LiveContextEntry,
+            MessageReceivedEvent,
+            TextContent,
+        )
+        from metor.ui.gui.runtime import conversation_rows
+
+        ended = LiveContextEntry(
+            'Bob', 'bob', True, 'disconnected', context_generation=1
+        )
+        self.snapshot(accepted=[ended])
+        self.assertEqual(conversation_rows(self.gui, Delivery.LIVE), [])
+        self.gui.transcript.install(
+            MessageReceivedEvent(
+                'Bob',
+                Delivery.LIVE,
+                TextContent('kept'),
+                onion='bob',
+                msg_id='kept',
+            )
+        )
+        self.assertEqual(
+            [item.peer for item in conversation_rows(self.gui, Delivery.LIVE)], ['bob']
+        )
+        self.gui.transcript.discard('bob', Delivery.LIVE)
+        self.assertEqual(conversation_rows(self.gui, Delivery.LIVE), [])
+        ended.pending_outbound_count = 1
+        self.snapshot(accepted=[ended])
+        self.assertEqual(
+            [item.peer for item in conversation_rows(self.gui, Delivery.LIVE)], ['bob']
+        )
+
     def test_accept_stays_elsewhere_and_open_requires_current_accepted_handle(
         self,
     ) -> None:
@@ -274,10 +361,86 @@ class InvitationPresentationTests(unittest.TestCase):
         )
         self.snapshot(accepted=[live])
         self.assertEqual(self.gui.state.route, Route('V08', 'alice'))
+        self.assertFalse(self.invitations.visible)
+        self.assertEqual(self.invitations.pending_handles(), ())
         self.assertTrue(self.invitations.perform('one', 'open'))
-        self.snapshot(accepted=[live])
         self.assertEqual(self.gui.state.route, Route('V09', 'bob', Delivery.LIVE))
         self.assertEqual(self.gui.client.request.call_count, 1)
+
+    def test_accept_and_open_navigates_on_exact_success_before_snapshot(self) -> None:
+        """A successful explicit Open cannot depend on a second invitation refresh."""
+        from metor.core.api import ConnectedEvent, Delivery
+        from metor.ui.gui.state import Route
+        from metor.ui.gui.state.mailbox import Update
+
+        self.invitations.observe(IncomingConnectionEvent('Bob', 'bob', 'one'))
+        self.assertTrue(self.invitations.perform('one', 'open'))
+        self.work()
+        self.invitations.install(
+            Update(0, self.operation, ConnectedEvent('Bob', 'bob'))
+        )
+        self.assertEqual(self.gui.state.route, Route('V09', 'bob', Delivery.LIVE))
+        self.assertFalse(self.invitations.visible)
+        self.assertEqual(self.invitations.pending_handles(), ())
+        self.invitations.observe(IncomingConnectionEvent('Bob', 'bob', 'one'))
+        self.assertFalse(self.invitations.visible)
+        self.assertEqual(self.gui.client.request.call_count, 1)
+
+    def test_accept_retires_only_resolved_request_from_multiple_invitation_selector(
+        self,
+    ) -> None:
+        """Already accepted chats never remain in the pending invitation pager."""
+        from metor.core.api import ConnectedEvent
+        from metor.ui.gui.state.mailbox import Update
+
+        self.invitations.observe(IncomingConnectionEvent('Bob', 'bob', 'one'))
+        self.invitations.observe(IncomingConnectionEvent('Carol', 'carol', 'two'))
+        self.assertTrue(self.invitations.perform('one', 'accept'))
+        self.invitations.install(
+            Update(0, self.operation, ConnectedEvent('Bob', 'bob'))
+        )
+        self.assertEqual(self.invitations.pending_handles(), ('two',))
+        self.assertEqual(self.invitations.selected, 'two')
+
+    def test_open_acceptance_preserves_a_later_explicit_navigation(self) -> None:
+        """An asynchronous success cannot pull the user back after they leave."""
+        from metor.core.api import ConnectedEvent
+        from metor.ui.gui.state import Route
+        from metor.ui.gui.state.mailbox import Update
+
+        self.invitations.observe(IncomingConnectionEvent('Bob', 'bob', 'one'))
+        self.assertTrue(self.invitations.perform('one', 'open'))
+        self.gui.state.route = Route('V12')
+        self.invitations.install(
+            Update(0, self.operation, ConnectedEvent('Bob', 'bob'))
+        )
+        self.assertEqual(self.gui.state.route, Route('V12'))
+        self.assertFalse(self.invitations.visible)
+
+    def test_unknown_open_requires_the_original_accepted_handle(self) -> None:
+        """A lost response waits for exact acceptance rather than a replacement chat."""
+        from metor.core.api import Delivery, LiveContextEntry
+        from metor.ui.gui.state import Route
+        from metor.ui.gui.state.mailbox import Update
+
+        self.invitations.observe(IncomingConnectionEvent('Bob', 'bob', 'one'))
+        self.assertTrue(self.invitations.perform('one', 'open'))
+        self.invitations.install(Update(0, self.operation))
+        self.assertEqual(self.gui.state.route, Route('V08', 'alice'))
+        self.snapshot(
+            accepted=[
+                LiveContextEntry(
+                    'Bob',
+                    'bob',
+                    True,
+                    'connected',
+                    context_generation=1,
+                    invitation_handle='one',
+                )
+            ]
+        )
+        self.assertEqual(self.gui.state.route, Route('V09', 'bob', Delivery.LIVE))
+        self.assertFalse(self.invitations.visible)
 
     def test_multiple_invitation_arrival_preserves_target_and_expired_open_never_calls_back(
         self,
@@ -295,10 +458,134 @@ class InvitationPresentationTests(unittest.TestCase):
         self.assertFalse(self.invitations.perform('one', 'open'))
         self.assertEqual(self.gui.client.request.call_count, 1)
 
+    def test_replaced_peer_request_has_one_prompt_and_old_controls_are_inert(
+        self,
+    ) -> None:
+        """A new handle immediately retires the same peer's previous invitation."""
+        from metor.core.api import PendingConnectionExpiredEvent
+
+        self.invitations.observe(IncomingConnectionEvent('Bob', 'bob', 'old'))
+        self.invitations.observe(IncomingConnectionEvent('Bob', 'bob', 'current'))
+        self.assertEqual(self.invitations.pending_handles(), ('current',))
+        self.assertEqual(self.invitations.selected, 'current')
+        self.assertFalse(self.invitations.perform('old', 'accept'))
+        self.invitations.observe(
+            PendingConnectionExpiredEvent('Bob', 'bob', action_handle='old')
+        )
+        self.invitations.observe(IncomingConnectionEvent('Bob', 'bob', 'old'))
+        self.assertEqual(self.invitations.pending_handles(), ('current',))
+        self.assertTrue(self.invitations.perform('current', 'accept'))
+        self.work()
+        command = self.gui.client.request.call_args.args[0]
+        self.assertEqual((command.target, command.action_handle), ('bob', 'current'))
+
+    def test_older_snapshot_cannot_restore_a_replaced_prompt(self) -> None:
+        """An in-flight earlier read cannot reverse a newer same-peer request event."""
+        from metor.core.api import (
+            ConnectionOrigin,
+            PendingConnectionEntry,
+            PendingConnectionReasonCode,
+            RuntimeSnapshotEvent,
+        )
+
+        self.invitations.observe(
+            IncomingConnectionEvent('Bob', 'bob', 'old', revision=1)
+        )
+        self.invitations.observe(
+            IncomingConnectionEvent('Bob', 'bob', 'current', revision=2)
+        )
+        self.gui.state.snapshot = RuntimeSnapshotEvent(
+            'fixture',
+            'self',
+            revision=1,
+            pending=[
+                PendingConnectionEntry(
+                    'Bob',
+                    'bob',
+                    ConnectionOrigin.INCOMING,
+                    PendingConnectionReasonCode.USER_ACCEPT,
+                    action_handle='old',
+                )
+            ],
+        )
+        self.invitations.poll()
+        self.assertEqual(self.invitations.pending_handles(), ('current',))
+        self.assertEqual(self.invitations.selected, 'current')
+        self.assertFalse(self.invitations.perform('old', 'open'))
+
+    def test_replacement_preserves_inflight_action_without_reviving_its_prompt(
+        self,
+    ) -> None:
+        """The old action result resolves only its handle, leaving the new request current."""
+        from metor.ui.gui.state.mailbox import Update
+
+        self.invitations.observe(IncomingConnectionEvent('Bob', 'bob', 'old'))
+        self.assertTrue(self.invitations.perform('old', 'accept'))
+        original_operation = self.operation
+        self.invitations.observe(IncomingConnectionEvent('Bob', 'bob', 'current'))
+        self.assertEqual(self.invitations._operation[1], 'old')
+        self.invitations.install(
+            Update(0, original_operation, ConnectionRejectedEvent('Bob', 'bob'))
+        )
+        self.assertEqual(self.invitations.entries['old'].phase, 'replaced')
+        self.assertEqual(self.invitations.pending_handles(), ('current',))
+        self.assertTrue(self.invitations.perform('current', 'accept'))
+        self.work()
+        self.assertEqual(
+            self.gui.client.request.call_args.args[0].action_handle, 'current'
+        )
+
+    def test_replaced_open_success_cannot_navigate_or_hide_the_current_request(
+        self,
+    ) -> None:
+        """A late old success cannot change the replacement request's chosen surface."""
+        from metor.core.api import ConnectedEvent
+        from metor.ui.gui.state.mailbox import Update
+
+        self.invitations.observe(IncomingConnectionEvent('Bob', 'bob', 'old'))
+        self.assertTrue(self.invitations.perform('old', 'open'))
+        operation = self.operation
+        self.invitations.observe(IncomingConnectionEvent('Bob', 'bob', 'current'))
+        self.invitations.show('current')
+        origin = self.gui.state.route
+        self.invitations.install(Update(0, operation, ConnectedEvent('Bob', 'bob')))
+        self.assertEqual(self.gui.state.route, origin)
+        self.assertTrue(self.invitations.visible)
+        self.assertEqual(self.invitations.selected, 'current')
+        self.assertEqual(self.invitations.entries['old'].phase, 'replaced')
+
+    def test_late_duplicate_result_preserves_the_current_action(self) -> None:
+        """An unrelated old operation result never steals a newer request's correlation."""
+        from metor.ui.gui.state.mailbox import Update
+
+        self.invitations.observe(IncomingConnectionEvent('Bob', 'bob', 'old'))
+        self.assertTrue(self.invitations.perform('old', 'accept'))
+        original = self.operation
+        self.invitations.observe(IncomingConnectionEvent('Carol', 'carol', 'current'))
+        self.invitations.install(
+            Update(0, original, ConnectionRejectedEvent('Bob', 'bob'))
+        )
+        self.assertTrue(self.invitations.perform('current', 'accept'))
+        current = self.invitations._operation
+        self.invitations.install(
+            Update(0, original, ConnectionRejectedEvent('Bob', 'bob'))
+        )
+        self.assertEqual(self.invitations._operation, current)
+
+    def test_anonymous_labels_do_not_coalesce_distinct_peer_authority(self) -> None:
+        """A shared anonymous label is never treated as a canonical peer identity."""
+        self.invitations.observe(
+            IncomingConnectionEvent('Live chat invitation', None, 'a')
+        )
+        self.invitations.observe(
+            IncomingConnectionEvent('Live chat invitation', None, 'b')
+        )
+        self.assertEqual(self.invitations.pending_handles(), ('a', 'b'))
+
     def test_recovery_snapshot_does_not_reopen_dismissed_invitation_surface(
         self,
     ) -> None:
-        """Recovery metadata remains discoverable without presenting another LIVE invitation."""
+        """Transport recovery remains outside the pending invitation presentation."""
         from metor.core.api import (
             ConnectionOrigin,
             PendingConnectionEntry,
@@ -319,9 +606,10 @@ class InvitationPresentationTests(unittest.TestCase):
             ]
         )
         self.assertFalse(self.invitations.visible)
-        self.assertEqual(self.invitations.selected, 'recovery')
+        self.assertIsNone(self.invitations.selected)
+        self.assertNotIn('recovery', self.invitations.entries)
         self.invitations.show()
-        self.assertTrue(self.invitations.visible)
+        self.assertFalse(self.invitations.visible)
 
     def test_ended_invitations_are_skipped_and_cannot_reopen_the_surface(self) -> None:
         """Expired history never remains as a close-only LIVE invitation page."""
@@ -332,6 +620,10 @@ class InvitationPresentationTests(unittest.TestCase):
         self.assertFalse(self.invitations.visible)
         self.invitations.observe(IncomingConnectionEvent('Carol', 'carol', 'two'))
         self.assertEqual(self.invitations.selected, 'two')
+        self.invitations.show('one')
+        self.assertFalse(self.invitations.visible)
+        self.invitations.show('two')
+        self.assertTrue(self.invitations.visible)
         self.invitations.step(-1)
         self.assertEqual(self.invitations.selected, 'two')
 

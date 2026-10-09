@@ -558,6 +558,14 @@ reuse is enabled, queued drops ride the existing live session channel and a
 cached drop tunnel is closed while live exists, so `allow_drop_standby_on_live`
 only has meaning when reuse is disabled:
 
+This policy covers both text and Voice Drops. Live keeps one socket reader;
+Voice delivery waits on bounded receiver-fed acknowledgements correlated to the
+authenticated peer, exact socket and message identity. Socket replacement or a
+failed transfer revokes that attempt's queued writes and leaves its durable Drop
+pending for retry. Only the terminal commit acknowledgement confirms delivery;
+chunk acknowledgements establish a resumable prefix. A peer's DROP-policy denial
+does not end its accepted Live chat.
+
 | `reuse_live_for_drops` | `allow_drop_standby_on_live` | Drop routing while live is active                                                                      |
 | ---------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------ |
 | `true` (default)       | `false` (default)            | Drops ride the live session channel; no drop tunnel cache is kept warm.                                |
@@ -867,6 +875,15 @@ It exists to keep reconnect, retunnel, fallback, and durable pending-live handli
 7. The UI must never infer recovery from time or socket silence.
    It reacts only to typed IPC transport events, fallback events, and ACK events.
 
+8. Accepted LIVE consent has a volatile logical generation.
+   Connected sockets own that generation; recoverable loss starts one monotonic
+   deadline using `daemon.live_reconnect_grace_timeout`. Authenticated recovery
+   can replace that generation before the deadline, subject to current consumer
+   and backlog policy. A `RECOVER` hint alone grants no consent. Retry failure
+   never extends the deadline, and End, reject, lock or shutdown revokes the scope.
+   Socket, attempt, generation and deadline checks keep delayed work from
+   reopening a terminated or replaced context.
+
 ### Recovery Origins and Their Meaning
 
 - `MANUAL` means the local user explicitly started or stopped the flow.
@@ -904,7 +921,9 @@ The UI may translate them differently, but it must not reinterpret them.
 3. If both peers initiated a connection simultaneously, the deterministic tie-breaker decides the winner.
    The loser is rejected with `MUTUAL_CONNECT` semantics instead of appearing as a random failure.
 
-4. If reconnect grace, retunnel recovery, scheduled auto reconnect, or a generic recovery hint corroborated by current local recovery state is present, the listener may auto-accept the incoming socket as a recovery replacement.
+4. An authenticated recovery socket may replace a currently accepted logical
+   generation while connected or before its loss deadline expires. Recovery
+   markers and the peer's generic hint cannot independently grant acceptance.
 
    If the passive peer explicitly opts out during that window by using `/end` or `/reject`, the retunneling side must surface that as one terminal peer-ended outcome, not as a generic `connection lost` transport failure.
 
@@ -932,12 +951,19 @@ The UI may translate them differently, but it must not reinterpret them.
 4. If a replacement socket arrives before grace expires, the delayed worker exits quietly.
    The peer only sees generic reconnect lifecycle, not a disconnect followed by a fresh incoming request.
 
-5. If grace expires without recovery, the daemon emits `DisconnectedEvent` and cleans up orphaned contacts.
+5. If grace expires without recovery, the daemon revokes that accepted scope,
+   emits `DisconnectedEvent`, and follows `daemon.fallback_to_drop` for pending
+   outgoing LIVE messages. Incoming unseen messages remain LIVE. With automatic
+   fallback disabled, outgoing messages remain in the durable pending LIVE spool.
 
-6. If `daemon.live_reconnect_delay > 0`, the daemon then schedules `AUTO_RECONNECT`.
+6. If `daemon.live_reconnect_delay > 0`, automatic work is scheduled during grace,
+   leaving time for the Tor handshake. It does not start a new accepted recovery
+   window after the old one expires.
 
-7. If `daemon.live_reconnect_delay = 0`, the daemon does not schedule a reconnect worker.
-   The current design still keeps retained unacknowledged live messages instead of converting them immediately at grace expiry, because a hinted late recovery replacement may still arrive and replay them.
+7. If `daemon.live_reconnect_delay = 0`, the daemon schedules no reconnect worker.
+   An eligible incoming replacement can still recover the accepted scope within
+   grace. After expiry, another session requires normal acceptance or mutual
+   connect under a fresh explicit attempt.
 
 ### Automatic Live Reconnect
 
@@ -946,12 +972,18 @@ The UI may translate them differently, but it must not reinterpret them.
 
 2. When auto reconnect is scheduled, the daemon emits `AutoReconnectScheduledEvent` and the chat UI moves into `RECONNECTING` state.
 
-3. The reconnect worker later calls the normal outbound `connect_to()` path with `origin = AUTO_RECONNECT`.
+3. The reconnect worker calls the normal outbound `connect_to()` path with
+   `origin = AUTO_RECONNECT` inside the existing accepted grace window. The
+   initial delay is clipped to leave the configured Tor timeout budget; the
+   default 15-second delay cannot consume the entire default 15-second grace.
 
 4. Successful auto reconnect behaves like a normal successful connect, except the origin remains `AUTO_RECONNECT` and the UI renders it as reconnect lifecycle rather than as a first connect.
 
-5. Terminal auto-reconnect failure is one of the explicit terminal points for retained unacknowledged live messages.
-   When retries are exhausted, the outbound attempt is rejected, or the attempt closes before acceptance, the daemon converts retained unacknowledged live messages to drops and then emits `ConnectionFailedEvent`.
+5. Failed retry rounds remain bounded by the original grace deadline. They do
+   not prompt again, silently create a new session, or extend accepted consent.
+   Grace expiry or explicit terminal rejection ends recovery and follows the
+   configured fallback policy. A fresh manual Retry first resolves expired
+   cleanup, then binds a new attempt; stale receivers cannot revive old work.
 
 ### Explicit Local Retunnel
 

@@ -41,6 +41,18 @@ def message_menu(
         Returns:
             None
         """
+        submission = controller.text.reservations.get('A11:' + msg_id)
+        if submission is not None:
+            item, _size = submission
+            if (
+                item.peer == route.peer
+                and item.delivery is route.delivery
+                and item.direction is direction
+            ):
+                body.add_widget(
+                    Label(controller.text.pending_status(item.peer, item.delivery))
+                )
+                return
         status = lookup()
         if status is None:
             body.add_widget(Label('Item no longer available'))
@@ -63,7 +75,9 @@ def message_menu(
                 confirm(
                     controller,
                     'Delete Drop',
-                    'Delete this Drop from local history. This does not delete the remote copy or cancel pending delivery.',
+                    'Delete this Drop from local history. Queued delivery will be cancelled. A copy already transmitted may still arrive.'
+                    if pending
+                    else 'Delete this Drop from local history. This does not delete the remote copy.',
                     lambda: controller.drop.delete(route.peer or '', msg_id, direction),
                 )
 
@@ -72,13 +86,15 @@ def message_menu(
                     'Delete Drop',
                     delete,
                     tone='danger',
-                    disabled=pending
-                    or controller.state.busy
-                    or controller.drop.pending is not None,
+                    disabled=controller.state.busy
+                    or controller.drop.pending is not None
+                    or not controller.drop.can_delete(route.peer or '', msg_id),
                 )
             )
             if pending:
-                body.add_widget(Label('Pending delivery is preserved', role='support'))
+                body.add_widget(
+                    Label('Queued delivery can be cancelled', role='support')
+                )
 
         elif (
             direction is MessageDirectionCode.OUT
@@ -111,6 +127,9 @@ def message_menu(
         ):
             resend_controls(body, controller, route.peer or '', msg_id)
 
+        if not body.children:
+            body.add_widget(Label('No message actions available', role='support'))
+
     sheet = ActionSheet(
         controller,
         build,
@@ -118,6 +137,8 @@ def message_menu(
         compact_menu=True,
         revision=lambda: (
             lookup(),
+            controller.text.pending_status(route.peer or '', route.delivery),
+            controller.drop.can_delete(route.peer or '', msg_id),
             resend_revision(controller, route.peer or '', msg_id),
         ),
     )

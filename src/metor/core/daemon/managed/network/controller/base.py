@@ -86,7 +86,7 @@ class ConnectionController(
         self._retain_call_transport = retain_call_transport
 
         self._receiver: Optional['StreamReceiver'] = None
-        self._live_reconnect_queue: list[str] = []
+        self._live_reconnect_queue: list[tuple[str, Optional[int]]] = []
         self._live_reconnect_lock: threading.Lock = threading.Lock()
         threading.Thread(target=self._live_reconnect_worker, daemon=True).start()
 

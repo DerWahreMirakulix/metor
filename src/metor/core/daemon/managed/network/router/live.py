@@ -199,7 +199,7 @@ class LiveMessageRouter:
             return
         alias, onion = resolved
         request_id: Optional[str] = get_current_request_id()
-        self._state.remember_message_request_id(msg_id, request_id)
+        self._state.remember_message_request_id(msg_id, request_id, live_peer=onion)
         conn: Optional[socket.socket] = self._state.get_connection(onion)
         timestamp: str = datetime.now(timezone.utc).isoformat()
 
@@ -245,6 +245,7 @@ class LiveMessageRouter:
                 status=MessageStatus.PENDING,
                 msg_id=msg_id,
             )
+            self._state.remember_message_request_id(msg_id, request_id, drop_peer=onion)
             if local_result is not None:
                 local_result(TextAcceptedEvent(onion, msg_id, Delivery.DROP))
             self._hm.log_event(

@@ -443,7 +443,8 @@ class PresentationTests(unittest.TestCase):
         controller.poll()
         controller.send_text('alice', Delivery.DROP)
         self.assertEqual(client.request.call_count, 1)
-        self.assertEqual(controller.state.drafts[('alice', Delivery.DROP)], 'hello')
+        self.assertNotIn(('alice', Delivery.DROP), controller.state.drafts)
+        self.assertEqual(next(iter(controller.text.operations.values()))[2], 'hello')
 
     def test_confirmed_send_clears_only_matching_draft(self) -> None:
         """New typing is preserved when an older submission is accepted."""

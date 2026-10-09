@@ -33,6 +33,53 @@ class AudioPortTests(unittest.TestCase):
         self.assertIsNone(audio.take_frame())
         audio.stop()
 
+    def test_inert_enumeration_keeps_unsupported_directions_visible(self) -> None:
+        """Format checks explain incompatible endpoints without opening any native stream."""
+        sounddevice = SimpleNamespace(
+            query_devices=Mock(
+                return_value=[
+                    {
+                        'name': 'Headset',
+                        'hostapi': 0,
+                        'max_input_channels': 1,
+                        'max_output_channels': 2,
+                    },
+                    {
+                        'name': 'Headset',
+                        'hostapi': 1,
+                        'max_input_channels': 0,
+                        'max_output_channels': 2,
+                    },
+                ]
+            ),
+            query_hostapis=Mock(
+                return_value=[{'name': 'MME'}, {'name': 'DirectSound'}]
+            ),
+            check_input_settings=Mock(),
+            check_output_settings=Mock(side_effect=[None, ValueError('Unsupported')]),
+            RawInputStream=Mock(),
+            RawOutputStream=Mock(),
+            PortAudioError=RuntimeError,
+        )
+
+        with patch.dict(sys.modules, {'sounddevice': sounddevice}):
+            endpoints = HeadsetAudio.endpoints()
+
+        self.assertEqual(len(endpoints), 2)
+        self.assertEqual(endpoints[0].input_error, '')
+        self.assertEqual(endpoints[0].output_error, '')
+        self.assertTrue(endpoints[1].output_available)
+        self.assertTrue(endpoints[1].output_error)
+        sounddevice.check_input_settings.assert_called_once_with(
+            device=0,
+            samplerate=PcmVoice.SAMPLE_RATE,
+            channels=PcmVoice.CHANNELS,
+            dtype='int16',
+        )
+        self.assertEqual(sounddevice.check_output_settings.call_count, 2)
+        sounddevice.RawInputStream.assert_not_called()
+        sounddevice.RawOutputStream.assert_not_called()
+
     def test_output_still_closes_if_capture_cleanup_fails(self) -> None:
         """A failed microphone does not strand the independent playback device."""
         audio = HeadsetAudio()
@@ -83,6 +130,29 @@ class AudioPortTests(unittest.TestCase):
         self.assertIsNone(audio._output)
         self.assertIs(audio._capture, capture)
         capture.stop.assert_not_called()
+
+    def test_output_underflow_accepts_current_samples_until_successful_drain(
+        self,
+    ) -> None:
+        """Inserted silence between blocking writes does not reject the submitted samples."""
+        output = Mock()
+        output.write.side_effect = [True, False, True]
+        sounddevice = SimpleNamespace(RawOutputStream=Mock(return_value=output))
+        audio = HeadsetAudio(output_device=7)
+        frame = b'\x00\x01' * PcmVoice.FRAME_SAMPLES
+
+        with patch.dict(sys.modules, {'sounddevice': sounddevice}):
+            for _ in range(3):
+                audio.play_frame(frame, headset_confirmed=True)
+            self.assertIs(audio._output, output)
+            output.stop.assert_not_called()
+            audio.stop_output()
+
+        self.assertEqual(output.write.call_count, 3)
+        output.start.assert_called_once()
+        output.stop.assert_called_once()
+        output.close.assert_called_once()
+        self.assertIsNone(audio._output)
 
 
 if __name__ == '__main__':

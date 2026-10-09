@@ -13,13 +13,13 @@ from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.state.media import PlaybackTarget
 
 # Local Package Imports
-from ..controls import Action, Label, Panel
+from ..controls import Label, Panel
 from ..symbol import IconAction, Symbol
 from .waveform import WaveformSeek
 
 
 class VoiceCard(BoxLayout):
-    """Keeps Play, duration/status and Go live in separate nonoverlapping columns."""
+    """Keeps Play, waveform and duration/status in separate nonoverlapping rows."""
 
     def __init__(
         self,
@@ -98,10 +98,6 @@ class VoiceCard(BoxLayout):
             )
         self.card.add_widget(footer)
         footer.bind(minimum_height=self._measure)
-        self.edge = BoxLayout(size_hint_x=None, width=dp(80))
-        self.jump = Action('Go live', self._jump, surface='liveSurface', tone='live')
-        self.jump.accessible_name = 'Jump to current audio'
-        self.at_edge = Label('At live edge', role='caption', tone='textSecondary')
         self.height = dp(124)
 
     def _reflow(self, *_args: object) -> None:
@@ -133,7 +129,15 @@ class VoiceCard(BoxLayout):
             None
         """
         playback = self.controller.playback
-        if playback.audio is None and self.configure_audio is not None:
+        progress = playback.progress
+        output_failed = (
+            progress is not None
+            and progress.target == self.target
+            and progress.state == 'output_unavailable'
+        )
+        if (
+            playback.audio is None or output_failed
+        ) and self.configure_audio is not None:
             self.configure_audio()
             return
         if (
@@ -144,19 +148,6 @@ class VoiceCard(BoxLayout):
             playback.stop()
         else:
             playback.play(self.target)
-        self.refresh()
-
-    def _jump(self) -> None:
-        """Starts at the newest complete PCM frame without consuming skipped content.
-
-        Args:
-            None
-        Returns:
-            None
-        """
-        position = max(0, self._available - PcmVoice.FRAME_BYTES)
-        position -= position % PcmVoice.SAMPLE_BYTES
-        self.controller.playback.play(self.target, offset=position)
         self.refresh()
 
     def _seek(self, fraction: float) -> None:
@@ -191,11 +182,11 @@ class VoiceCard(BoxLayout):
         matching = progress is not None and progress.target == self.target
         position = progress.position if matching and progress is not None else 0
         state = progress.state if matching and progress is not None else ''
+        call_audio = self.controller.calls.active or self.controller.calls.media_active
         self.play.disabled = (
             codec != PcmVoice.CODEC
             or self.controller.state.covered
-            or self.controller.calls.active
-            or self.controller.calls.media_active
+            or call_audio
             or playback.audio is None
             and self.configure_audio is None
         )
@@ -205,7 +196,11 @@ class VoiceCard(BoxLayout):
             self.play.add_widget(Symbol('pause' if playing else 'play'))
             self._playing = playing
         self.play.accessible_name = (
-            'Pause voice message'
+            'Play voice message · Available after call'
+            if call_audio
+            else 'Choose audio output'
+            if state == 'output_unavailable'
+            else 'Pause voice message'
             if matching and playback.running
             else 'Play voice message'
         )
@@ -217,10 +212,18 @@ class VoiceCard(BoxLayout):
         elapsed = PcmVoice.duration_ms(position) / PcmVoice.MILLISECONDS
         envelope = playback.cache.envelope(self.target)
         self.seek.disabled = (
-            self.play.disabled or playback.audio is None or size <= 0 or not envelope[1]
+            self.play.disabled
+            or playback.audio is None
+            or state == 'output_unavailable'
+            or size <= 0
+            or not envelope[1]
         )
         self.title.text = (
-            'Audio unavailable'
+            'Available after call'
+            if call_audio
+            else 'Output unavailable · Choose audio device'
+            if state == 'output_unavailable'
+            else 'Audio unavailable · Retry'
             if self.play.disabled or state == 'unavailable'
             else 'Play voice message'
             if playback.audio is None
@@ -238,19 +241,3 @@ class VoiceCard(BoxLayout):
             else f'{elapsed:.1f} s / … · {status}'
         )
         self.seek.set_source(size, position, envelope)
-        if (
-            not finalized
-            and self.target.direction is MessageDirectionCode.IN
-            and playback.audio is not None
-        ):
-            if self.edge.parent is None:
-                self.footer.add_widget(self.edge)
-            action = (
-                self.jump if position + PcmVoice.FRAME_BYTES < size else self.at_edge
-            )
-            if action.parent is None:
-                self.edge.clear_widgets()
-                self.edge.add_widget(action)
-            self.jump.disabled = self.play.disabled or playback.audio is None
-        elif self.edge.parent is self.footer:
-            self.footer.remove_widget(self.edge)

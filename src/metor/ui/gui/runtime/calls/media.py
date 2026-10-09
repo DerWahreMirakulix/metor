@@ -90,7 +90,7 @@ class CallMediaWorker:
             Update(
                 self.generation,
                 'call-media-error:' + self.call_id,
-                status='Call audio stopped. Check the headset and call again.',
+                status='Call audio stopped. Check the audio devices and call again.',
             )
         )
         try:

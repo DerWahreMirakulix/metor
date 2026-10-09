@@ -9,13 +9,13 @@ from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.widget import Widget
 
-from metor.core.api import Delivery
+from metor.core.api import CallState, Delivery
 from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.widgets import Action, Label
 from metor.ui.gui.widgets.qr import ContactQr
 from metor.ui.gui.widgets.sheet import ActionSheet, confirm
 
-from ..audio import show_audio_unavailable
+from ..actions import call_peer
 
 # Local Package Imports
 from .form import contact_form
@@ -63,15 +63,25 @@ def contact_sheet(
         def call() -> None:
             """Starts an explicit phone call while preserving the invoking route."""
             sheet.dismiss(animation=False)
-            if not controller.calls.ready:
-                show_audio_unavailable(controller, refresh, purpose='calls')
-                return
-            controller.calls.start(peer)
-            refresh()
+            call_peer(controller, peer, refresh)
 
+        current = controller.calls.current
+        call_label = 'Call'
+        if (
+            current is not None
+            and current.peer == peer
+            and current.state is not CallState.ENDED
+        ):
+            call_label = (
+                'In call'
+                if current.state is CallState.ACTIVE
+                else 'Incoming call'
+                if current.state is CallState.INCOMING
+                else 'Calling…'
+            )
         body.add_widget(
             Action(
-                'Call',
+                call_label,
                 call,
                 disabled=controller.state.busy
                 or 'calls' not in controller.state.capabilities,
@@ -115,7 +125,10 @@ def contact_sheet(
         )
 
     sheet = ActionSheet(
-        controller, build, title=lambda: controller.contacts.alias(peer)
+        controller,
+        build,
+        title=lambda: controller.contacts.alias(peer),
+        revision=lambda: controller.calls.revision,
     )
     sheet.show()
 

@@ -232,7 +232,7 @@ def exercise_sheet_refresh(app: MetorApp, complete: Callable[[], None]) -> None:
         sheet = ActionSheet(
             controller,
             build,
-            title='Choose headphone output',
+            title='Choose audio output',
             stable_frame=True,
             revision=lambda: revision[0],
             snapshot_updates=False,

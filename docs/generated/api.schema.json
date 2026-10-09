@@ -518,6 +518,9 @@
         },
         "non_contacts_only": {
           "type": "boolean"
+        },
+        "cancel_pending": {
+          "type": "boolean"
         }
       },
       "additionalProperties": false,
@@ -732,6 +735,9 @@
               "type": "null"
             }
           ]
+        },
+        "cancel_pending": {
+          "type": "boolean"
         }
       },
       "additionalProperties": false,
@@ -809,6 +815,9 @@
         },
         "target": {
           "type": "string"
+        },
+        "cancel_pending": {
+          "type": "boolean"
         }
       },
       "additionalProperties": false,

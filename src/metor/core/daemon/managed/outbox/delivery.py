@@ -4,6 +4,7 @@ import base64
 import json
 import socket
 import threading
+from functools import partial
 from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple
 
 from metor.core.api import (
@@ -26,8 +27,14 @@ from metor.data import (
 from metor.data.blob import BlobLifecycle, BlobStore
 
 # Local Package Imports
-from ..network import StateTracker, TcpStreamReader
+from ..network import StateTracker
 from .tunnel import DropTunnelManager
+from .voice import (
+    DropDeliveryCancelled,
+    DropResponseReader,
+    VoiceDropSender,
+    is_expected_voice_commit_line,
+)
 
 if TYPE_CHECKING:
     from metor.data.profile import Config
@@ -65,26 +72,6 @@ def is_expected_ack_line(msg_id: str, ack_line: Optional[str]) -> bool:
     parts: list[str] = ack_line.strip().split()
     return (
         len(parts) == 2 and parts[0] == TorCommand.DROP_ACK.value and parts[1] == msg_id
-    )
-
-
-def is_expected_voice_commit_line(msg_id: str, ack_line: Optional[str]) -> bool:
-    """Validates a durable Voice completion acknowledgement.
-
-    Args:
-        msg_id (str): Logical Voice identity awaiting confirmation.
-        ack_line (Optional[str]): Raw newline-delimited peer frame.
-
-    Returns:
-        bool: True only for a matching terminal Voice completion frame.
-    """
-    if ack_line is None:
-        return False
-    parts = ack_line.strip().split()
-    return (
-        len(parts) == 2
-        and parts[0] == TorCommand.VOICE_COMMIT_ACK.value
-        and parts[1] == msg_id
     )
 
 
@@ -151,6 +138,7 @@ class DropDelivery:
         self._stop_flag: threading.Event = stop_flag
         self._config: 'Config' = config
         self._blobs = blob_store
+        self._voice_sender = VoiceDropSender(state, blob_store)
         self._operation_lock = operation_lock or threading.RLock()
 
     def process_pending(self) -> None:
@@ -178,9 +166,10 @@ class DropDelivery:
         Returns:
             None
         """
-        if self._reuse_session(onion) and all(
-            row[2] == ContentType.TEXT.value for row in messages
-        ):
+        messages = [row for row in messages if self._is_pending(row)]
+        if not messages:
+            return
+        if self._reuse_session(onion):
             self.send_over_session(onion, messages)
             return
 
@@ -197,19 +186,25 @@ class DropDelivery:
 
         tunnel = self._tunnels.acquire(onion)
         if tunnel is None:
-            self._log_tunnel_failure(onion)
+            with self._operation_lock:
+                if any(self._is_pending(row) for row in messages):
+                    self._log_tunnel_failure(onion)
             return
         conn, stream = tunnel
 
         try:
             conn.settimeout(self._config.get_float(SettingKey.STREAM_IDLE_TIMEOUT))
             for row in messages:
+                if not self._is_pending(row):
+                    continue
                 db_id, _, content_type, payload, msg_id, timestamp = row
                 try:
-                    early_ack = self._send_drop_row(conn, stream, row)
+                    early_ack = self._send_drop_row(
+                        conn, stream, row, partial(self._is_pending, row)
+                    )
                     self._tunnels.touch(onion, conn, stream)
                     ack_line: Optional[str] = early_ack or stream.read_line()
-                    if self._handle_rejection(onion, msg_id, ack_line):
+                    if self._handle_rejection(row, ack_line):
                         self._tunnels.close(onion)
                         break
                     expected_ack = (
@@ -228,8 +223,14 @@ class DropDelivery:
                         timestamp,
                         transport='tunnel',
                     )
+                except DropDeliveryCancelled:
+                    self._tunnels.close(onion)
+                    break
                 except Exception:
-                    self._log_delivery_failure(onion, 'Drop delivery failed.')
+                    if not self._is_pending(row):
+                        self._tunnels.close(onion)
+                        break
+                    self._log_delivery_failure(onion, 'Drop delivery failed.', row=row)
                     self._tunnels.close(onion)
                     break
 
@@ -243,7 +244,9 @@ class DropDelivery:
             ):
                 self._tunnels.close(onion)
         except Exception:
-            self._log_delivery_failure(onion, 'Drop delivery failed.')
+            with self._operation_lock:
+                if any(self._is_pending(row) for row in messages):
+                    self._log_delivery_failure(onion, 'Drop delivery failed.')
             self._tunnels.close(onion)
 
     def send_single_drop(self, onion: str, row: OutboxRow) -> None:
@@ -256,22 +259,28 @@ class DropDelivery:
         Returns:
             None
         """
-        if self._reuse_session(onion) and row[2] == ContentType.TEXT.value:
+        if not self._is_pending(row):
+            return
+        if self._reuse_session(onion):
             self.send_over_session(onion, [row])
             return
 
         tunnel = self._tunnels.establish(onion)
         if tunnel is None:
-            self._log_tunnel_failure(onion)
+            with self._operation_lock:
+                if self._is_pending(row):
+                    self._log_tunnel_failure(onion)
             return
         conn, stream = tunnel
         db_id, _, content_type, payload, msg_id, timestamp = row
 
         try:
             conn.settimeout(self._config.get_float(SettingKey.STREAM_IDLE_TIMEOUT))
-            early_ack = self._send_drop_row(conn, stream, row)
+            early_ack = self._send_drop_row(
+                conn, stream, row, partial(self._is_pending, row)
+            )
             ack_line: Optional[str] = early_ack or stream.read_line()
-            if self._handle_rejection(onion, msg_id, ack_line):
+            if self._handle_rejection(row, ack_line):
                 return
             expected_ack = (
                 is_expected_voice_commit_line(msg_id, ack_line)
@@ -289,8 +298,11 @@ class DropDelivery:
                 timestamp,
                 transport='direct',
             )
+        except DropDeliveryCancelled:
+            pass
         except Exception:
-            self._log_delivery_failure(onion, 'Drop delivery failed.')
+            if self._is_pending(row):
+                self._log_delivery_failure(onion, 'Drop delivery failed.', row=row)
         finally:
             try:
                 conn.close()
@@ -298,162 +310,117 @@ class DropDelivery:
                 pass
 
     def send_over_session(self, onion: str, messages: List[OutboxRow]) -> None:
-        """Writes pending drops to an active session for receiver-owned ACKs.
+        """Routes pending Drops over Live with sole receiver-owned socket reads.
 
-        Args:
-            onion (str): The target onion identity.
-            messages (List[OutboxRow]): The grouped pending rows.
-
-        Returns:
-            None
+        Voice uses a bounded transfer lease and waits for per-chunk and terminal
+        responses. Text retains its asynchronous receiver-owned ACK handling.
+        Failed attempts leave durable rows pending for the next worker pass.
         """
         conn: Optional[socket.socket] = self._state.get_connection(onion)
         if conn is None:
             return
+        self._tunnels.close(onion)
         for row in messages:
-            if self._stop_flag.is_set():
+            if (
+                self._stop_flag.is_set()
+                or self._state.get_connection(onion) is not conn
+            ):
                 return
-            _, _, _, payload, msg_id, timestamp = row
+            if not self._is_pending(row):
+                continue
+            db_id, _, content_type, payload, msg_id, timestamp = row
+            if content_type == ContentType.TEXT.value:
+                try:
+                    self._state.send_frame(
+                        conn,
+                        build_drop_message(payload, msg_id, timestamp).encode('utf-8'),
+                        self._row_claim(
+                            row, lambda: self._state.get_connection(onion) is conn
+                        ),
+                    )
+                except Exception:
+                    return
+                continue
+            transfer = None
             try:
-                self._state.send_frame(
-                    conn, build_drop_message(payload, msg_id, timestamp).encode('utf-8')
+                transfer = self._state.begin_drop_transfer(
+                    onion,
+                    conn,
+                    msg_id,
+                    self._config.get_float(SettingKey.STREAM_IDLE_TIMEOUT),
+                    self._stop_flag,
+                    partial(self._is_pending, row),
                 )
-            except Exception:
+                early_ack = self._send_drop_row(
+                    conn,
+                    transfer,
+                    row,
+                    self._row_claim(
+                        row,
+                        partial(self._state.is_drop_transfer_current, conn, transfer),
+                    ),
+                )
+                ack_line = early_ack or transfer.read_line()
+                if self._handle_rejection(row, ack_line):
+                    return
+                if not is_expected_voice_commit_line(msg_id, ack_line):
+                    raise ConnectionError(
+                        'Live Drop completion acknowledgement missing.'
+                    )
+                self._finalize_delivery(
+                    db_id,
+                    onion,
+                    content_type,
+                    payload,
+                    msg_id,
+                    timestamp,
+                    transport='session',
+                )
+            except DropDeliveryCancelled:
                 return
+            except Exception:
+                if self._is_pending(row):
+                    self._log_delivery_failure(onion, 'Drop delivery failed.', row=row)
+                return
+            finally:
+                if transfer is not None:
+                    self._state.finish_drop_transfer(conn, transfer)
 
     def _send_drop_row(
         self,
         conn: socket.socket,
-        stream: TcpStreamReader,
+        stream: DropResponseReader,
         row: OutboxRow,
+        claim: Optional[Callable[[], bool]] = None,
     ) -> Optional[str]:
-        """Sends one text or bounded resumable Voice DROP, leaving final ACK unread.
-
-        Args:
-            conn (socket.socket): The conn input.
-            stream (TcpStreamReader): The stream input.
-            row (OutboxRow): The row input.
-
-        Returns:
-            Optional[str]: The resulting value.
-        """
+        """Sends one text or resumable Voice Drop through its response owner."""
         _, _, content_type, payload, msg_id, timestamp = row
         if content_type == ContentType.TEXT.value:
-            self._state.send_frame(
-                conn, build_drop_message(payload, msg_id, timestamp).encode('utf-8')
-            )
-            return None
-        if content_type != ContentType.VOICE.value or self._blobs is None:
-            raise ValueError('Unsupported DROP content type.')
-        metadata = json.loads(payload)
-        if not isinstance(metadata, dict):
-            raise ValueError('Invalid Voice DROP metadata.')
-        codec = str(metadata['codec'])
-        chunk_ids = metadata.get('chunk_ids')
-        size_bytes = metadata.get('size_bytes')
-        if (
-            not isinstance(chunk_ids, list)
-            or any(not isinstance(chunk_id, str) for chunk_id in chunk_ids)
-            or type(size_bytes) is not int
-            or size_bytes < 0
-        ):
-            raise ValueError('Invalid segmented Voice DROP metadata.')
-        begin: Dict[str, JsonValue] = {
-            'id': msg_id,
-            'codec': codec,
-            'timestamp': timestamp,
-        }
-        self._state.send_frame(
-            conn, self._voice_frame(TorCommand.DROP_VOICE_BEGIN, begin)
-        )
-        resume_line = stream.read_line()
-        if resume_line is not None and is_expected_voice_commit_line(
-            msg_id, resume_line
-        ):
-            return resume_line
-        offset = self._parse_voice_offset(msg_id, resume_line, size_bytes)
-        stored_offset = 0
-        for chunk_id in chunk_ids:
-            chunk = self._blobs.read(chunk_id, BlobLifecycle.PERSISTENT)
-            chunk_end = stored_offset + len(chunk)
-            if offset >= chunk_end:
-                stored_offset = chunk_end
-                continue
-            if offset < stored_offset:
-                raise ConnectionError('Voice DROP resume offset is not contiguous.')
-            chunk = chunk[offset - stored_offset :]
-            previous_offset = offset
+            if claim is not None and not claim():
+                raise DropDeliveryCancelled('Text Drop delivery was cancelled.')
             self._state.send_frame(
                 conn,
-                self._voice_frame(
-                    TorCommand.DROP_VOICE_CHUNK,
-                    {
-                        'id': msg_id,
-                        'offset': offset,
-                        'data': base64.b64encode(chunk).decode('ascii'),
-                    },
-                ),
+                build_drop_message(payload, msg_id, timestamp).encode('utf-8'),
+                claim,
             )
-            offset = self._parse_voice_offset(msg_id, stream.read_line(), size_bytes)
-            if offset <= previous_offset:
-                raise ConnectionError('Voice DROP acknowledgement did not advance.')
-            stored_offset = chunk_end
-        if offset != size_bytes:
-            raise ConnectionError('Voice DROP retained size does not match metadata.')
-        self._state.send_frame(
-            conn,
-            self._voice_frame(
-                TorCommand.DROP_VOICE_END,
-                {
-                    'id': msg_id,
-                    'size': size_bytes,
-                    'duration_ms': metadata.get('duration_ms'),
-                },
-            ),
-        )
-        return None
+            return None
+        if content_type != ContentType.VOICE.value:
+            raise ValueError('Unsupported DROP content type.')
+        return self._voice_sender.send(conn, stream, payload, msg_id, timestamp, claim)
 
-    @staticmethod
-    def _voice_frame(command: TorCommand, payload: Dict[str, JsonValue]) -> bytes:
-        """Encodes one bounded Voice DROP protocol frame.
+    def _is_pending(self, row: OutboxRow) -> bool:
+        """Checks exact durable delivery ownership under the cancellation barrier."""
+        db_id, onion, _, _, msg_id, _ = row
+        with self._operation_lock:
+            return not self._stop_flag.is_set() and self._mm.drop_delivery_pending(
+                db_id, onion, msg_id
+            )
 
-        Args:
-            command (TorCommand): The command input.
-            payload (Dict[str, JsonValue]): The payload input.
-
-        Returns:
-            bytes: The resulting value.
-        """
-        encoded = base64.b64encode(
-            json.dumps(payload, separators=(',', ':')).encode('utf-8')
-        ).decode('ascii')
-        return f'{command.value} {encoded}\n'.encode('ascii')
-
-    @staticmethod
-    def _parse_voice_offset(msg_id: str, line: Optional[str], maximum: int) -> int:
-        """Validates one exact monotonic Voice resume acknowledgement.
-
-        Args:
-            msg_id (str): The msg id input.
-            line (Optional[str]): The line input.
-            maximum (int): The maximum input.
-
-        Returns:
-            int: The resulting integer value.
-        """
-        if line is None:
-            raise ConnectionError('Voice DROP acknowledgement missing.')
-        parts = line.split()
-        if (
-            len(parts) != 3
-            or parts[0] != TorCommand.VOICE_ACK.value
-            or parts[1] != msg_id
-        ):
-            raise ConnectionError('Voice DROP acknowledgement invalid.')
-        offset = int(parts[2])
-        if offset < 0 or offset > maximum:
-            raise ConnectionError('Voice DROP acknowledgement offset invalid.')
-        return offset
+    def _row_claim(
+        self, row: OutboxRow, transport_claim: Callable[[], bool]
+    ) -> Callable[[], bool]:
+        """Binds immutable row identity and transport eligibility to queued frames."""
+        return lambda: transport_claim() and self._is_pending(row)
 
     def is_drop_standby_allowed(self) -> bool:
         """Checks whether cached drop standby may coexist with live state.
@@ -479,14 +446,11 @@ class DropDelivery:
             SettingKey.REUSE_LIVE_FOR_DROPS
         ) and self._state.is_live_active(onion)
 
-    def _handle_rejection(
-        self, onion: str, msg_id: str, response_line: Optional[str]
-    ) -> bool:
+    def _handle_rejection(self, row: OutboxRow, response_line: Optional[str]) -> bool:
         """Projects a peer rejection while leaving the durable row pending.
 
         Args:
-            onion (str): The target onion identity.
-            msg_id (str): The rejected message identifier.
+            row: Exact durable delivery whose response was rejected.
             response_line (Optional[str]): The peer response frame.
 
         Returns:
@@ -496,12 +460,18 @@ class DropDelivery:
             TorCommand.REJECT.value
         ):
             return False
-        reason: Optional[str] = parse_reject_reason(response_line)
-        self._broadcast(DropFailedEvent(msg_id=msg_id, reason=reason))
-        self._log_delivery_failure(
-            onion,
-            'Drop rejected by peer: ' + reason if reason else 'Drop rejected by peer.',
-        )
+        with self._operation_lock:
+            if not self._is_pending(row):
+                return True
+            _, onion, _, _, msg_id, _ = row
+            reason: Optional[str] = parse_reject_reason(response_line)
+            self._broadcast(DropFailedEvent(msg_id=msg_id, reason=reason))
+            self._log_delivery_failure(
+                onion,
+                'Drop rejected by peer: ' + reason
+                if reason
+                else 'Drop rejected by peer.',
+            )
         return True
 
     def _finalize_delivery(
@@ -531,7 +501,9 @@ class DropDelivery:
         if self._stop_flag.is_set():
             return
         with self._operation_lock:
-            if self._stop_flag.is_set():
+            if self._stop_flag.is_set() or not self._mm.drop_delivery_pending(
+                db_id, onion, msg_id
+            ):
                 return
             self._mm.update_message_status(db_id, MessageStatus.DELIVERED)
             if (
@@ -579,19 +551,25 @@ class DropDelivery:
             detail_text='Failed to build Tor circuit',
         )
 
-    def _log_delivery_failure(self, onion: str, detail: str) -> None:
+    def _log_delivery_failure(
+        self, onion: str, detail: str, *, row: Optional[OutboxRow] = None
+    ) -> None:
         """Records one failed drop delivery attempt.
 
         Args:
             onion (str): The target onion identity.
             detail (str): The failure detail.
+            row: Optional exact delivery guard against cancelled attempt feedback.
 
         Returns:
             None
         """
-        self._hm.log_event(
-            HistoryEvent.FAILED,
-            onion,
-            actor=HistoryActor.SYSTEM,
-            detail_text=detail,
-        )
+        with self._operation_lock:
+            if row is not None and not self._is_pending(row):
+                return
+            self._hm.log_event(
+                HistoryEvent.FAILED,
+                onion,
+                actor=HistoryActor.SYSTEM,
+                detail_text=detail,
+            )

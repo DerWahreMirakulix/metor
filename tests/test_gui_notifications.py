@@ -9,6 +9,10 @@ from metor.client import FrontendProfileState
 from metor.client import FrontendLaunchContext
 from metor.core.api import (
     ConnectionRetryEvent,
+    ConnectionActor,
+    ConnectionOrigin,
+    DisconnectedEvent,
+    LiveContextEntry,
     ContactEntry,
     Delivery,
     DropConversationSummaryEntry,
@@ -202,9 +206,30 @@ class NotificationProjectionTests(unittest.TestCase):
     def test_covered_events_do_not_reconstruct_off_history_and_churn_coalesces(
         self,
     ) -> None:
+        self.gui.state.snapshot = RuntimeSnapshotEvent(
+            'fixture',
+            'self',
+            live_contexts=[
+                LiveContextEntry(
+                    'Alice',
+                    'peer',
+                    True,
+                    'reconnect_scheduled',
+                    context_generation=1,
+                    recovery_eligible=True,
+                )
+            ],
+        )
         for revision in (1, 2, 2):
             self.gui.notifications.observe(
-                ConnectionRetryEvent('Alice', 1, 3, onion='peer', revision=revision)
+                ConnectionRetryEvent(
+                    'Alice',
+                    1,
+                    3,
+                    onion='peer',
+                    revision=revision,
+                    origin=ConnectionOrigin.AUTO_RECONNECT,
+                )
             )
         store = self.gui.notifications.store
         self.assertEqual(store.items[(NoticeKind.UNSTABLE, 'peer')].count, 2)
@@ -213,6 +238,30 @@ class NotificationProjectionTests(unittest.TestCase):
             ConnectionRetryEvent('Alice', 2, 3, onion='other', revision=3)
         )
         self.assertNotIn((NoticeKind.UNSTABLE, 'other'), store.items)
+
+    def test_initial_retry_and_cancelled_recovery_have_no_unstable_notice(self) -> None:
+        """Connection setup and a deliberately ended chat do not imply instability."""
+        self.gui.notifications.observe(
+            ConnectionRetryEvent('Alice', 1, 3, onion='peer', revision=1)
+        )
+        store = self.gui.notifications.store
+        self.assertNotIn((NoticeKind.UNSTABLE, 'peer'), store.items)
+        store.put(Notice(NoticeKind.UNSTABLE, 'peer', 'old', actionable=False))
+        self.gui.notifications.observe(
+            DisconnectedEvent('Alice', onion='peer', actor=ConnectionActor.LOCAL)
+        )
+        self.assertNotIn((NoticeKind.UNSTABLE, 'peer'), store.items)
+        self.gui.notifications.observe(
+            ConnectionRetryEvent(
+                'Alice',
+                1,
+                3,
+                onion='peer',
+                revision=2,
+                origin=ConnectionOrigin.AUTO_RECONNECT,
+            )
+        )
+        self.assertNotIn((NoticeKind.UNSTABLE, 'peer'), store.items)
 
 
 if __name__ == '__main__':

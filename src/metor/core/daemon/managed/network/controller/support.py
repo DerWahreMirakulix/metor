@@ -3,7 +3,7 @@
 import socket
 import threading
 import time
-from typing import TYPE_CHECKING, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple
 
 from metor.core.api import (
     AutoReconnectScheduledEvent,
@@ -59,7 +59,7 @@ class ConnectionControllerSupportMixin:
     _stop_flag: threading.Event
     _config: 'Config'
     _receiver: Optional['StreamReceiver']
-    _live_reconnect_queue: List[str]
+    _live_reconnect_queue: List[Tuple[str, Optional[int]]]
     _live_reconnect_lock: threading.Lock
     _operation_lock: threading.RLock
 
@@ -93,18 +93,20 @@ class ConnectionControllerSupportMixin:
         Returns:
             None
         """
+        accepted_generation = self._state.accepted_live_context_generation(onion)
         self._state.clear_retunnel_flow(onion)
-        self._broadcast(
-            create_event(
-                EventType.DISCONNECTED,
-                {
-                    'alias': alias,
-                    'onion': onion,
-                    'actor': ConnectionActor.SYSTEM,
-                    'origin': ConnectionOrigin.RETUNNEL,
-                },
+        if accepted_generation is None:
+            self._broadcast(
+                create_event(
+                    EventType.DISCONNECTED,
+                    {
+                        'alias': alias,
+                        'onion': onion,
+                        'actor': ConnectionActor.SYSTEM,
+                        'origin': ConnectionOrigin.RETUNNEL,
+                    },
+                )
             )
-        )
         params: Dict[str, JsonValue] = {'alias': alias, 'onion': onion}
         params['error_code'] = RuntimeErrorCode.RETUNNEL_RECONNECT_FAILED
         if error:
@@ -133,7 +135,8 @@ class ConnectionControllerSupportMixin:
                 )
             return
 
-        self._convert_unacked_live_to_drops(alias, onion)
+        if accepted_generation is None:
+            self._convert_unacked_live_to_drops(alias, onion)
 
     def _broadcast_retunnel_preserved_failure(
         self,

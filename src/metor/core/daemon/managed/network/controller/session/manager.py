@@ -66,6 +66,8 @@ class ConnectionControllerSessionMixin(ConnectionControllerSupportMixin):
         self,
         target: str,
         origin: ConnectionOrigin = ConnectionOrigin.MANUAL,
+        *,
+        expected_context_generation: Optional[int] = None,
     ) -> None:
         """
         Delegates outbound connection setup to the focused connect helper.
@@ -77,7 +79,12 @@ class ConnectionControllerSessionMixin(ConnectionControllerSupportMixin):
         Returns:
             None
         """
-        connect_to(self, target, origin=origin)
+        connect_to(
+            self,
+            target,
+            origin=origin,
+            expected_context_generation=expected_context_generation,
+        )
 
     def accept(
         self,
@@ -96,7 +103,8 @@ class ConnectionControllerSessionMixin(ConnectionControllerSupportMixin):
         Returns:
             None
         """
-        accept(self, target, origin=origin, expected_pending=expected_pending)
+        with self._operation_lock, self._state.snapshot_barrier():
+            accept(self, target, origin=origin, expected_pending=expected_pending)
 
     def reject(
         self,
@@ -121,15 +129,16 @@ class ConnectionControllerSessionMixin(ConnectionControllerSupportMixin):
         Returns:
             None
         """
-        reject(
-            self,
-            target,
-            initiated_by_self=initiated_by_self,
-            socket_to_close=socket_to_close,
-            origin=origin,
-            reject_intent=reject_intent,
-            expected_pending=expected_pending,
-        )
+        with self._operation_lock, self._state.snapshot_barrier():
+            reject(
+                self,
+                target,
+                initiated_by_self=initiated_by_self,
+                socket_to_close=socket_to_close,
+                origin=origin,
+                reject_intent=reject_intent,
+                expected_pending=expected_pending,
+            )
 
     def disconnect(
         self,

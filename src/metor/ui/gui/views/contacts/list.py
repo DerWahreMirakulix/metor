@@ -12,7 +12,7 @@ from metor.ui.gui.constants import GuiLimits
 from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.runtime.contacts import ContactIntent
 from metor.ui.gui.state import Route
-from metor.ui.gui.widgets import Action, Label, TextField
+from metor.ui.gui.widgets import Action, ActionRow, Label, TextField
 from metor.ui.gui.widgets.context import ContextAction
 from metor.ui.gui.widgets.symbol import IconAction
 from metor.ui.gui.widgets.sheet import ActionSheet, confirm
@@ -38,8 +38,7 @@ class ContactListView(BoxLayout):
         self.route = controller.state.route
         self._key: object = None
         self._rows: dict[str, Action] = {}
-        header = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(12))
-        header.bind(minimum_height=header.setter('height'))
+        header = ActionRow(spacing=dp(12))
         self.back = IconAction(
             'chevron-left', 'Back', self.go_back, pos_hint={'center_y': 0.5}
         )
@@ -66,14 +65,14 @@ class ContactListView(BoxLayout):
         self.rows.bind(minimum_height=self.rows.setter('height'))
         self.scroll.add_widget(self.rows)
         self.add_widget(self.scroll)
-        pages = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(12))
+        pages = ActionRow(spacing=dp(12))
         self.previous = IconAction(
             'chevron-left', 'Previous contact page', partial(self.page, -1)
         )
         self.next = IconAction(
             'chevron-right', 'Next contact page', partial(self.page, 1)
         )
-        self.page_label = Label(role='support', wrap=False)
+        self.page_label = Label(role='support')
         for widget in (self.previous, self.page_label, self.next):
             pages.add_widget(widget)
         self.footer = BoxLayout(
@@ -326,7 +325,7 @@ class ContactListView(BoxLayout):
                 if self.route.view == 'V12'
                 else partial(controller.contacts.select, item.onion, intent)
             )
-            row = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(12))
+            row = ActionRow(spacing=dp(12))
             if selecting:
                 row.add_widget(
                     IconAction(

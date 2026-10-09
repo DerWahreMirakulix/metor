@@ -3,8 +3,10 @@
 from collections.abc import Callable
 from functools import partial
 
+from kivy.clock import Clock
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.scrollview import ScrollView
 
 from metor.core.api import Delivery
 from metor.ui.gui.constants import Geometry
@@ -17,9 +19,8 @@ from metor.ui.gui.widgets.sheet import ActionSheet
 # Local Package Imports
 from .composer import Composer
 from .timeline import Timeline
-from .header import LiveHeaderAction
-from ..audio import show_audio_unavailable
-from ..actions import clear_drops, live_context_actions
+from .header import LiveHeaderAction, PeerHeader
+from ..actions import call_peer, clear_drops, live_context_actions
 
 
 class PeerView(BoxLayout):
@@ -41,73 +42,122 @@ class PeerView(BoxLayout):
         self.controller, self.refresh = controller, refresh
         self._revoked = False
         self.route = controller.state.route
-        self.header = BoxLayout(orientation='vertical', size_hint_y=None, spacing=dp(8))
-        self.header.bind(minimum_height=self.header.setter('height'))
-        title_row = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(12))
-        title_row.add_widget(
-            IconAction('chevron-left', 'Back', self._back, pos_hint={'center_y': 0.5})
+        self.header = PeerHeader(
+            controller,
+            self.route,
+            back=self._back,
+            call=self._call,
+            more=self._menu,
+            start=self._connect,
+            end=self._end_live,
         )
-        self.name = Label('', role='peer', pos_hint={'center_y': 0.5})
-        self.name.bind(
-            height=lambda _widget, height: setattr(
-                title_row, 'height', max(dp(48), height)
-            )
+        self.header_viewport = ScrollView(
+            do_scroll_x=False,
+            do_scroll_y=False,
+            size_hint_y=None,
+            height=dp(Geometry.TARGET),
         )
-        title_row.add_widget(self.name)
-        self.header.add_widget(title_row)
-        self.controls = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(12))
-        self.subtitle = Label(
-            '', role='caption', tone='textSecondary', pos_hint={'center_y': 0.5}
-        )
-        self.subtitle.bind(
-            height=lambda _widget, height: setattr(
-                self.controls, 'height', max(dp(48), height)
-            )
-        )
-        self.controls.add_widget(self.subtitle)
-        self.live_slot = BoxLayout(
-            size_hint_x=None, width=dp(48), pos_hint={'center_y': 0.5}
-        )
-        self.controls.add_widget(self.live_slot)
-        self.call = IconAction('phone', 'Call', self._call, pos_hint={'center_y': 0.5})
-        self.more = IconAction(
-            'ellipsis',
-            'Conversation actions',
-            self._menu,
-            pos_hint={'center_y': 0.5},
-        )
-        self.controls.add_widget(self.call)
-        self.controls.add_widget(self.more)
-        self.header.add_widget(self.controls)
-        self._end_identity: tuple[int | None, str | None] | None = None
-        self.end = LiveHeaderAction(
-            'End Live', 'x', partial(self._end_live, None, None), tone='danger'
-        )
-        self.connect = LiveHeaderAction(
-            'Start Live', 'plus', self._connect, surface='live', tone='onAccent'
-        )
-        self.add_widget(self.header)
-        tabs = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(4))
-        for delivery in (Delivery.DROP, Delivery.LIVE):
-            tabs.add_widget(
-                Action(
-                    delivery.value.upper(),
-                    partial(self._tab, delivery),
-                    surface=delivery.value + 'Surface'
-                    if delivery is self.route.delivery
-                    else 'surface',
-                    tone=delivery.value,
-                )
-            )
-        Action.group(tuple(reversed(tabs.children)))
-        self.add_widget(tabs)
+        self.header_viewport.add_widget(self.header)
+        self._header_geometry: tuple[float, float, bool, float] | None = None
+        self._reveal_header = Clock.create_trigger(self._reveal_identity_row, 0)
+        self.add_widget(self.header_viewport)
         self.timeline = Timeline(controller, self.route, refresh)
         self.add_widget(self.timeline)
         self.retry_recording: Action | None = None
         self._recovery_identity: tuple[int, str] | None = None
         self.composer = Composer(controller, self.route, self._refresh_connection)
+        self.composer.bar.bind(minimum_height=self._measure_composer_bar)
+        self.bind(height=self._measure_regions)
+        self.bind(children=self._measure_regions)
+        self.header.bind(height=self._measure_regions)
+        self.composer.bind(height=self._measure_regions, parent=self._measure_regions)
         self.bind(width=lambda *_args: self.update())
         self.update()
+
+    def _measure_composer_bar(self, *_args: object) -> None:
+        """Reserves the real height of a wrapped PTT or send control within the input row."""
+        self.composer.bar.height = max(dp(64), self.composer.bar.minimum_height)
+
+    def _measure_regions(self, *_args: object) -> None:
+        """Bounds the identity area while reserving readable history and input controls."""
+        if self._revoked:
+            return
+        composer_height = sum(
+            child.height
+            for child in self.children
+            if child not in (self.header_viewport, self.timeline)
+        )
+        self.spacing = dp(
+            8
+            if self.header.height
+            + composer_height
+            + dp(Geometry.TARGET)
+            + dp(16) * (len(self.children) - 1)
+            > self.height
+            else 16
+        )
+        available = (
+            self.height
+            - composer_height
+            - self.spacing * (len(self.children) - 1)
+            - dp(Geometry.TARGET)
+        )
+        self.header_viewport.height = min(
+            self.header.height, max(dp(Geometry.TARGET), available)
+        )
+        self.header_viewport.do_scroll_y = (
+            self.header.height > self.header_viewport.height
+        )
+        if self.header_viewport.do_scroll_y:
+            geometry = (
+                self.header_viewport.height,
+                self.header.height,
+                self.header.expanded_title,
+                self.header.call.height,
+            )
+            if geometry != self._header_geometry:
+                self._header_geometry = geometry
+                self._reveal_header()
+        else:
+            self._header_geometry = None
+            self._reveal_header.cancel()
+
+    def _reveal_identity_row(self, *_args: object) -> None:
+        """Initially reveals complete identity actions after constrained layout settles."""
+        if self._revoked or not self.header_viewport.do_scroll_y:
+            return
+        self.header_viewport.update_from_scroll()
+        self.header_viewport.scroll_to(self.header.call, padding=0, animate=False)
+
+    @property
+    def name(self) -> Label:
+        """Exposes the current peer title owned by the measured header."""
+        return self.header.name
+
+    @property
+    def subtitle(self) -> Label:
+        """Exposes the current connection status beside its explicit control."""
+        return self.header.subtitle
+
+    @property
+    def call(self) -> IconAction:
+        """Exposes the deliberate telephone action beside the peer title."""
+        return self.header.call
+
+    @property
+    def more(self) -> IconAction:
+        """Exposes the conversation menu beside the peer title."""
+        return self.header.more
+
+    @property
+    def connect(self) -> LiveHeaderAction:
+        """Exposes this peer's explicit Start or Open Live action."""
+        return self.header.connect
+
+    @property
+    def end(self) -> LiveHeaderAction:
+        """Exposes the currently qualified Cancel or End Live action."""
+        return self.header.end
 
     def reflow(self, *, wide: bool) -> None:
         """Reflows visual action width while retaining header, focus, drafts and PTT ownership.
@@ -202,11 +252,12 @@ class PeerView(BoxLayout):
             if self.route.delivery is Delivery.DROP:
                 body.add_widget(
                     Action(
-                        'Clear Drops',
+                        'Delete conversation',
                         clear,
                         tone='danger',
                         disabled=controller.state.busy
-                        or controller.drop.pending is not None,
+                        or controller.drop.pending is not None
+                        or not controller.drop.can_clear(peer),
                     )
                 )
             if self.route.delivery is Delivery.LIVE:
@@ -224,6 +275,7 @@ class PeerView(BoxLayout):
             build,
             title=lambda: controller.contacts.alias(peer),
             compact_menu=True,
+            revision=lambda: controller.drop.can_clear(peer),
         )
         sheet.show()
 
@@ -246,26 +298,7 @@ class PeerView(BoxLayout):
         Returns:
             None
         """
-        if not self.controller.calls.ready:
-            show_audio_unavailable(self.controller, self.refresh, purpose='calls')
-        else:
-            self.controller.calls.start(self.route.peer or '')
-            self.refresh()
-
-    def _tab(self, delivery: Delivery) -> None:
-        """Changes the projection with no implicit connect or consume action.
-
-        Args:
-            delivery: Deliberately selected peer projection.
-        Returns:
-            None
-        """
-        self.controller.navigate(
-            Route(
-                'V08' if delivery is Delivery.DROP else 'V09', self.route.peer, delivery
-            )
-        )
-        self.refresh()
+        call_peer(self.controller, self.route.peer or '', self.refresh)
 
     def _connect(self) -> None:
         """Starts LIVE only in response to its explicit action.
@@ -275,7 +308,10 @@ class PeerView(BoxLayout):
         Returns:
             None
         """
-        self.controller.live.start(self.route.peer or '')
+        if self.controller.live.start(self.route.peer or ''):
+            destination = Route('V09', self.route.peer, Delivery.LIVE)
+            if self.controller.state.route != destination:
+                self.controller.navigate(destination)
         self._refresh_connection()
 
     def _end_live(self, context_generation: int | None, attempt_id: str | None) -> None:
@@ -296,117 +332,8 @@ class PeerView(BoxLayout):
         self.refresh()
 
     def _update_connection(self) -> bool:
-        """Updates only connection controls before the next native frame is presented.
-
-        Returns:
-            bool: Whether Core reports a connected or recoverable LIVE context.
-        """
-        controller, state = self.controller, self.controller.state
-        peer, snapshot = self.route.peer, state.snapshot
-        live = (
-            next((item for item in snapshot.live_contexts if item.onion == peer), None)
-            if snapshot
-            else None
-        )
-        starting = controller.live.starting(peer or '')
-        failure = controller.live.failure(peer or '')
-        stopping = controller.live.stop_status(peer or '')
-        active = live is not None and (
-            live.session_state == 'connected' or live.recovery_eligible
-        )
-        connecting = bool(
-            live and live.outbound_attempt_id and not active and not failure
-        )
-        identity = (
-            live.context_generation if live and active else None,
-            live.outbound_attempt_id if live and connecting else None,
-        )
-        if identity != self._end_identity:
-            if self.end.parent is not None:
-                self.end.parent.remove_widget(self.end)
-            self.end = LiveHeaderAction(
-                'Cancel Live' if connecting else 'End Live',
-                'x',
-                partial(self._end_live, *identity),
-                tone='danger',
-            )
-            self._end_identity = identity
-        self.subtitle.text = (
-            'Drop conversation'
-            if self.route.delivery is Delivery.DROP
-            else stopping
-            if stopping
-            else failure
-            if failure
-            else 'Changing route…'
-            if live and live.route_changing
-            else 'Reconnecting…'
-            if live and live.session_state != 'connected' and live.recovery_eligible
-            else 'Connected · Live'
-            if active
-            else 'Connecting Live…'
-            if connecting or starting
-            else 'Incoming Live request'
-            if live and live.session_state == 'pending'
-            else 'No Live connection'
-        )
-        control: LiveHeaderAction | None
-        if self.route.delivery is Delivery.LIVE:
-            control = self.end if active or connecting or stopping else self.connect
-            available = (
-                active
-                or connecting
-                or bool(stopping)
-                or starting
-                or bool(failure)
-                or controller.live.idle(peer or '')
-            )
-            if not available:
-                control = None
-        else:
-            control = None
-        for attached in tuple(self.live_slot.children):
-            if attached is not control:
-                self.live_slot.remove_widget(attached)
-        if control is not None:
-            if control.parent is None:
-                self.live_slot.add_widget(control)
-        else:
-            self.live_slot.width = 0
-        self.end.disabled = self.connect.disabled = (
-            state.busy
-            or controller.client is None
-            or controller.live.pending is not None
-            or bool(stopping)
-        )
-        self.end.disabled = (
-            self.end.disabled
-            or 'qualified_live_control' not in state.capabilities
-            or identity == (None, None)
-        )
-        self.end.label.text = self.end.accessible_name = stopping or (
-            'Cancel Live' if connecting else 'End Live'
-        )
-        self.connect.disabled = (
-            self.connect.disabled
-            or starting
-            or bool(failure)
-            and not controller.live.retry_ready(peer or '')
-        )
-        self.connect.label.text = self.connect.accessible_name = (
-            'Connecting Live…'
-            if starting
-            else 'Retry Live'
-            if failure
-            else 'Reconnect Live'
-            if live
-            else 'Start Live'
-        )
-        self.call.disabled = state.busy
-        if control is not None:
-            control.present(compact=self.width < dp(Geometry.COMPACT_MAX))
-            self.live_slot.width = control.width
-        return active
+        """Projects current connection state through this route's measured header."""
+        return self.header.update()
 
     def update(self) -> None:
         """Reconciles public data in place while retaining composer and scroll ownership."""
@@ -440,6 +367,7 @@ class PeerView(BoxLayout):
             or active
             or draft_owned
             or recording_owned
+            or self.composer.has_pending_footer()
         ):
             if self.composer.parent is None:
                 self.add_widget(self.composer)

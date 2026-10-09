@@ -3,7 +3,7 @@
 from typing import TYPE_CHECKING
 
 from metor.client.platform import OutputPort
-from metor.core.api import Delivery, MessageDirectionCode
+from metor.core.api import Delivery, MessageDirectionCode, VoiceReleasedEvent
 from metor.ui.gui.platform.audio import HeadsetAudio, PcmVoice
 from metor.ui.gui.state.mailbox import Update
 from metor.ui.gui.state.media import MediaCache, PlaybackProgress, PlaybackTarget
@@ -56,6 +56,7 @@ class PlaybackController:
         if self.running:
             return False
         self.audio = HeadsetAudio(output_device=endpoint)
+        self.progress = None
         return True
 
     def target(
@@ -241,6 +242,15 @@ class PlaybackController:
         if update.playback is not None:
             if update.playback.serial == self._serial:
                 self.progress = update.playback
+                if (
+                    update.operation == 'playback-released'
+                    and isinstance(update.event, VoiceReleasedEvent)
+                    and self.controller.transcript.confirm_voice_release(
+                        update.playback.target, update.event
+                    )
+                ):
+                    self.controller.refresh_state()
+                    self.controller.inventory.reset()
             return True
         return update.operation == 'playback-done'
 

@@ -11,7 +11,7 @@ from metor.core.api import Delivery
 from metor.ui.gui.constants import GuiLimits
 from metor.ui.gui.runtime import GuiController, conversation_rows
 from metor.ui.gui.state import Route
-from metor.ui.gui.widgets import Action, Label
+from metor.ui.gui.widgets import Action, ActionRow, Label
 from metor.ui.gui.widgets.symbol import IconAction
 
 # Local Package Imports
@@ -58,7 +58,7 @@ class RootPanel(BoxLayout):
             if view == 'V16':
                 self.notifications = action
         self.add_widget(header)
-        tabs = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(4))
+        tabs = ActionRow(spacing=dp(4))
         self.tabs: dict[Delivery, Action] = {}
         for delivery in (Delivery.DROP, Delivery.LIVE):
             action = Action(
@@ -90,7 +90,7 @@ class RootPanel(BoxLayout):
         self.empty_hint = Label(
             'Choose a saved contact to begin.', tone='textSecondary'
         )
-        self.pager = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(12))
+        self.pager = ActionRow(spacing=dp(12))
         self.previous = Action('Previous', partial(self._page, -1))
         self.next = Action('Next', partial(self._page, 1))
         self.previous.focus_key, self.next.focus_key = (
@@ -99,6 +99,26 @@ class RootPanel(BoxLayout):
         )
         self.pager.add_widget(self.previous)
         self.pager.add_widget(self.next)
+        self.ended_section = BoxLayout(
+            orientation='vertical', spacing=dp(12), size_hint_y=None
+        )
+        self.ended_section.bind(minimum_height=self.ended_section.setter('height'))
+        self.ended_toggle = Action(
+            'Ended Live chats', self._toggle_ended, surface='raised'
+        )
+        self.ended_toggle.focus_key = ('control', 'Ended Live chats')
+        self.ended_section.add_widget(self.ended_toggle)
+        self.ended_column = BoxLayout(
+            orientation='vertical', spacing=dp(12), size_hint_y=None
+        )
+        self.ended_column.bind(minimum_height=self.ended_column.setter('height'))
+        self.ended_pager = ActionRow(spacing=dp(12))
+        self.ended_previous = Action('Previous', partial(self._ended_page, -1))
+        self.ended_next = Action('Next', partial(self._ended_page, 1))
+        self.ended_previous.focus_key = ('control', 'Previous ended Live chats')
+        self.ended_next.focus_key = ('control', 'Next ended Live chats')
+        self.ended_pager.add_widget(self.ended_previous)
+        self.ended_pager.add_widget(self.ended_next)
         self.new = Action(
             'New Drop' if self.delivery is Delivery.DROP else 'Start Live',
             partial(navigate, Route('V11', delivery=self.delivery)),
@@ -119,6 +139,19 @@ class RootPanel(BoxLayout):
         """
         state = self.controller.state
         state.root_pages[self.delivery] = state.root_pages.get(self.delivery, 0) + delta
+        self.refresh()
+
+    def _toggle_ended(self) -> None:
+        """Expands retained ended chats without sending, consuming, or reconnecting."""
+        state = self.controller.state
+        state.ended_live_expanded = not state.ended_live_expanded
+        self.update()
+        self.refresh()
+
+    def _ended_page(self, delta: int) -> None:
+        """Pages the ended section independently of current Live connections."""
+        self.controller.state.ended_live_page += delta
+        self.update()
         self.refresh()
 
     def update(self) -> None:
@@ -181,6 +214,43 @@ class RootPanel(BoxLayout):
             + (', unseen activity' if unseen else '')
         )
         rows = conversation_rows(self.controller, self.delivery)
+        ended = [entry for entry in rows if entry.ended]
+        rows = [entry for entry in rows if not entry.ended]
+        expanded = bool(ended) and state.ended_live_expanded
+        ended_page = min(
+            max(0, state.ended_live_page),
+            max(0, (len(ended) - 1) // GuiLimits.PAGE_ITEMS),
+        )
+        state.ended_live_page = ended_page
+        ended_entries = (
+            ended[
+                ended_page * GuiLimits.PAGE_ITEMS : (ended_page + 1)
+                * GuiLimits.PAGE_ITEMS
+            ]
+            if expanded
+            else []
+        )
+        self.ended_toggle.label.text = f'Ended Live chats ({len(ended)})'
+        self.ended_toggle.accessible_name = self.ended_toggle.label.text + (
+            ', expanded' if expanded else ', collapsed'
+        )
+        if ended and self.ended_section.parent is None:
+            self.column.add_widget(self.ended_section, index=0)
+        elif not ended and self.ended_section.parent is not None:
+            self.column.remove_widget(self.ended_section)
+        if expanded and self.ended_column.parent is None:
+            self.ended_section.add_widget(self.ended_column)
+        elif not expanded and self.ended_column.parent is not None:
+            self.ended_section.remove_widget(self.ended_column)
+        if expanded and len(ended) > GuiLimits.PAGE_ITEMS:
+            if self.ended_pager.parent is None:
+                self.ended_section.add_widget(self.ended_pager)
+            self.ended_previous.disabled = ended_page == 0
+            self.ended_next.disabled = (ended_page + 1) * GuiLimits.PAGE_ITEMS >= len(
+                ended
+            )
+        elif self.ended_pager.parent is not None:
+            self.ended_section.remove_widget(self.ended_pager)
         page = min(
             state.root_pages.get(self.delivery, 0),
             max(0, (len(rows) - 1) // GuiLimits.PAGE_ITEMS),
@@ -191,15 +261,17 @@ class RootPanel(BoxLayout):
             for placeholder in (self.empty, self.empty_hint):
                 if placeholder.parent is not None:
                     self.column.remove_widget(placeholder)
-        identities = {entry.peer for entry in entries}
+        visible_entries = entries + ended_entries
+        identities = {entry.peer for entry in visible_entries}
         for peer in tuple(self.rows):
             if peer not in identities:
                 removed = self.rows.pop(peer)
                 for control in removed.walk(restrict=True):
                     if isinstance(control, Action):
                         control.focus = False
-                self.column.remove_widget(removed)
-        for entry in entries:
+                if removed.parent is not None:
+                    removed.parent.remove_widget(removed)
+        for entry in visible_entries:
             row = self.rows.get(entry.peer)
             if row is None:
                 row = RootRow(self.controller, entry, self.navigate, self.refresh)
@@ -209,15 +281,29 @@ class RootPanel(BoxLayout):
             row.select(state.route)
         for index, entry in enumerate(reversed(entries)):
             row = self.rows[entry.peer]
+            index += int(self.ended_section.parent is self.column)
             if row.parent is not self.column:
+                if row.parent is not None:
+                    row.parent.remove_widget(row)
                 self.column.add_widget(row, index=index)
             elif self.column.children.index(row) != index:
                 self.column.remove_widget(row)
                 self.column.add_widget(row, index=index)
-        Action.group(tuple(self.rows[entry.peer].action for entry in entries))
+        for index, entry in enumerate(reversed(ended_entries)):
+            row = self.rows[entry.peer]
+            if row.parent is not self.ended_column:
+                if row.parent is not None:
+                    row.parent.remove_widget(row)
+                self.ended_column.add_widget(row, index=index)
+            elif self.ended_column.children.index(row) != index:
+                self.ended_column.remove_widget(row)
+                self.ended_column.add_widget(row, index=index)
+        Action.group(tuple(self.rows[entry.peer].action for entry in visible_entries))
         for placeholder in (self.empty, self.empty_hint):
             if not entries and placeholder.parent is None:
-                self.column.add_widget(placeholder)
+                self.column.add_widget(
+                    placeholder, index=int(self.ended_section.parent is self.column)
+                )
             elif entries and placeholder.parent is not None:
                 self.column.remove_widget(placeholder)
         if len(rows) > GuiLimits.PAGE_ITEMS:
