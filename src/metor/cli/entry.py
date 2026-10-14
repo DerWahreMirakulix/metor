@@ -23,6 +23,7 @@ from metor.cli.dispatcher import CliDispatcher
 from metor.cli.handlers import CommandHandlers
 from metor.cli.help import Help
 from metor.cli.parser import CliParser
+from metor.cli.streams import configure_redirected_output
 from metor.cli.theme import Theme
 from metor.versioning import APP_VERSION
 from metor.application import initialize_runtime_environment
@@ -41,6 +42,9 @@ def run_cli(argv: List[str]) -> int:
     Returns:
         int: The process exit code.
     """
+    if not configure_redirected_output():
+        return 1
+
     args: argparse.Namespace
     extra: List[str]
     args, extra = CliParser.parse(argv)

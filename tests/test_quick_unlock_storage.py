@@ -1,6 +1,9 @@
 """Credential atomic replacement and profile lifecycle protection compatibility."""
 
 import hmac
+import os
+import subprocess
+import sys
 from pathlib import Path
 import unittest
 from unittest.mock import patch
@@ -70,6 +73,101 @@ class QuickUnlockStorageTests(unittest.TestCase):
                     self.assertIsNone(store.metadata())
                 finally:
                     SqlManager.close_connection(profile.paths.get_db_file())
+
+    @unittest.skipIf(os.name == 'nt', 'POSIX FIFO read-boundary regression.')
+    def test_metadata_rejects_fifo_without_blocking(self) -> None:
+        """Malformed local storage cannot indefinitely occupy an auth worker."""
+        with PrivateTemporaryDirectory() as directory:
+            path = Path(directory) / 'pin.json'
+            getattr(os, 'mkfifo')(path, 0o600)
+            child = subprocess.run(
+                [
+                    sys.executable,
+                    '-c',
+                    'from pathlib import Path; import sys; '
+                    'from metor.core.daemon.managed.quick_unlock import '
+                    'QuickUnlockStore, QuickUnlockStorageError\n'
+                    'try: QuickUnlockStore(Path(sys.argv[1])).metadata()\n'
+                    'except QuickUnlockStorageError: sys.exit(0)\n'
+                    'sys.exit(1)\n',
+                    str(path),
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=Constants.DEFAULT_IPC_TIMEOUT,
+                check=False,
+            )
+            self.assertEqual(child.returncode, 0)
+            self.assertTrue(path.exists())
+
+    @unittest.skipIf(os.name == 'nt', 'POSIX replacement read-boundary regression.')
+    def test_metadata_rejects_replacement_before_read_without_blocking(self) -> None:
+        """Validation cannot be raced with a FIFO, alias or unsafe file permissions."""
+        for replacement in ('fifo', 'symlink', 'hardlink', 'public-file'):
+            with self.subTest(replacement=replacement):
+                child = subprocess.run(
+                    [
+                        sys.executable,
+                        '-c',
+                        'import sys; sys.path.insert(0, sys.argv[1]); '
+                        'from test_quick_unlock_storage import QuickUnlockStorageTests; '
+                        'QuickUnlockStorageTests()._assert_replacement_rejected(sys.argv[2])',
+                        str(Path(__file__).parent),
+                        replacement,
+                    ],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    timeout=Constants.DEFAULT_IPC_TIMEOUT,
+                    check=False,
+                )
+                self.assertEqual(child.returncode, 0, child.stdout[-4096:])
+
+    def _assert_replacement_rejected(self, replacement: str) -> None:
+        """Run one actual leaf replacement in a child with a parent-owned deadline."""
+        with PrivateTemporaryDirectory() as directory:
+            root = Path(directory)
+            path = root / 'pin.json'
+            store = QuickUnlockStore(path)
+            original_open = os.open
+            store.configure('01' * 16, '02' * 32)
+            original = path.read_bytes()
+            saved = root / 'saved'
+            swapped = False
+
+            def swap_before_open(
+                target: object, flags: int, *args: object, **kwargs: object
+            ) -> int:
+                """Replace the exact leaf after validation at the kernel-open boundary."""
+                nonlocal swapped
+                if target == path and not swapped:
+                    swapped = True
+                    path.replace(saved)
+                    if replacement == 'fifo':
+                        getattr(os, 'mkfifo')(path, 0o600)
+                    elif replacement == 'symlink':
+                        path.symlink_to(saved)
+                    elif replacement == 'hardlink':
+                        os.link(saved, path)
+                    else:
+                        path.write_bytes(saved.read_bytes())
+                        path.chmod(0o644)
+                return original_open(target, flags, *args, **kwargs)  # type: ignore[arg-type]
+
+            try:
+                with (
+                    patch(
+                        'metor.core.daemon.managed.quick_unlock.os.open',
+                        side_effect=swap_before_open,
+                    ),
+                    self.assertRaises(QuickUnlockStorageError),
+                ):
+                    store.metadata()
+                self.assertTrue(swapped)
+                self.assertEqual(saved.read_bytes(), original)
+            finally:
+                path.unlink(missing_ok=True)
+                saved.unlink(missing_ok=True)
 
     def test_private_exclusive_output_preserves_existing_entry(self) -> None:
         """A random-name collision cannot modify contents, ACLs, or file identity."""

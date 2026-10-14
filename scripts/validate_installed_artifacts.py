@@ -317,6 +317,7 @@ def run_acceptance(
             expected: int = 0,
             extra_environment: dict[str, str] | None = None,
             timeout_seconds: int = _CONSUMER_COMMAND_TIMEOUT_SEC,
+            creation_flags: int = 0,
         ) -> str:
             command_environment = dict(environment)
             if extra_environment is not None:
@@ -329,6 +330,7 @@ def run_acceptance(
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 timeout=timeout_seconds,
+                creationflags=creation_flags,
             )
             print(result.stdout, end='')
             if result.returncode != expected:
@@ -546,7 +548,13 @@ py-modules = ["closure_fake"]
                 / 'tests'
                 / 'gui_windows_process_chain.py'
             )
-            output = run([str(executable), '-I', str(entrypoint_probe)])
+            # Give this native fixture its own visible terminal. Hosted runners
+            # can inherit a console attachment with no usable window; that is
+            # not the terminal boundary the process-chain check must exercise.
+            output = run(
+                [str(executable), '-I', str(entrypoint_probe)],
+                creation_flags=int(getattr(subprocess, 'CREATE_NEW_CONSOLE')),
+            )
             if 'WINDOWS_INSTALLED_GUI_ENTRYPOINTS_OK' not in output:
                 raise RuntimeError('Windows GUI entry-point acceptance failed.')
         install('metor-ui-terminal')

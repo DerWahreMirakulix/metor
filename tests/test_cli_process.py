@@ -212,14 +212,16 @@ class CliProcessTests(unittest.TestCase):
     ) -> None:
         """ACP and UTF-8 process defaults must agree on the same Unicode credential."""
         password = '  über-disposable-pipe-secret  '
+        profile_name = 'PipeÜberλ'
         self.environment['PYTHONIOENCODING'] = 'cp1252'
         created = self.run_cli(
-            'profiles', 'add', 'PipeInput', input_text=f'{password}\n{password}\n'
+            'profiles', 'add', profile_name, input_text=f'{password}\n{password}\n'
         )
         self.assertEqual(created.returncode, 0)
+        self.assertIn(profile_name, created.stdout)
         self.environment['PYTHONIOENCODING'] = 'utf-8'
         reopened = self.run_cli(
-            '-p', 'PipeInput', 'contacts', 'list', input_text=password + '\n'
+            '-p', profile_name, 'contacts', 'list', input_text=password + '\n'
         )
         self.assertEqual(reopened.returncode, 0)
         self.assertNotIn('Invalid password', reopened.stdout)

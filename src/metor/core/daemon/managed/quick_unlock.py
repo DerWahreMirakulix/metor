@@ -7,7 +7,7 @@ import os
 import stat
 import secrets
 from pathlib import Path
-from typing import Optional
+from typing import BinaryIO, Optional
 
 from metor.core.auth import (
     PIN_SALT_BYTES,
@@ -127,11 +127,14 @@ class QuickUnlockStore:
         self._validate_protection(self._path.parent, directory=True)
         self._validate_protection(self._path, directory=False)
         try:
-            if self._path.stat().st_size > Constants.QUICK_UNLOCK_METADATA_MAX_BYTES:
-                raise QuickUnlockStorageError(
-                    'Quick-unlock credential metadata exceeds its size limit.'
-                )
-            with self._path.open('rb') as handle:
+            with self._open_metadata() as handle:
+                if (
+                    os.fstat(handle.fileno()).st_size
+                    > Constants.QUICK_UNLOCK_METADATA_MAX_BYTES
+                ):
+                    raise QuickUnlockStorageError(
+                        'Quick-unlock credential metadata exceeds its size limit.'
+                    )
                 payload = handle.read(Constants.QUICK_UNLOCK_METADATA_MAX_BYTES + 1)
             if len(payload) > Constants.QUICK_UNLOCK_METADATA_MAX_BYTES:
                 raise QuickUnlockStorageError(
@@ -165,6 +168,30 @@ class QuickUnlockStore:
                 'Invalid quick-unlock credential material.'
             ) from exc
         return salt, verifier
+
+    def _open_metadata(self) -> BinaryIO:
+        """Opens the bounded credential read without blocking on a replaced POSIX leaf.
+
+        The opened POSIX descriptor is checked again because the entry can change
+        after path validation. No-follow and nonblocking open reject links and
+        allow special-file refusal before any read occurs.
+        """
+        if os.name == 'nt':
+            return self._path.open('rb')
+        no_follow = getattr(os, 'O_NOFOLLOW', None)
+        nonblock = getattr(os, 'O_NONBLOCK', None)
+        if no_follow is None or nonblock is None:
+            raise OSError('Safe credential read flags are unavailable.')
+        descriptor = os.open(
+            self._path,
+            os.O_RDONLY | no_follow | nonblock | getattr(os, 'O_CLOEXEC', 0),
+        )
+        try:
+            self._validate_posix_status(os.fstat(descriptor), directory=False)
+            return os.fdopen(descriptor, 'rb')
+        except BaseException:
+            os.close(descriptor)
+            raise
 
     def verify(self, challenge_hex: str, proof: str) -> bool:
         """Verifies a one-use PIN HMAC proof in constant time.
@@ -251,7 +278,21 @@ class QuickUnlockStore:
         if os.name == 'nt':
             QuickUnlockStore._validate_windows_acl(path)
             return
-        status = path.stat(follow_symlinks=False)
+        QuickUnlockStore._validate_posix_status(
+            path.stat(follow_symlinks=False), directory=directory
+        )
+
+    @staticmethod
+    def _validate_posix_status(status: os.stat_result, *, directory: bool) -> None:
+        """Requires private ownership and a directory or uniquely linked regular file."""
+        if directory:
+            valid_type = stat.S_ISDIR(status.st_mode)
+        else:
+            valid_type = stat.S_ISREG(status.st_mode) and status.st_nlink == 1
+        if not valid_type:
+            raise QuickUnlockStorageError(
+                'Credential path type or link count is invalid.'
+            )
         if status.st_uid != QuickUnlockStore._getuid():
             raise QuickUnlockStorageError('Credential path has an unsafe owner.')
         forbidden = stat.S_IRWXG | stat.S_IRWXO

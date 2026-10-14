@@ -144,7 +144,11 @@ xvfb-run -a --server-args='-screen 0 1280x1024x24' python scripts/validate_insta
 On a native Windows desktop, use the same bundle build command followed by
 `python scripts/validate_installed_artifacts.py closure-bundles --gui-smoke
 --windows-launch`. The latter exercises both installed `metor.exe` and
-`metor-gui.exe` windows and checks for an extra console. It also starts the
+`metor-gui.exe` windows and checks for an extra console. The validator creates
+one visible console for this fixture before launching either entry point, so
+the same terminal-preservation checks apply to interactive shells and hosted
+runners. That console must stay attached and visible throughout; any additional
+console fails acceptance. It also starts the
 installed graphical entry point without standard streams, checks the bounded
 native startup-error dialog, and exercises `--start-daemon` with a disposable
 encrypted profile through native UI Automation. The resulting daemon remains

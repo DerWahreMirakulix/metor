@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 from metor.cli.dispatcher import CliDispatcher
+from metor.cli.entry import run_cli
 from metor.cli.parser import CliParser
 from metor.cli.prompt import PromptAbortedError, prompt_hidden, prompt_text
 from metor.data import ProfileManager, ProfileSecurityMode
@@ -29,6 +30,52 @@ class CliFailureTests(unittest.TestCase):
         """Build the real parser, dispatcher, proxy and output-status boundary."""
         args, extra = CliParser.parse(argv)
         return CliDispatcher(args, extra, self.profile)
+
+    def test_redirected_output_preserves_unicode_as_utf8_bytes(self) -> None:
+        """ACP process defaults cannot corrupt valid output or crash on surrogates."""
+        with (
+            io.TextIOWrapper(io.BytesIO(), encoding='cp1252', newline='\n') as output,
+            io.TextIOWrapper(io.BytesIO(), encoding='cp1252', newline='\n') as errors,
+            patch('sys.stdout', output),
+            patch('sys.stderr', errors),
+        ):
+            self.assertEqual(run_cli(['--version']), 0)
+            for stream in (output, errors):
+                stream.write('Straße λ \ud800\n')
+                stream.flush()
+                self.assertTrue(
+                    stream.buffer.getvalue().endswith(
+                        'Straße λ \\ud800\n'.encode('utf-8')
+                    )
+                )
+
+    def test_terminal_output_keeps_native_encoding(self) -> None:
+        """Console wrappers retain their own encoding and error policy."""
+        with (
+            io.TextIOWrapper(io.BytesIO(), encoding='cp1252') as output,
+            io.TextIOWrapper(io.BytesIO(), encoding='cp1252') as errors,
+            patch.object(output, 'isatty', return_value=True),
+            patch.object(errors, 'isatty', return_value=True),
+            patch('sys.stdout', output),
+            patch('sys.stderr', errors),
+        ):
+            self.assertEqual(run_cli(['--version']), 0)
+            for stream in (output, errors):
+                self.assertEqual(stream.encoding, 'cp1252')
+                self.assertEqual(stream.errors, 'strict')
+
+    def test_unavailable_output_prevents_command_dispatch(self) -> None:
+        """A closed output stream aborts without exposing an exception value."""
+        output = io.TextIOWrapper(io.BytesIO(), encoding='cp1252')
+        output.close()
+        with (
+            patch('sys.stdout', output),
+            patch('sys.stderr', io.StringIO()) as errors,
+            patch.object(CliParser, 'parse') as parse,
+        ):
+            self.assertEqual(run_cli(['profiles', 'add', 'Unreachable']), 1)
+        parse.assert_not_called()
+        self.assertEqual(errors.getvalue(), '')
 
     def test_redirected_secrets_never_use_windows_console_or_echo(self) -> None:
         """Original stdin can be a pipe; Windows getpass must never see it."""

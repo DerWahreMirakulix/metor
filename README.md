@@ -376,8 +376,9 @@ For scripts, use the exit status to distinguish confirmed success (`0`) from
 failure (nonzero). Command failures use `1`; launcher/parser failures may use
 `2`, and an interruption handled at the launcher may use `130`. Cancelling a
 profile migration returns failure without changing the profile. Output is
-human-readable text and may contain ANSI formatting;
-there is no JSON output mode. Use the typed SDK or documented IPC for structured
+human-readable text and may contain ANSI formatting. Redirected stdout and stderr
+use UTF-8 on every supported platform; terminal streams retain their native encoding.
+There is no JSON output mode. Use the typed SDK or documented IPC for structured
 results and stable field names. Put `--` before literal option-looking operands,
 for example `metor send alice -- "--help"` sends the text `--help` instead of
 requesting command help.

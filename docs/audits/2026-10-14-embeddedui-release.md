@@ -109,11 +109,25 @@ separate PowerShell/SYSTEM ACL path. Formats and derivation are unchanged;
 incompatible existing PIN permissions remain unavailable until password unlock
 and explicit PIN setup. Native Windows confirmation of these changes is pending.
 
+The resumed POSIX review found that PIN metadata could be replaced with a FIFO
+between path validation and opening, blocking the credential read. Metadata now
+opens with no-follow and nonblocking flags and validates the actual descriptor
+as a privately owned regular file with one hard link before reading. The size
+check and bounded read apply to that same descriptor; unsafe permissions,
+ownership, links and special files fail closed. Final candidate verification of
+this correction remains pending.
+
 Redirected CLI confirmation and password input now use one strict UTF-8 decoder;
 an actual process round trip verifies Unicode credentials despite a Windows-style
 legacy encoding default. The capture fixture now waits within the existing IPC
 budget instead of a shorter independent deadline, with a delayed-response
 regression proving the distinction.
+
+The next native Windows Unicode case exposed a separate redirected-output
+failure: the host's legacy stdout encoding could reject a valid contact label.
+CLI dispatch now configures redirected stdout and stderr as UTF-8, preserving
+valid Unicode and escaping isolated surrogate code points. Console handling
+remains unchanged. Native Windows validation of this output correction is pending.
 
 The next native CI investigation identified the installed Windows GUI startup
 block in Kivy's OpenGL-version error dialog on the hosted runner. The Windows
@@ -121,8 +135,12 @@ installed-GUI steps in CI and release now select `angle_sdl2` explicitly; produc
 defaults are unchanged. The subsequent
 [native Windows run](https://github.com/DerWahreMirakulix/metor/actions/runs/38545872010/job/115791655204)
 passed installed GUI startup, close and callback-failure cleanup with ANGLE.
-Its later process-chain fixture mishandled a native NULL window handle; that
-fixture correction still requires a new complete Windows acceptance run.
+Its later process-chain fixture mishandled a native NULL window handle. The
+installed-artifact validator now creates an explicit visible console owned by
+the fixture and requires it to remain attached and visible throughout each
+launch. Window discovery includes the installed launcher's interpreter children;
+additional consoles still fail acceptance. These fixture corrections require a
+new complete native Windows acceptance run.
 
 A late security review found that loss of the native OS lock/suspend observer
 did not remain a permanent barrier for the GUI process. The correction adds a
