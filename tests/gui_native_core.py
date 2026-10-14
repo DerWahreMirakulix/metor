@@ -423,6 +423,14 @@ class NativeCoreApp(MetorApp):
             )
         )
 
+    def sent_text_visible(self, text: str, delivery: Delivery) -> bool:
+        """Waits for Core confirmation as well as the immediately drawn send intent."""
+        return (
+            self.entry().text == ''
+            and self.text_visible(text)
+            and not self.controller.text.pending(self.target, delivery)
+        )
+
     def archive(self, client: MetorClient, target: str) -> MessagesDataEvent:
         """Reads confirmed durable rows using a separate public SDK connection."""
         result = client.request(GetMessagesCommand(target), MessagesDataEvent)
@@ -586,7 +594,7 @@ class NativeCoreApp(MetorApp):
         )
         self.add(
             'drop_rejection_retry_accepted_once',
-            lambda: self.entry().text == '' and self.text_visible(REJECTED_DROP),
+            lambda: self.sent_text_visible(REJECTED_DROP, Delivery.DROP),
             self._verify_retried_drop,
         )
         for index, text in enumerate(DROP_TEXTS):
@@ -611,7 +619,7 @@ class NativeCoreApp(MetorApp):
             )
             self.add(
                 f'drop_{index + 1}_visible_without_reentry',
-                lambda value=text: self.entry().text == '' and self.text_visible(value),
+                lambda value=text: self.sent_text_visible(value, Delivery.DROP),
                 lambda current=index: self._verify_drop(current),
             )
         self.add(
@@ -636,7 +644,7 @@ class NativeCoreApp(MetorApp):
         )
         self.add(
             'gui_to_terminal_drop_visible',
-            lambda: self.entry().text == '' and self.text_visible(GUI_TERMINAL_DROP),
+            lambda: self.sent_text_visible(GUI_TERMINAL_DROP, Delivery.DROP),
             self._finish_terminal_peer,
         )
         self.add(
@@ -758,8 +766,7 @@ class NativeCoreApp(MetorApp):
         self.add(
             'live_text_visible',
             lambda: (
-                self.entry().text == ''
-                and self.text_visible(LIVE_TEXT)
+                self.sent_text_visible(LIVE_TEXT, Delivery.LIVE)
                 and len(self.args.peer_events) == 1
             ),
             self._verify_live,
