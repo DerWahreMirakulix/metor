@@ -51,7 +51,8 @@ class RemainingTransportTests(unittest.TestCase):
 
         def claim() -> bool:
             entered.set()
-            return release.wait(5)
+            release.wait()
+            return True
 
         self.state.send_frame(conn, b'prior\n', claim)
         self.assertTrue(entered.wait(2))

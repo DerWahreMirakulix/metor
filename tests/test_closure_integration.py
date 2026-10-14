@@ -186,14 +186,17 @@ class ClosureStreamTests(unittest.TestCase):
             threading.Event(),
             threading.Event(),
         )
+        self.addCleanup(release.set)
 
         def claim() -> bool:
             entered.set()
-            return release.wait(2)
+            release.wait()
+            return True
 
         writer = BoundedSocketWriter(
             left, capacity=8, byte_capacity=1024, on_exit=lambda writer: exited.set()
         )
+        self.addCleanup(writer.close)
         writer.enqueue(b'first\n', claim=claim)
         self.assertTrue(entered.wait(1))
         writer.finish(b'DISCONNECT\n', timeout=1)
@@ -950,10 +953,12 @@ class ClosureDaemonTests(unittest.TestCase):
         onion = self.fixture.receiver_onion
         state.add_active_connection(onion, local)
         entered, release = threading.Event(), threading.Event()
+        self.addCleanup(release.set)
 
         def claimed() -> bool:
             entered.set()
-            return release.wait(2)
+            release.wait()
+            return True
 
         state.send_frame(local, b'prior\n', claimed)
         self.assertTrue(entered.wait(1))

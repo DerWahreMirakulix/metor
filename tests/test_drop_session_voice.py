@@ -493,7 +493,8 @@ class DropSessionVoiceTests(unittest.TestCase):
         def block_writer() -> bool:
             """Pauses the actual socket owner before following frame claims."""
             entered.set()
-            return release.wait(2.0)
+            release.wait()
+            return True
 
         self.sender_state.send_frame(sender, b'/read emission-barrier\n', block_writer)
         self.assertTrue(entered.wait(2.0))

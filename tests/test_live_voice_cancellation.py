@@ -35,9 +35,10 @@ class LiveVoiceCancellationTests(unittest.TestCase):
         self.addCleanup(self.release.set)
 
         def hold_writer() -> bool:
-            """Holds the real emission owner before following Voice frame claims."""
+            """Holds emission until the test or its registered cleanup releases it."""
             self.entered.set()
-            return self.release.wait(2.0)
+            self.release.wait()
+            return True
 
         self.state.send_frame(self.local, b'writer-barrier\n', hold_writer)
         self.assertTrue(self.entered.wait(1.0))
@@ -120,7 +121,9 @@ class LiveVoiceCancellationTests(unittest.TestCase):
         self.assertEqual(self.voice.replay(f.receiver_onion), [])
         self.release.set()
         self.assertTrue(self.state._socket_writers[self.local].flush(1.0))
-        self.assertEqual(TcpStreamReader(self.peer).read_line(), 'writer-barrier')
+        stream = TcpStreamReader(self.peer)
+        self.assertEqual(stream.read_line(), 'writer-barrier')
+        self.assertEqual(stream.get_buffer(), b'')
         self.peer.settimeout(0.1)
         with self.assertRaises(socket.timeout):
             self.peer.recv(1)
