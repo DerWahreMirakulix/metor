@@ -959,8 +959,18 @@ class DocumentationReleaseArchitectureTests(unittest.TestCase):
             encoding='utf-8'
         )
         self.assertIn('uses: ./.github/actions/gui-acceptance', ci_workflow)
+        for native_workflow in (ci_workflow, validation_jobs):
+            windows_step = next(
+                step
+                for step in native_workflow.split('\n      - name:')
+                if 'scripts/validate_installed_artifacts.py' in step
+                and '--windows-launch' in step
+            )
+            self.assertIn("if: runner.os == 'Windows'", windows_step)
+            self.assertIn('KIVY_GL_BACKEND: angle_sdl2', windows_step)
         self.assertIn('tests/gui_native_core.py --width 360', gui_action)
         self.assertIn('tests/gui_native_core.py --width 1180', gui_action)
+        self.assertIn('tests/gui_native_scrolling.py --output', gui_action)
         self.assertIn('tests/gui_stream_pressure.py', gui_action)
         self.assertIn(
             'dbus-run-session -- python tests/gui_native_accessibility.py', gui_action

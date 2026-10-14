@@ -9,7 +9,7 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import cast
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import nacl.pwhash
 
@@ -165,25 +165,21 @@ class SessionAuthContractTests(unittest.TestCase):
             with self.assertRaises(QuickUnlockStorageError):
                 store.metadata()
 
-    def test_windows_acl_validation_rejects_extra_trustee(self) -> None:
-        """R2-T02: effective ACL validation rejects inherited or extra access."""
-        result = Mock()
-        result.returncode = 0
-        result.stdout = (
-            '{"Protected":true,"Current":"S-1-5-21-1","Owner":"S-1-5-21-1","Rules":['
-            '{"Sid":"S-1-5-21-1","Inherited":false,"Type":"Allow",'
-            '"Rights":"FullControl"},'
-            '{"Sid":"S-1-5-18","Inherited":false,"Type":"Allow",'
-            '"Rights":"FullControl"},'
-            '{"Sid":"S-1-1-0","Inherited":false,"Type":"Allow",'
-            '"Rights":"Read"}]}'
-        )
-        with patch(
-            'metor.core.daemon.managed.quick_unlock.subprocess.run',
-            return_value=result,
+    def test_windows_acl_validation_failure_is_typed_without_external_helper(
+        self,
+    ) -> None:
+        """Native policy refusal stays fail-closed without exposing its path or SID."""
+        with (
+            patch(
+                'metor.core.daemon.managed.quick_unlock.validate_private_windows_path',
+                side_effect=PermissionError('private-path-or-trustee'),
+            ) as validate,
+            patch('subprocess.run') as external,
         ):
             with self.assertRaises(QuickUnlockStorageError):
                 QuickUnlockStore._validate_windows_acl(Path('credential'))
+        validate.assert_called_once_with(Path('credential'), directory=False)
+        external.assert_not_called()
 
     def test_restricted_client_enforces_scope_and_pin_password_escalation(self) -> None:
         """Blocks normal access and requires password after three failed PIN proofs."""

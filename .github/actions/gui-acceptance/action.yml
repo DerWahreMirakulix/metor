@@ -30,6 +30,18 @@ runs:
         xvfb-run -a --server-args='-screen 0 1280x1024x24' python tests/gui_native_core.py --width 360 --height 640 --font-scale 1.5 --revision "$METOR_CANDIDATE_REVISION" --result "${RUNNER_TEMP}/gui-core-compact.json" --images "${RUNNER_TEMP}/gui-core-compact-images" > "${RUNNER_TEMP}/gui-core-compact.log" 2>&1
         xvfb-run -a --server-args='-screen 0 1280x1024x24' python tests/gui_native_core.py --width 1180 --height 760 --font-scale 1.5 --revision "$METOR_CANDIDATE_REVISION" --result "${RUNNER_TEMP}/gui-core-wide.json" --images "${RUNNER_TEMP}/gui-core-wide-images" > "${RUNNER_TEMP}/gui-core-wide.log" 2>&1
         python tests/gui_stream_pressure.py --result "${RUNNER_TEMP}/stream-pressure.json" > "${RUNNER_TEMP}/stream-pressure.log" 2>&1
+    - name: Verify native wheel boundaries and pointer dragging at low frame rate
+      shell: bash
+      env:
+        KIVY_WINDOW: sdl2
+        KIVY_CLIPBOARD: dummy
+        LIBGL_ALWAYS_SOFTWARE: "1"
+        SDL_VIDEODRIVER: x11
+      run: |
+        set -euo pipefail
+        timeout --kill-after=5s 60s xvfb-run -a --server-args='-screen 0 1280x1024x24' \
+          python tests/gui_native_scrolling.py --output "${RUNNER_TEMP}/native-scrolling.png" 2>&1 \
+          | tail -c 65536 > "${RUNNER_TEMP}/native-scrolling.log"
     - name: Verify native AT-SPI privacy and actions on an isolated bus
       shell: bash
       env:
@@ -66,6 +78,8 @@ runs:
           ${{ runner.temp }}/readable-controls.log
           ${{ runner.temp }}/device-configuration.png
           ${{ runner.temp }}/device-configuration.log
+          ${{ runner.temp }}/native-scrolling.png
+          ${{ runner.temp }}/native-scrolling.log
           ${{ runner.temp }}/native-accessibility.log
           ${{ runner.temp }}/gui-core-compact*
           ${{ runner.temp }}/gui-core-wide*

@@ -90,7 +90,10 @@ def security_view(
     """
     outer = AnchorLayout(padding=f'{Geometry.EDGE}dp')
     scroll = ScrollView(
-        size_hint=(None, None), width=f'{Geometry.FORM_MAX}dp', do_scroll_x=False
+        size_hint=(None, None),
+        width=f'{Geometry.FORM_MAX}dp',
+        do_scroll_x=False,
+        always_overscroll=False,
     )
 
     def fit_width(*_args: object) -> None:

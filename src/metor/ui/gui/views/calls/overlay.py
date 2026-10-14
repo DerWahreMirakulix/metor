@@ -146,7 +146,7 @@ class CallOverlay(FloatLayout):
         header.add_widget(title)
         header.add_widget(IconAction('x', 'Hide call controls', hide_controls))
         panel.add_widget(header)
-        scroll = ScrollView(do_scroll_x=False)
+        scroll = ScrollView(do_scroll_x=False, always_overscroll=False)
         body = BoxLayout(orientation='vertical', spacing=dp(12), size_hint_y=None)
         body.bind(minimum_height=body.setter('height'))
         if current is not None:

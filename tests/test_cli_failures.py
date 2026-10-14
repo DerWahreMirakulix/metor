@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 
 from metor.cli.dispatcher import CliDispatcher
 from metor.cli.parser import CliParser
-from metor.cli.prompt import PromptAbortedError, prompt_hidden
+from metor.cli.prompt import PromptAbortedError, prompt_hidden, prompt_text
 from metor.data import ProfileManager, ProfileSecurityMode
 from metor.utils import Constants
 
@@ -64,6 +64,62 @@ class CliFailureTests(unittest.TestCase):
         console.assert_called_once_with('Password: ')
         stream.readline.assert_not_called()
         self.assertEqual(output.getvalue(), '')
+
+    def test_confirmation_and_unicode_secrets_share_one_utf8_pipe_decoder(self) -> None:
+        """Windows ACP wrappers cannot prefetch a following UTF-8 password incorrectly."""
+        secret = '  über-λ-secret  '
+        with io.TextIOWrapper(
+            io.BytesIO(f'yes\n{secret}\r\n{secret}\n'.encode('utf-8')),
+            encoding='cp1252',
+        ) as stream:
+            with (
+                patch('sys.stdin', stream),
+                patch('sys.stdout', io.StringIO()) as output,
+                patch('sys.stderr', io.StringIO()) as errors,
+                patch('getpass.getpass', side_effect=AssertionError('console input')),
+            ):
+                self.assertEqual(prompt_text('Confirm: '), 'yes')
+                self.assertEqual(prompt_hidden('Password: '), secret)
+                self.assertEqual(prompt_hidden('Confirm password: '), secret)
+            self.assertEqual(stream.encoding, 'utf-8')
+            self.assertEqual(stream.errors, 'strict')
+            self.assertNotIn(secret, output.getvalue() + errors.getvalue())
+
+    def test_pipe_encoding_errors_abort_without_secret_or_decoder_details(self) -> None:
+        """Invalid bytes and already-decoded foreign input cannot become credentials."""
+        for reader in (prompt_hidden, prompt_text):
+            for payload, read_first in (
+                (b'private-prefix\xff\n', False),
+                ('yes\nüber-secret\n'.encode('utf-8'), True),
+            ):
+                with self.subTest(reader=reader.__name__, read_first=read_first):
+                    with io.TextIOWrapper(
+                        io.BytesIO(payload), encoding='cp1252'
+                    ) as stream:
+                        if read_first:
+                            self.assertEqual(stream.readline(), 'yes\n')
+                        with (
+                            patch('sys.stdin', stream),
+                            patch('sys.stdout', io.StringIO()) as output,
+                            patch('sys.stderr', io.StringIO()) as errors,
+                            self.assertRaises(PromptAbortedError),
+                        ):
+                            reader('Input: ')
+                        text = output.getvalue() + errors.getvalue()
+                        self.assertIn('UTF-8', text)
+                        self.assertNotIn('private-prefix', text)
+                        self.assertNotIn('über-secret', text)
+                        self.assertNotIn('UnicodeDecodeError', text)
+                        self.assertNotIn('Traceback', text)
+
+    def test_already_read_utf8_pipe_keeps_prefetched_password(self) -> None:
+        """A correct decoder is never reconfigured after consuming a prior line."""
+        with io.TextIOWrapper(
+            io.BytesIO('yes\nüber-secret\n'.encode('utf-8')), encoding='utf-8'
+        ) as stream:
+            self.assertEqual(stream.readline(), 'yes\n')
+            with patch('sys.stdin', stream), patch('sys.stderr', io.StringIO()):
+                self.assertEqual(prompt_hidden('Password: '), 'über-secret')
 
     def test_oversized_pipe_secret_aborts_before_confirmation_or_creation(self) -> None:
         """A bounded read cannot turn a truncated prefix or suffix into a password."""

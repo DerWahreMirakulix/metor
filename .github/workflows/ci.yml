@@ -123,6 +123,8 @@ jobs:
       - name: Validate installed consumers and native GUI on Windows
         if: runner.os == 'Windows'
         shell: bash
+        env:
+          KIVY_GL_BACKEND: angle_sdl2
         run: python scripts/validate_installed_artifacts.py closure-bundles --gui-smoke --windows-launch
       - name: Accept native GUI behavior
         if: runner.os == 'Linux'

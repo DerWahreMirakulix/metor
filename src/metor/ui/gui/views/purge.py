@@ -19,7 +19,7 @@ def purge_view(controller: GuiController) -> AnchorLayout:
         AnchorLayout: Full-application covered layout, including the desktop master.
     """
     wrapper = AnchorLayout(padding=f'{Geometry.EDGE}dp')
-    scroll = ScrollView(do_scroll_x=False, size_hint_x=None)
+    scroll = ScrollView(do_scroll_x=False, always_overscroll=False, size_hint_x=None)
 
     def fit_width(*_args: object) -> None:
         """Keep the privacy message inside current density-scaled insets.

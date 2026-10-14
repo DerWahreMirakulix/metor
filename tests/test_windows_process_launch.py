@@ -9,7 +9,6 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
-from metor.core.daemon.managed.quick_unlock import QuickUnlockStore
 from metor.core.tor_windows import launch_tor_without_console
 from metor.utils import Constants
 
@@ -101,24 +100,6 @@ class WindowsProcessLaunchTests(unittest.TestCase):
                     tor_cmd=str(child_path), config=_TOR_CONFIG
                 )
             self.assertEqual(process.wait(timeout=Constants.TOR_KILL_TIMEOUT_SEC), 0)
-
-    def test_windows_acl_helper_suppresses_its_console(self) -> None:
-        """A later PowerShell ACL operation cannot open a separate window."""
-        completed = Mock(returncode=0)
-        with (
-            patch.object(subprocess, 'CREATE_NO_WINDOW', 0x08000000, create=True),
-            patch(
-                'metor.core.daemon.managed.quick_unlock.subprocess.run',
-                return_value=completed,
-            ) as run,
-        ):
-            result = QuickUnlockStore._run_acl_helper(
-                Path('C:/test/credential'), 'Write-Output ok', 'test'
-            )
-        self.assertIs(result, completed)
-        self.assertEqual(run.call_args.kwargs['creationflags'], 0x08000000)
-        self.assertEqual(run.call_args.args[0][0], 'powershell.exe')
-        self.assertNotIn('C:/test/credential', repr(run.call_args.args[0]))
 
 
 if __name__ == '__main__':

@@ -26,7 +26,12 @@ def entry_view(controller: GuiController, refresh: Callable[[], None]) -> Anchor
         AnchorLayout: Centered scrollable authentication composition.
     """
     outer = AnchorLayout(padding='24dp')
-    scroll = ScrollView(size_hint=(None, None), width='400dp', do_scroll_x=False)
+    scroll = ScrollView(
+        size_hint=(None, None),
+        width='400dp',
+        do_scroll_x=False,
+        always_overscroll=False,
+    )
 
     def fit_width(*_args: object) -> None:
         """Keep the form inside its live, density-scaled horizontal padding.

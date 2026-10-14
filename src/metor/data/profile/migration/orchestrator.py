@@ -1,6 +1,5 @@
 """State-machine orchestration for offline profile storage security migration."""
 
-import shutil
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
 
@@ -26,6 +25,7 @@ from metor.data.profile.migration.journal import (
     recover_staged_profile_migration,
     write_migration_journal,
 )
+from metor.data.profile.migration.staging import copy_private_profile_tree
 from metor.data.profile.models import (
     ProfileConfigKey,
     ProfileOperationResult,
@@ -167,7 +167,7 @@ def _migrate_existing_profile(
         close_generation_database(backup_path)
         secure_remove_path(staged_path)
         secure_remove_path(backup_path)
-        shutil.copytree(pm.paths.get_config_dir(), staged_path, symlinks=True)
+        copy_private_profile_tree(pm.paths.get_config_dir(), staged_path)
 
         staged_pm = ProfileManager.for_migration_staging(safe_name, staged_path)
         staged_db_path = staged_pm.paths.get_db_file()

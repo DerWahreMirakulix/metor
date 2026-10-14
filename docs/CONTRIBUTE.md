@@ -158,6 +158,14 @@ behavior. The native rendering and synthetic stream fixtures are explicit CI
 commands outside unittest discovery; they require a working graphical display
 and are not silently skipped.
 
+The hosted Windows CI and release gates select `KIVY_GL_BACKEND=angle_sdl2`
+because the VM's desktop OpenGL context is below Kivy's required version.
+To reproduce that acceptance environment in PowerShell, set
+`$env:KIVY_GL_BACKEND = 'angle_sdl2'` before running the validation command.
+The pinned Windows GUI dependencies include ANGLE. This selection is scoped
+to the native Windows validation steps; installed applications retain Kivy's
+default backend selection.
+
 The complete suite also includes actual CLI subprocess and POSIX Terminal PTY
 tests against disposable encrypted Core runtimes. They verify command outcomes,
 argument rejection, authentication, input editing, asynchronous rendering and

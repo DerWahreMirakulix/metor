@@ -533,7 +533,7 @@ def _exercise(command: list[str], root: Path) -> None:
 
 
 def _exercise_quick_unlock(root: Path) -> None:
-    """Observe the installed ACL helper while it protects disposable data."""
+    """Observe installed native credential protection of disposable data."""
     from metor.core.daemon.managed.quick_unlock import (
         PIN_SALT_BYTES,
         PIN_VERIFIER_BYTES,
@@ -546,7 +546,7 @@ def _exercise_quick_unlock(root: Path) -> None:
     observation_failed = threading.Event()
 
     def observe() -> None:
-        """Record a short-lived helper console during the blocking ACL call."""
+        """Record any console appearing during credential operations."""
         while not stopped.wait(0.05):
             try:
                 appeared.update(_console_windows() - baseline)
@@ -567,7 +567,9 @@ def _exercise_quick_unlock(root: Path) -> None:
     if observation_failed.is_set():
         raise AssertionError('Native console observation failed.')
     if appeared or _console_windows() - baseline:
-        raise AssertionError('Quick-unlock ACL helper opened another console.')
+        raise AssertionError(
+            'Quick-unlock credential operations opened another console.'
+        )
 
 
 def _console_fixture(root: Path) -> Path:

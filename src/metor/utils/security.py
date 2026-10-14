@@ -20,6 +20,7 @@ from metor.utils.windows_acl import (
     apply_private_windows_dacl,
     create_private_windows_directory,
     private_security_attributes,
+    validate_private_windows_dacl,
 )
 
 
@@ -30,6 +31,7 @@ _WINDOWS_WRITE_DAC: int = 0x00040000
 _WINDOWS_FILE_SHARE_READ: int = 0x00000001
 _WINDOWS_FILE_SHARE_WRITE: int = 0x00000002
 _WINDOWS_FILE_SHARE_DELETE: int = 0x00000004
+_WINDOWS_CREATE_NEW: int = 1
 _WINDOWS_OPEN_EXISTING: int = 3
 _WINDOWS_OPEN_ALWAYS: int = 4
 _WINDOWS_FILE_FLAG_OPEN_REPARSE_POINT: int = 0x00200000
@@ -155,6 +157,7 @@ def _open_windows_file(
     creation_disposition: int = _WINDOWS_OPEN_EXISTING,
     *,
     share_delete: bool = True,
+    read_only: bool = False,
 ) -> int | None:
     """Opens one Windows path without traversing a reparse point.
 
@@ -162,6 +165,7 @@ def _open_windows_file(
         file_path (Path): Candidate sensitive file.
         creation_disposition (int): Native create/open disposition.
         share_delete (bool): Whether another process may rename/delete the path while this handle is open.
+        read_only: Request read access only; valid only for existing objects.
 
     Returns:
         int | None: Owned file descriptor, or None when the path is absent.
@@ -200,10 +204,15 @@ def _open_windows_file(
     share_mode = _WINDOWS_FILE_SHARE_READ | _WINDOWS_FILE_SHARE_WRITE
     if share_delete:
         share_mode |= _WINDOWS_FILE_SHARE_DELETE
-    private_creation = creation_disposition == _WINDOWS_OPEN_ALWAYS
-    desired_access = (
-        _WINDOWS_GENERIC_READ | _WINDOWS_GENERIC_WRITE | _WINDOWS_READ_CONTROL
+    private_creation = creation_disposition in (
+        _WINDOWS_CREATE_NEW,
+        _WINDOWS_OPEN_ALWAYS,
     )
+    if read_only and creation_disposition != _WINDOWS_OPEN_EXISTING:
+        raise ValueError('Read-only Windows handles cannot create private files.')
+    desired_access = _WINDOWS_GENERIC_READ | _WINDOWS_READ_CONTROL
+    if not read_only:
+        desired_access |= _WINDOWS_GENERIC_WRITE
     if private_creation:
         desired_access |= _WINDOWS_READ_CONTROL | _WINDOWS_WRITE_DAC
     attributes_context = (
@@ -223,6 +232,10 @@ def _open_windows_file(
         )
     if handle == _WINDOWS_INVALID_HANDLE_VALUE:
         error_code = get_last_error()
+        if creation_disposition == _WINDOWS_CREATE_NEW and error_code in (80, 183):
+            raise FileExistsError(
+                errno.EEXIST, 'Private output already exists.', file_path
+            )
         if error_code in (2, 3):
             return None
         raise OSError(
@@ -253,10 +266,51 @@ def _open_windows_file(
     try:
         open_osfhandle = getattr(msvcrt, 'open_osfhandle')
         binary_flag = getattr(os, 'O_BINARY', 0)
-        return int(open_osfhandle(int(handle), os.O_RDWR | binary_flag))
+        access_flag = os.O_RDONLY if read_only else os.O_RDWR
+        return int(open_osfhandle(int(handle), access_flag | binary_flag))
     except Exception:
         close_handle(handle)
         raise
+
+
+def validate_private_windows_path(file_path: Path, *, directory: bool) -> None:
+    """Checks exact owner-only protection through read-only no-reparse handles.
+
+    Args:
+        file_path: Existing credential file or its protected parent directory.
+        directory: Whether the target must be a directory with inherited child ACEs.
+    Raises:
+        OSError: If the target is absent, linked, unsafe, or not exactly protected.
+    """
+    if os.name != 'nt':
+        raise OSError(
+            errno.ENOTSUP, 'Windows credential ACL inspection is unavailable.'
+        )
+    import msvcrt
+
+    parent_handle, close_parent = _open_windows_directory_handle(file_path.parent)
+    try:
+        if directory:
+            handle, close_handle = _open_windows_directory_handle(file_path)
+            try:
+                validate_private_windows_dacl(handle, directory=True)
+            finally:
+                close_handle(handle)
+            return
+        descriptor = _open_windows_file(file_path, share_delete=False, read_only=True)
+        if descriptor is None:
+            raise FileNotFoundError(file_path)
+        try:
+            opened = os.fstat(descriptor)
+            if not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1:
+                raise PermissionError('Credential is not a unique regular file.')
+            validate_private_windows_dacl(
+                getattr(msvcrt, 'get_osfhandle')(descriptor), directory=False
+            )
+        finally:
+            os.close(descriptor)
+    finally:
+        close_parent(parent_handle)
 
 
 def _open_sensitive_file(file_path: Path) -> int | None:
@@ -601,7 +655,7 @@ def create_private_directory_tree(
 
 @contextmanager
 def open_private_binary_file(
-    file_path: Path, *, append: bool = False
+    file_path: Path, *, append: bool = False, exclusive: bool = False
 ) -> Iterator[BinaryIO]:
     """Opens one private regular output file under a locked anchored parent.
 
@@ -609,6 +663,7 @@ def open_private_binary_file(
         file_path (Path): Exact internal file to create or replace.
         append (bool): Preserve existing data and write at the end of the file.
             The caller serializes writes when sharing an output destination.
+        exclusive (bool): Create a new file; an existing entry is never changed.
 
     Yields:
         BinaryIO: Binary output stream bound to the validated file descriptor.
@@ -622,7 +677,9 @@ def open_private_binary_file(
     if os.name == 'nt':
         parent_handle, close_parent = _open_windows_directory_handle(file_path.parent)
         try:
-            descriptor = _open_windows_file(file_path, _WINDOWS_OPEN_ALWAYS)
+            descriptor = _open_windows_file(
+                file_path, _WINDOWS_CREATE_NEW if exclusive else _WINDOWS_OPEN_ALWAYS
+            )
             if descriptor is None:
                 raise OSError(errno.ENOENT, 'Private output file could not be created.')
             with os.fdopen(descriptor, 'ab' if append else 'wb') as handle:
@@ -658,6 +715,7 @@ def open_private_binary_file(
             | os.O_CREAT
             | nonblock
             | (os.O_APPEND if append else 0)
+            | (os.O_EXCL if exclusive else 0)
             | no_follow
             | int(getattr(os, 'O_CLOEXEC', 0)),
             0o600,

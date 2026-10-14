@@ -12,6 +12,7 @@ from metor.utils import (
     Constants,
     FileLock,
     create_private_directory_tree,
+    open_private_binary_file,
     secure_remove_path,
 )
 
@@ -133,18 +134,19 @@ def write_migration_journal(journal_path: Path, profile_name: str, state: str) -
         separators=(',', ':'),
     ).encode('utf-8')
     create_private_directory_tree(journal_path.parent, ())
-    temp_path = journal_path.parent / f'.{journal_path.name}.{secrets.token_hex(8)}.tmp'
+    temp_path = journal_path.parent / (
+        f'.{journal_path.name}.{secrets.token_hex(Constants.PRIVATE_TEMP_TOKEN_BYTES)}.tmp'
+    )
+    temp_created = False
     try:
-        with temp_path.open('xb') as handle:
+        with open_private_binary_file(temp_path, exclusive=True) as handle:
+            temp_created = True
             handle.write(document)
-            handle.flush()
-            os.fsync(handle.fileno())
-        temp_path.chmod(0o600)
         temp_path.replace(journal_path)
-        journal_path.chmod(0o600)
         fsync_directory(journal_path.parent)
     finally:
-        temp_path.unlink(missing_ok=True)
+        if temp_created:
+            temp_path.unlink(missing_ok=True)
 
 
 def _read_migration_journal(journal_path: Path, profile_name: str) -> str:

@@ -436,7 +436,9 @@ worker('empty')
     def test_live_source_names_require_actual_installed_files(self) -> None:
         """Repository-shaped private paths outside the wheel root stay private."""
         with TemporaryDirectory(prefix='private-gui-source-') as directory:
-            root = Path(directory)
+            # Windows temporary roots can use RUNNER~1 while resolve() expands
+            # file paths. Match the canonical root used by the real watchdog.
+            root = Path(directory).resolve()
             installed = root / 'consumer'
             public = (
                 installed / 'Lib' / 'site-packages' / 'metor' / 'ui' / 'gui' / 'app.py'

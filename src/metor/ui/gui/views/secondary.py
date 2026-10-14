@@ -93,7 +93,8 @@ def secondary_view(controller: GuiController, refresh: Callable[[], None]) -> Bo
             )
         )
     panel.add_widget(header)
-    scroll = ScrollView(do_scroll_x=False)
+    # Wheel overscroll can leave footer actions clipped when rendering is slow.
+    scroll = ScrollView(do_scroll_x=False, always_overscroll=False)
     generation = state.generation
     remembered_scroll = state.secondary_scroll.get(route, 1.0)
 

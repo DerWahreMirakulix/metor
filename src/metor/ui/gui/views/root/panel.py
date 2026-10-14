@@ -74,7 +74,7 @@ class RootPanel(BoxLayout):
             tabs.add_widget(action)
         Action.group(tuple(reversed(tabs.children)))
         self.add_widget(tabs)
-        self.scroll = ScrollView(do_scroll_x=False)
+        self.scroll = ScrollView(do_scroll_x=False, always_overscroll=False)
         self.column = BoxLayout(
             orientation='vertical', spacing=dp(12), size_hint_y=None
         )

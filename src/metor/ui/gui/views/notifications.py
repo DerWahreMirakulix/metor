@@ -92,7 +92,7 @@ def notification_center(
         )
     )
     panel.add_widget(header)
-    scroll = ScrollView(do_scroll_x=False)
+    scroll = ScrollView(do_scroll_x=False, always_overscroll=False)
     body = BoxLayout(orientation='vertical', spacing=dp(12), size_hint_y=None)
     body.bind(minimum_height=body.setter('height'))
     scroll.add_widget(body)

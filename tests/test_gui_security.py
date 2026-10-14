@@ -3,7 +3,6 @@
 import atexit
 import json
 import socket
-import subprocess
 import threading
 import time
 from collections.abc import Callable
@@ -35,7 +34,6 @@ from metor.core.api import (
 )
 from metor.core.daemon.managed.engine import Daemon
 from metor.core.daemon.managed.local_auth import create_session_auth_context
-from metor.core.daemon.managed.quick_unlock import QuickUnlockStore
 from metor.core.key import KeyManager
 from metor.data import ContactManager, HistoryManager, MessageManager, SettingKey
 from metor.data.profile import ProfileManager
@@ -48,7 +46,7 @@ from metor.utils import Constants
 
 
 _SECURITY_WORKER_TIMEOUT_SEC: float = (
-    Constants.QUICK_UNLOCK_HELPER_TIMEOUT_SEC + Constants.FILE_LOCK_TIMEOUT_SEC
+    Constants.DEFAULT_IPC_TIMEOUT + Constants.FILE_LOCK_TIMEOUT_SEC
 )
 
 
@@ -203,45 +201,12 @@ class GuiSecurityIntegrationTests(unittest.TestCase):
     def test_pin_forgot_password_and_none_use_core_challenges(self) -> None:
         """PIN cannot weaken policy; explicit password recovery restores full strength."""
         controller = self.controller
-        acl_timings: list[tuple[str, float]] = []
-        run_acl_helper = QuickUnlockStore._run_acl_helper
-
-        def timed_acl_helper(
-            path: Path, script: str, phase: str
-        ) -> subprocess.CompletedProcess[str]:
-            """Delegates to the native ACL helper while recording its phase duration.
-
-            Args:
-                path (Path): Exact temporary credential path.
-                script (str): Constant production ACL script.
-                phase (str): Non-secret production ACL phase.
-
-            Returns:
-                subprocess.CompletedProcess[str]: Unchanged production helper result.
-            """
-            started_at = time.monotonic()
-            try:
-                return run_acl_helper(path, script, phase)
-            finally:
-                acl_timings.append((phase, time.monotonic() - started_at))
-
-        with patch.object(
-            QuickUnlockStore,
-            '_run_acl_helper',
-            side_effect=timed_acl_helper,
-        ):
-            self.assertTrue(
-                controller.security.configure(ClientUnlockMethod.PIN, '1357')
-            )
-            worker_elapsed = self.settle('configure-pin')
+        self.assertTrue(controller.security.configure(ClientUnlockMethod.PIN, '1357'))
+        worker_elapsed = self.settle('configure-pin')
         print(
             'GUI_SECURITY_TIMING '
             + json.dumps(
                 {
-                    'acl_phases': [
-                        {'phase': phase, 'seconds': round(elapsed, 3)}
-                        for phase, elapsed in acl_timings
-                    ],
                     'worker_seconds': round(worker_elapsed, 3),
                 },
                 sort_keys=True,

@@ -372,7 +372,8 @@ class CaptureIntegrationTests(unittest.TestCase):
         capture_binding = controller.voice.press.binding
         self.assertIsNotNone(capture_binding)
         assert capture_binding is not None
-        self.assertTrue(microphone.opened_event.wait(3))
+        # Admission completes a real Core/IPC operation before opening input.
+        self.assertTrue(microphone.opened_event.wait(2 * Constants.DEFAULT_IPC_TIMEOUT))
         self.assertTrue(microphone.frame_event.wait(3))
 
         output = ConcurrentOutput(lambda: controller.voice.running)

@@ -60,6 +60,7 @@ class Constants(ContractConstants):
 
     # Security-Critical File Operations
     SECURE_SHRED_BLOCK_BYTES: int = 65536
+    PRIVATE_TEMP_TOKEN_BYTES: int = 8
 
     # Application & UI Constraints
     CLI_PIPE_SECRET_MAX_BYTES: int = 4096
@@ -72,8 +73,6 @@ class Constants(ContractConstants):
     SENSITIVE_AUTH_GRANT_TIMEOUT_SEC: float = 60.0
     PENDING_INVITATION_TOKEN_BYTES: int = 32
     MAX_PENDING_INVITATION_HANDLES: int = 128
-    # Bounds cold PowerShell startup and ACL work on loaded Windows hosts.
-    QUICK_UNLOCK_HELPER_TIMEOUT_SEC: float = 30.0
     TOR_HANDSHAKE_CHALLENGE_BYTES: int = (
         32  # Random challenge length for one Tor peer-auth proof round
     )

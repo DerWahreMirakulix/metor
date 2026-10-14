@@ -101,6 +101,45 @@ instead of entering the console-only `getpass` path; EOF and inputs exceeding
 4,096 UTF-8 bytes abort without credential truncation. These corrections require
 fresh candidate checks and do not establish a Windows acceptance pass.
 
+Native Windows testing also exposed default ownership on migration staging and
+journal files. Migration now uses canonical private writers and bounded copying,
+rejecting links, multiple hard links and special files. PIN verification and
+keyslots share the same native owner-only storage policy, replacing the PIN's
+separate PowerShell/SYSTEM ACL path. Formats and derivation are unchanged;
+incompatible existing PIN permissions remain unavailable until password unlock
+and explicit PIN setup. Native Windows confirmation of these changes is pending.
+
+Redirected CLI confirmation and password input now use one strict UTF-8 decoder;
+an actual process round trip verifies Unicode credentials despite a Windows-style
+legacy encoding default. The capture fixture now waits within the existing IPC
+budget instead of a shorter independent deadline, with a delayed-response
+regression proving the distinction.
+
+The next native CI investigation identified the installed Windows GUI startup
+block in Kivy's OpenGL-version error dialog on the hosted runner. The Windows
+installed-GUI steps in CI and release now select `angle_sdl2` explicitly; product
+defaults are unchanged. That runner configuration requires a fresh successful
+native run before Windows acceptance can be claimed.
+
+A slower-frame Linux reproduction exposed a product scroll-boundary defect:
+Kivy wheel overscroll could settle with the Exit action still clipped by
+5–7 pixels. Existing GUI scroll views now explicitly disable always-on
+overscroll, bounding wheel movement at the content edges and keeping short
+content still while preserving touch dragging for longer content. This changes
+the shared scroll policy without relaxing geometry assertions or test deadlines.
+Native wheel/touch and complete candidate acceptance must verify the final change.
+The shared CI/release action now includes a focused native XTest regression at
+20 FPS: a long Settings page must expose its full footer and remain draggable,
+while a short Profiles page stays fixed after wheel and pointer-drag input. It
+passed locally with the correction and failed its pre-fix negative control;
+the bounded log and screen capture accompany candidate workflow evidence.
+
+Public Tor execution was unavailable in this cloud environment because its
+network policy does not permit the required relay TCP connections. The existing
+optional public-Tor gate checks daemon bootstrap to 100% and IPC availability;
+it does not establish an actual peer-to-peer message round trip over Tor.
+Deterministic loopback peer tests do not supply that missing network evidence.
+
 [PR #11](https://github.com/DerWahreMirakulix/metor/pull/11) owns the completed
 verification summary and native CI results. Its checks and bounded workflow
 artifacts identify each immutable tested revision. A CI-linked entry below is

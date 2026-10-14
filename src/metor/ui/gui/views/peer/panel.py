@@ -53,6 +53,7 @@ class PeerView(BoxLayout):
         )
         self.header_viewport = ScrollView(
             do_scroll_x=False,
+            always_overscroll=False,
             do_scroll_y=False,
             size_hint_y=None,
             height=dp(Geometry.TARGET),

@@ -12,7 +12,7 @@ delivery, transport, persistence, or profile truth.
 and `metor-sdk` packages from the same release wheelhouse. The common launcher
 selects a frontend using explicit `--ui`, then `METOR_UI`, then
 `client.default_ui`, then Terminal. Installing the GUI does not select it by
-default. A normal desktop start needs an SDL2/OpenGL display:
+default. A normal desktop start needs an SDL2 display and OpenGL 2.0 or newer:
 
 ```sh
 metor chat --ui gui
@@ -24,9 +24,14 @@ On Windows, launch the installed `metor-gui.exe` from the environment's
 `Scripts` directory for a graphical start without a console window. The
 release GUI bundle places it in `.venv\Scripts`. `metor chat --ui gui` remains
 available from PowerShell for diagnostics; that original terminal remains open.
-Neither start path creates a console for GUI child processes (daemon, Tor or the
-Windows ACL helper). A failure before the graphical shell
-opens produces a generic Windows dialog that points to that diagnostic command.
+Neither start path creates a console for GUI child processes (daemon or Tor).
+PIN credentials use the same native owner-only Windows protection as profile keys,
+without launching a helper process. A failure before the graphical shell opens
+produces a generic Windows dialog that points to that diagnostic command.
+Windows VMs or Remote Desktop sessions with insufficient OpenGL driver support
+can select Kivy's ANGLE backend by setting `$env:KIVY_GL_BACKEND='angle_sdl2'` in
+PowerShell before launching Metor. If graphics startup still fails, install a
+compatible graphics driver and use the diagnostic command above.
 
 The GUI opens its graphical shell before profile authentication, including when
 started from a terminal. With no profiles it opens Create profile and says
@@ -650,6 +655,8 @@ Entry, lock, and profile management content stays fixed when it fits the
 viewport. Scrolling is enabled only for actual overflow, including locked
 activity or accepted-call controls. Pending profile activation shows covered
 progress until a graphical prompt or the complete profile becomes available.
+All viewports clamp mouse-wheel movement at their content edges so footer
+actions remain fully reachable; touch dragging remains available for overflow.
 
 DROP and LIVE require distinct labels as well as color. Status, disabled state,
 focus, recording, errors, and destructive consequences cannot rely on color,

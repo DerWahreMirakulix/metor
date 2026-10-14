@@ -4,7 +4,9 @@ Normalizes interactive prompt aborts so Ctrl-C and EOF do not leak raw stack tra
 """
 
 from dataclasses import dataclass
+import codecs
 import getpass
+import io
 import sys
 
 from metor.utils import Constants
@@ -66,6 +68,28 @@ def _emit_prompt_abort_newline() -> None:
     sys.stderr.flush()
 
 
+def _prepare_prompt_input() -> None:
+    """Select UTF-8 before a redirected text stream can prefetch later secrets."""
+    if sys.stdin is None:
+        raise EOFError
+    if not isinstance(sys.stdin, io.TextIOWrapper):
+        return
+    try:
+        if sys.stdin.isatty():
+            return
+        if (
+            codecs.lookup(sys.stdin.encoding).name != 'utf-8'
+            or sys.stdin.errors != 'strict'
+        ):
+            sys.stdin.reconfigure(encoding='utf-8', errors='strict')
+    except (OSError, ValueError):
+        # Reconfiguring after an external text read can discard or reinterpret
+        # prefetched data. Fail rather than authenticate a different password.
+        sys.stderr.write('Redirected input could not be configured as UTF-8.\n')
+        sys.stderr.flush()
+        raise PromptAbortedError() from None
+
+
 def prompt_hidden(prompt: str) -> str:
     """
     Requests a hidden terminal password or one bounded redirected stdin line.
@@ -80,8 +104,7 @@ def prompt_hidden(prompt: str) -> str:
         str: The entered text, which may be empty.
     """
     try:
-        if sys.stdin is None:
-            raise EOFError
+        _prepare_prompt_input()
         if sys.stdin.isatty():
             return getpass.getpass(prompt)
         # Windows getpass reads the console even when stdin is a pipe. Select
@@ -142,7 +165,11 @@ def prompt_text(prompt: str) -> str:
         str: The entered text, which may be empty.
     """
     try:
+        _prepare_prompt_input()
         return input(prompt)
+    except UnicodeError:
+        sys.stderr.write('\nInput is not valid UTF-8.\n')
+        raise PromptAbortedError() from None
     except (EOFError, KeyboardInterrupt) as exc:
         _emit_prompt_abort_newline()
         raise PromptAbortedError() from exc

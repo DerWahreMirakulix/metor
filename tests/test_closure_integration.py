@@ -991,24 +991,34 @@ class ClosureCredentialTests(unittest.TestCase):
             if os.name == 'nt':
                 store._validate_windows_acl(path)
                 store._validate_windows_acl(path.parent)
-                store._run_acl_helper(
-                    path,
-                    '$acl=[System.IO.File]::GetAccessControl($Target); '
-                    '$sid=New-Object System.Security.Principal.SecurityIdentifier("S-1-1-0"); '
-                    '$rule=New-Object System.Security.AccessControl.FileSystemAccessRule($sid,"Read","Allow"); '
-                    '$acl.AddAccessRule($rule); [System.IO.File]::SetAccessControl($Target,$acl)',
-                    'test-unsafe-trustee',
+                import win32security
+
+                security = win32security.GetNamedSecurityInfo(
+                    str(path),
+                    win32security.SE_FILE_OBJECT,
+                    win32security.DACL_SECURITY_INFORMATION,
+                )
+                acl = security.GetSecurityDescriptorDacl()
+                acl.AddAccessAllowedAce(
+                    win32security.ACL_REVISION,
+                    0x00120089,
+                    win32security.ConvertStringSidToSid('S-1-1-0'),
+                )
+                win32security.SetNamedSecurityInfo(
+                    str(path),
+                    win32security.SE_FILE_OBJECT,
+                    win32security.DACL_SECURITY_INFORMATION,
+                    None,
+                    None,
+                    acl,
+                    None,
                 )
                 with self.assertRaises(QuickUnlockStorageError):
                     store.metadata()
-                store._protect_windows_path(path, directory=False)
-                with patch.object(
-                    QuickUnlockStore,
-                    '_protect_windows_path',
-                    side_effect=QuickUnlockStorageError('test protection failure'),
-                ):
-                    with self.assertRaises(QuickUnlockStorageError):
-                        store.configure('06' * 16, '07' * 32)
+                from metor.utils import open_private_binary_file
+
+                with open_private_binary_file(path, append=True):
+                    pass
                 self.assertEqual(
                     store.metadata(), ('04' * 16, bytes.fromhex('05' * 32))
                 )

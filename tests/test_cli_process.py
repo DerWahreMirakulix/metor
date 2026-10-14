@@ -81,6 +81,7 @@ class CliProcessTests(unittest.TestCase):
             [sys.executable, '-m', 'metor', *argv],
             input=input_text,
             text=True,
+            encoding='utf-8',
             capture_output=True,
             cwd=self.root,
             env=environment,
@@ -209,12 +210,14 @@ class CliProcessTests(unittest.TestCase):
     def test_redirected_password_authenticates_offline_without_console_input(
         self,
     ) -> None:
-        """The same stdin secret creates and reopens encrypted storage on Windows too."""
-        password = '  disposable-pipe-secret  '
+        """ACP and UTF-8 process defaults must agree on the same Unicode credential."""
+        password = '  über-disposable-pipe-secret  '
+        self.environment['PYTHONIOENCODING'] = 'cp1252'
         created = self.run_cli(
             'profiles', 'add', 'PipeInput', input_text=f'{password}\n{password}\n'
         )
         self.assertEqual(created.returncode, 0)
+        self.environment['PYTHONIOENCODING'] = 'utf-8'
         reopened = self.run_cli(
             '-p', 'PipeInput', 'contacts', 'list', input_text=password + '\n'
         )

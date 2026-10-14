@@ -376,8 +376,8 @@ results and stable field names. Put `--` before literal option-looking operands,
 for example `metor send alice -- "--help"` sends the text `--help` instead of
 requesting command help.
 
-Password prompts hide terminal input. With redirected stdin, each prompt reads
-one line without echo, including on Windows; confirmation prompts need a second
+Password prompts hide terminal input. Redirected stdin must use UTF-8; each password
+prompt reads one line without echo, including on Windows. Confirmation prompts need a second
 line. Spaces are preserved and the line ending is removed. Each redirected secret
 is limited to 4,096 bytes when encoded as UTF-8. EOF, invalid text or an oversized secret
 aborts the operation with a nonzero status, without using a truncated credential.
