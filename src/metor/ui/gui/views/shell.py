@@ -275,6 +275,7 @@ class Shell(BoxLayout):
             if view == 'V16' and not covered_view:
                 notices.mark_seen()
             key = (
+                self.controller.native_lifecycle_failed,
                 state.generation,
                 state.route,
                 state.snapshot.onion if view == 'V15' and state.snapshot else None,
@@ -313,7 +314,7 @@ class Shell(BoxLayout):
                 if covered_view or view in {'V02', 'V03', 'V20'}
                 else None,
                 (self.controller.purge.title, self.controller.purge.detail)
-                if view in {'V21', 'V22'}
+                if view in {'V21', 'V22'} or self.controller.native_lifecycle_failed
                 else None,
                 (
                     self.controller.device.phase,
@@ -385,7 +386,10 @@ class Shell(BoxLayout):
         self._master = None
         self._detail = None
         self._security_panel = None
-        if self.controller.interactions.prompt is not None:
+        if (
+            self.controller.native_lifecycle_failed
+            or self.controller.interactions.prompt is not None
+        ):
             self.add_widget(entry_view(self.controller, self.refresh))
             return
         if state.route.view == 'V22' and self.controller.purge.active:

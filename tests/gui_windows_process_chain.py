@@ -131,13 +131,35 @@ def _powershell() -> Path:
     return executable
 
 
+def _console_handle() -> int:
+    """Normalize the nullable HWND returned by the typed Win32 console API."""
+    query = ctypes.windll.kernel32.GetConsoleWindow
+    query.argtypes = []
+    query.restype = wintypes.HWND
+    return int(query() or 0)
+
+
+def _establish_original_console() -> int:
+    """Create the intended visible test console when the host starts without one."""
+    handle = _console_handle()
+    if not handle:
+        allocate = ctypes.windll.kernel32.AllocConsole
+        allocate.argtypes = []
+        allocate.restype = wintypes.BOOL
+        if not allocate():
+            raise RuntimeError('Could not establish the original test console.')
+        handle = _console_handle()
+        if not handle:
+            raise RuntimeError('The original test console has no native window.')
+    return handle
+
+
 def _assert_original_console(hwnd: int) -> None:
     """Require the original test terminal to remain attached and visible."""
-    kernel32 = ctypes.windll.kernel32
     user32 = ctypes.windll.user32
     user32.IsWindowVisible.argtypes = [wintypes.HWND]
     user32.IsWindowVisible.restype = wintypes.BOOL
-    if kernel32.GetConsoleWindow() != hwnd or not user32.IsWindowVisible(hwnd):
+    if _console_handle() != hwnd or not user32.IsWindowVisible(hwnd):
         raise AssertionError('The original console was closed or hidden.')
 
 
@@ -653,7 +675,7 @@ def _tor_child_worker(executable: Path, root: Path) -> int:
     """Spawn the fixture from a process with no inherited Windows console."""
     from metor.core.tor_windows import launch_tor_without_console
 
-    if ctypes.windll.kernel32.GetConsoleWindow() != 0:
+    if _console_handle():
         return 2
     config = {
         'SocksPort': '10241',
@@ -746,13 +768,7 @@ def main() -> None:
     gui = scripts / 'metor-gui.exe'
     if not cli.is_file() or not gui.is_file():
         raise RuntimeError('The isolated installation lacks a GUI or CLI entry point.')
-    kernel32 = ctypes.windll.kernel32
-    kernel32.GetConsoleWindow.restype = wintypes.HWND
-    kernel32.AllocConsole.restype = wintypes.BOOL
-    if kernel32.GetConsoleWindow() == 0:
-        if not kernel32.AllocConsole():
-            raise RuntimeError('Could not establish the original test console.')
-    original_console = int(kernel32.GetConsoleWindow())
+    original_console = _establish_original_console()
     _assert_original_console(original_console)
     with tempfile.TemporaryDirectory(prefix='metor-win-gui-') as directory:
         root = Path(directory)

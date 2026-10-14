@@ -73,6 +73,7 @@ runs:
           ${{ runner.temp }}/qr-wide.log
           ${{ runner.temp }}/dpi-reflow.log
           ${{ runner.temp }}/gui-presentation.png
+          ${{ runner.temp }}/gui-presentation-source-lost.png
           ${{ runner.temp }}/gui-presentation.log
           ${{ runner.temp }}/readable-controls.png
           ${{ runner.temp }}/readable-controls.log

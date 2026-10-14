@@ -519,7 +519,7 @@ class MetorApp(App):
             self.shell.revoke_peer_views()
 
     def _lifecycle_source_failed(self) -> None:
-        """Expose lost native monitoring while retaining the privacy cover.
+        """Permanently detach this GUI after losing native security monitoring.
 
         Args:
             None
@@ -527,9 +527,10 @@ class MetorApp(App):
         Returns:
             None
         """
-        self.controller.state.status = (
-            'Desktop lifecycle monitoring failed. Metor remains locked.'
-        )
+        self.exit_status = 1
+        self.controller.fail_native_lifecycle()
+        if self.input_dock is not None:
+            self.input_dock.hide()
 
     def on_pause(self) -> Literal[True]:
         """Covers and safely stops capture on supported native suspend notifications.

@@ -81,6 +81,7 @@ class GuiController:
         self.simulator = simulator
         self.clipboard_own_address = clipboard_own_address
         self.native_audio = native_audio
+        self._native_lifecycle_failed = False
         self.state = GuiState()
         self.mailbox = Mailbox()
         self.interactions = Interactions(self.state.generation, self.mailbox)
@@ -188,6 +189,28 @@ class GuiController:
         self.playback.stop()
         self.device.focus_lost()
 
+    @property
+    def native_lifecycle_failed(self) -> bool:
+        """Require a new GUI process after its native security monitor is lost."""
+        return self._native_lifecycle_failed
+
+    def fail_native_lifecycle(self) -> None:
+        """Permanently fence this GUI and detach only its own communication client.
+
+        The latch outlives profile/security resets. An already accepted purge
+        keeps its separate read-only observer; no new producer or recovery can
+        restore authorization after the native source has stopped.
+        """
+        with self._guard:
+            if self._native_lifecycle_failed:
+                return
+            self._native_lifecycle_failed = True
+        self.state.covered = True
+        if self.purge.active:
+            self.purge.poll()
+        else:
+            self.close()
+
     def suspend(self) -> None:
         """Covers private state and keeps input revoked until fresh native events.
 
@@ -239,7 +262,8 @@ class GuiController:
         """
         with self._guard:
             if (
-                self.purge.active
+                self.native_lifecycle_failed
+                or self.purge.active
                 or operation in self._unknown_actions
                 or self.state.busy
             ):
@@ -303,7 +327,11 @@ class GuiController:
         Returns:
             bool: Whether activation was admitted.
         """
-        return False if self.purge.active else self.activation.open_profile()
+        return (
+            False
+            if self.native_lifecycle_failed or self.purge.active
+            else self.activation.open_profile()
+        )
 
     def adopt_client(self, client: MetorClient, generation: int) -> bool:
         """Installs a completed bootstrap only into its still-current activation.
@@ -315,7 +343,7 @@ class GuiController:
             bool: Whether the client was installed rather than abandoned.
         """
         with self._guard:
-            if generation != self.state.generation:
+            if self.native_lifecycle_failed or generation != self.state.generation:
                 return False
             self.client = client
             return True
@@ -331,7 +359,7 @@ class GuiController:
         """
         return (
             False
-            if self.purge.active
+            if self.native_lifecycle_failed or self.purge.active
             else self.activation.create_profile(name, password)
         )
 
@@ -483,6 +511,9 @@ class GuiController:
             bool: Whether the presentation changed.
         """
         changed = self.purge.poll()
+        if self.native_lifecycle_failed:
+            self.mailbox.clear()
+            return changed
         changed = self.device.poll() or changed
         if self.purge.active:
             return changed

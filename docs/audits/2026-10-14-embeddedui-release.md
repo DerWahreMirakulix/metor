@@ -118,8 +118,19 @@ regression proving the distinction.
 The next native CI investigation identified the installed Windows GUI startup
 block in Kivy's OpenGL-version error dialog on the hosted runner. The Windows
 installed-GUI steps in CI and release now select `angle_sdl2` explicitly; product
-defaults are unchanged. That runner configuration requires a fresh successful
-native run before Windows acceptance can be claimed.
+defaults are unchanged. The subsequent
+[native Windows run](https://github.com/DerWahreMirakulix/metor/actions/runs/38545872010/job/115791655204)
+passed installed GUI startup, close and callback-failure cleanup with ANGLE.
+Its later process-chain fixture mishandled a native NULL window handle; that
+fixture correction still requires a new complete Windows acceptance run.
+
+A late security review found that loss of the native OS lock/suspend observer
+did not remain a permanent barrier for the GUI process. The correction adds a
+controller-lifetime failure state: detach the local client, invalidate stale
+callbacks and keep private content covered with only Close available until a
+fresh GUI process starts. An independently running daemon and other clients
+continue. Focused regression and candidate validation of this correction remain
+pending; ordinary IPC disconnect is a separate condition.
 
 A slower-frame Linux reproduction exposed a product scroll-boundary defect:
 Kivy wheel overscroll could settle with the Exit action still clipped by

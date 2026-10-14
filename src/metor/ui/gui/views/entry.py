@@ -95,7 +95,19 @@ def entry_view(controller: GuiController, refresh: Callable[[], None]) -> Anchor
         controller.open_profile()
         refresh()
 
-    if prompt is not None:
+    if controller.native_lifecycle_failed:
+        column.add_widget(Label('Restart Metor', role='peer'))
+        column.add_widget(
+            Label(
+                'Desktop security monitoring stopped. Close and restart Metor to continue safely.',
+                role='support',
+            )
+        )
+        if controller.purge.active:
+            column.add_widget(Label(controller.purge.title, role='support'))
+            column.add_widget(Label(controller.purge.detail, role='support'))
+        column.add_widget(Action('Close Metor', controller.lifecycle.start))
+    elif prompt is not None:
 
         def respond(value: str | bool | None) -> None:
             """Replace an answered prompt with the pending startup state.
@@ -236,8 +248,10 @@ def entry_view(controller: GuiController, refresh: Callable[[], None]) -> Anchor
         column.add_widget(
             Action('New profile', lambda: navigate('V03'), disabled=state.busy)
         )
-    if state.status and not (
-        state.busy and state.route.view == 'V01' and prompt is None
+    if (
+        state.status
+        and not controller.native_lifecycle_failed
+        and not (state.busy and state.route.view == 'V01' and prompt is None)
     ):
         column.add_widget(Label(state.status, role='support', tone='info'))
     fit_cover()

@@ -18,6 +18,7 @@ from metor.client import FrontendLaunchContext, MetorClient, build_session_auth_
 from metor.client.platform import PlatformBindings
 from metor.core.api import (
     ClientAccessRestrictedEvent,
+    ClientReauthorizedEvent,
     ClientUnlockMethod,
     Delivery,
     GetMessageOutcomeCommand,
@@ -30,6 +31,7 @@ from metor.core.api import (
     GuiPreferencesRejectedEvent,
     IpcEvent,
     IpcCommand,
+    ReauthorizeClientCommand,
     SetGuiPreferencesCommand,
 )
 from metor.core.daemon.managed.engine import Daemon
@@ -197,6 +199,96 @@ class GuiSecurityIntegrationTests(unittest.TestCase):
         self.settle()
         self.assertFalse(controller.state.covered)
         self.assertEqual(controller.state.route, Route('V06'))
+
+    def test_native_source_failure_fences_inflight_unlock_and_keeps_other_client(
+        self,
+    ) -> None:
+        """A real accepted proof cannot restore this GUI after its monitor fails."""
+        self._assert_native_failure_fences_completion(ReauthorizeClientCommand)
+
+    def test_native_source_failure_fences_inflight_restore_and_keeps_other_client(
+        self,
+    ) -> None:
+        """A real fresh snapshot and preferences cannot remove the failure cover."""
+        self._assert_native_failure_fences_completion(GetGuiPreferencesCommand)
+
+    def _assert_native_failure_fences_completion(
+        self, gate_command: type[IpcCommand]
+    ) -> None:
+        """Holds one successful Core response until the GUI loses native monitoring.
+
+        Args:
+            gate_command: Unlock or restore command whose real response is delayed.
+
+        Returns:
+            None
+        """
+        controller = self.controller
+        identity = controller.state.snapshot.profile_instance_id
+        self.assertTrue(controller.security.lock())
+        controller.poll()
+        self.settle()
+        self.assertIsNotNone(controller.security.restriction)
+        entered, release = threading.Event(), threading.Event()
+        self.addCleanup(release.set)
+        request = self.client.request
+        replies: list[IpcEvent | None] = []
+
+        def hold_completed_response(
+            command: IpcCommand, expected: type[IpcEvent]
+        ) -> IpcEvent | None:
+            """Runs the actual authenticated exchange before delaying GUI delivery."""
+            result = request(command, expected)
+            if isinstance(command, gate_command):
+                replies.append(result)
+                entered.set()
+                if not release.wait(_SECURITY_WORKER_TIMEOUT_SEC):
+                    raise TimeoutError('Native failure test gate was not released')
+            return result
+
+        with patch.object(self.client, 'request', side_effect=hold_completed_response):
+            self.assertTrue(controller.security.unlock('test-password'))
+            worker = controller._worker
+            self.assertIsNotNone(worker)
+            assert worker is not None
+            if gate_command is GetGuiPreferencesCommand:
+                worker.join(_SECURITY_WORKER_TIMEOUT_SEC)
+                self.assertFalse(worker.is_alive())
+                controller.poll()
+                worker = controller._worker
+                self.assertIsNotNone(worker)
+                assert worker is not None
+            try:
+                self.assertTrue(entered.wait(_SECURITY_WORKER_TIMEOUT_SEC))
+                self.assertEqual(len(replies), 1)
+                self.assertIsInstance(
+                    replies[0],
+                    ClientReauthorizedEvent
+                    if gate_command is ReauthorizeClientCommand
+                    else GuiPreferencesEvent,
+                )
+                old_generation = controller.state.generation
+                controller.fail_native_lifecycle()
+                self.assertTrue(controller.native_lifecycle_failed)
+                self.assertGreater(controller.state.generation, old_generation)
+                self.assertTrue(controller.state.covered)
+                self.assertIsNone(controller.client)
+                self.assertEqual(
+                    self.other.runtime_snapshot().profile_instance_id, identity
+                )
+            finally:
+                release.set()
+                worker.join(_SECURITY_WORKER_TIMEOUT_SEC)
+                self.assertFalse(worker.is_alive())
+            controller.poll()
+
+        self.assertTrue(controller.native_lifecycle_failed)
+        self.assertTrue(controller.state.covered)
+        self.assertIsNone(controller.state.snapshot)
+        self.assertIsNone(controller.state.preferences)
+        self.assertIsNone(controller.client)
+        self.assertFalse(controller.security.unlock('test-password'))
+        self.assertEqual(self.other.runtime_snapshot().profile_instance_id, identity)
 
     def test_pin_forgot_password_and_none_use_core_challenges(self) -> None:
         """PIN cannot weaken policy; explicit password recovery restores full strength."""

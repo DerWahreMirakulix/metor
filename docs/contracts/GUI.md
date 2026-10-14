@@ -20,6 +20,16 @@ metor chat --ui gui --simulator
 metor chat --ui gui --simulator --device-config docs/examples/gui-simulator.toml
 ```
 
+On Linux, both desktop and simulator startup also require access to the system
+D-Bus and `org.freedesktop.login1` (logind). The GUI process must belong to a
+registered login session that logind can resolve through `GetSessionByPID`.
+Supported desktop screen-lock services on the session bus supplement this
+binding; they do not replace it. Startup fails if the required lifecycle source
+cannot be established, and no device configuration option disables this check.
+A graphical display alone is insufficient: Xvfb, containers, SSH or WSL sessions
+without that logind binding cannot run the ordinary GUI or simulator. The
+deterministic acceptance fixtures replace this source explicitly for testing.
+
 On Windows, launch the installed `metor-gui.exe` from the environment's
 `Scripts` directory for a graphical start without a console window. The
 release GUI bundle places it in `.venv\Scripts`. `metor chat --ui gui` remains
@@ -565,6 +575,13 @@ Hard profile lock, profile switch, client loss and purge end the call. System
 suspend ends real-time audio rather than replaying a backlog after resume.
 The Linux logind/screen-lock and Windows session/power adapters distinguish
 screen lock from suspend; physical continuation requires a named native run.
+If native security monitoring is lost, this GUI cancels its pending entry and
+media work, detaches its own client, and shows a permanent **Restart Metor**
+cover with **Close Metor**. Unlock, reconnect and profile changes cannot reopen
+that process; close it and launch Metor again to establish a fresh native source.
+Other clients and an independent daemon continue. An already accepted profile
+destruction retains its read-only progress observation until this GUI closes;
+the restart cover shows only its nonsecret progress and safety instructions.
 
 Temporary Power menus and purge-arming covers do not replace session
 restriction. Native screen lock and application idle timeout still restrict the

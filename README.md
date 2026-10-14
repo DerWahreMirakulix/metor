@@ -76,6 +76,12 @@ Recommended reading order:
 
 For security reasons and to prevent supply-chain attacks, Metor **does not** bundle the Tor binary. You must install it from the official Tor Project sources.
 
+The Linux GUI and simulator require an SDL2/OpenGL display, access to system
+D-Bus, and a logind-registered login session for the GUI process. A display alone
+is insufficient in containers, SSH or WSL sessions without that login binding.
+See the [GUI startup prerequisites](docs/contracts/GUI.md#installation-and-startup)
+for the exact Linux requirements and Windows graphics setup.
+
 ### Distribution Matrix
 
 Metor is split into four non-overlapping packages:
