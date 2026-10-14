@@ -37,6 +37,7 @@ CONTACT_EVENT_TYPES: dict[ContactOperationType, EventType] = {
         EventType.DISCOVERED_PEER_NOT_FOUND
     ),
     ContactOperationType.INVALID_ONION: EventType.INVALID_TARGET,
+    ContactOperationType.INVALID_ALIAS: EventType.INVALID_TARGET,
     ContactOperationType.ONION_IN_USE: EventType.ONION_IN_USE,
     ContactOperationType.PEER_ANONYMIZED: EventType.PEER_ANONYMIZED,
     ContactOperationType.PEER_CANT_DELETE_ACTIVE: EventType.PEER_CANT_DELETE_ACTIVE,

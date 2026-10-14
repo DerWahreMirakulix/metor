@@ -213,6 +213,73 @@ class CliProcessTests(unittest.TestCase):
         self.assertIn('Plaintext profiles are disabled', result.stdout)
         self.assertNotIn('Internal daemon error', result.stdout)
 
+    def test_migration_prompt_failures_preserve_profiles_and_exit_nonzero(self) -> None:
+        """Scripted cancellation and invalid secrets never become a successful migration."""
+        password = 'disposable-migration-password'
+        created = self.run_cli(
+            'profiles', 'add', 'Encrypted', input_text=f'{password}\n{password}\n'
+        )
+        self.assertEqual(created.returncode, 0)
+        enabled = self.run_cli(
+            '-p',
+            'Encrypted',
+            'settings',
+            'set',
+            'daemon.allow_plaintext_profiles',
+            'true',
+            input_text=password + '\n',
+        )
+        self.assertEqual(enabled.returncode, 0)
+        plain = self.run_cli('profiles', 'add', 'Plaintext', '--plaintext')
+        self.assertEqual(plain.returncode, 0)
+
+        for profile, target, attempts in (
+            (
+                'Encrypted',
+                'plaintext',
+                (
+                    ('no\n', 'aborted'),
+                    ('', 'aborted'),
+                    ('yes\n', 'aborted'),
+                    ('yes\n\n', 'Current master password cannot be empty'),
+                ),
+            ),
+            (
+                'Plaintext',
+                'encrypted',
+                (
+                    ('', 'aborted'),
+                    ('\n', 'New master password cannot be empty'),
+                    (password + '\n', 'aborted'),
+                    (password + '\ndifferent-secret\n', 'do not match'),
+                ),
+            ),
+        ):
+            profile_root = self.root / Constants.DATA_DIR / profile
+            before = {
+                path.relative_to(profile_root): path.read_bytes()
+                for path in profile_root.rglob('*')
+                if path.is_file()
+            }
+            self.assertTrue(before)
+            for stdin, expected in attempts:
+                with self.subTest(profile=profile, expected=expected):
+                    result = self.run_cli(
+                        'profiles', 'migrate', profile, '--to', target, input_text=stdin
+                    )
+                    self.assertEqual(result.returncode, 1)
+                    self.assertIn(expected, result.stdout)
+                    self.assertNotIn(password, result.stdout + result.stderr)
+                    self.assertNotIn('different-secret', result.stdout + result.stderr)
+                    self.assertEqual(
+                        {
+                            path.relative_to(profile_root): path.read_bytes()
+                            for path in profile_root.rglob('*')
+                            if path.is_file()
+                        },
+                        before,
+                    )
+
     def test_unreachable_forwarded_daemon_fails_instead_of_claiming_success(
         self,
     ) -> None:

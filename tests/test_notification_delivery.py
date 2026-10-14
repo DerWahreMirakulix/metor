@@ -1,21 +1,83 @@
 """Bounded optional notification delivery and rejected-socket cleanup."""
 
 import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import threading
 import unittest
 from unittest.mock import Mock, patch
+
+from link_fixtures import create_native_symlink_or_skip
 
 from metor.core.daemon.managed.ipc import IpcServer
 from metor.core.daemon.managed.notify.notification import (
     NotificationPayload,
     NotificationService,
 )
-from metor.core.daemon.managed.notify.sinks import WebhookSink
+from metor.core.daemon.managed.notify.sinks import FileSink, WebhookSink
 
 
 class NotificationDeliveryTests(unittest.TestCase):
     """Keeps optional sink latency and failures outside messaging callers."""
+
+    def test_file_sink_appends_with_private_permissions(self) -> None:
+        """Plaintext notification exports preserve records in an owner-private file."""
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / 'notifications.jsonl'
+            sink = FileSink(str(path))
+            sink.deliver(NotificationPayload('first', peer_alias='private'))
+            if os.name != 'nt':
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+                path.chmod(0o644)
+            sink.deliver(NotificationPayload('second', peer_alias='secret'))
+            records = [json.loads(line) for line in path.read_text().splitlines()]
+            self.assertEqual(
+                [record['kind'] for record in records], ['first', 'second']
+            )
+            if os.name != 'nt':
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+
+    def test_file_sink_refuses_symlink_destination_without_writing_target(self) -> None:
+        """A configured path cannot redirect sensitive metadata through a link."""
+        with TemporaryDirectory() as temp_dir:
+            target = Path(temp_dir) / 'target'
+            target.write_bytes(b'original')
+            link = Path(temp_dir) / 'notifications.jsonl'
+            create_native_symlink_or_skip(self, link, target)
+            with self.assertRaises(OSError):
+                FileSink(str(link)).deliver(NotificationPayload('secret'))
+            self.assertEqual(target.read_bytes(), b'original')
+
+    @unittest.skipIf(os.name == 'nt', 'POSIX FIFO filesystem contract')
+    def test_private_file_sink_rejects_fifo_without_waiting_for_reader(self) -> None:
+        """A special-file destination cannot trap delivery inside a blocking open."""
+        with TemporaryDirectory() as temp_dir:
+            path = Path(temp_dir) / 'notifications.fifo'
+            os.mkfifo(path)
+            result = subprocess.run(
+                [
+                    sys.executable,
+                    '-c',
+                    'import sys\n'
+                    'from pathlib import Path\n'
+                    'from metor.utils import open_private_binary_file\n'
+                    'try:\n'
+                    '    with open_private_binary_file(Path(sys.argv[1]), append=True):\n'
+                    '        sys.exit(1)\n'
+                    'except OSError:\n'
+                    '    pass\n',
+                    str(path),
+                ],
+                capture_output=True,
+                timeout=2,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 0)
+            self.assertTrue(path.is_fifo())
 
     def test_webhook_never_reads_an_unbounded_response_body(self) -> None:
         response = Mock()

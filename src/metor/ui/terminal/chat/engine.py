@@ -424,7 +424,7 @@ class Chat:
                         command_found: bool = self._dispatcher.dispatch(user_input)
                         if not command_found:
                             self._renderer.print_message(
-                                f"Unknown command: '{user_input}'",
+                                f"Unknown command: '{escape_terminal_text(user_input)}'",
                                 msg_type=ChatMessageType.STATUS,
                                 tone=StatusTone.SYSTEM,
                             )

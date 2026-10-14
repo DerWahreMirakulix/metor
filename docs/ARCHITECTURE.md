@@ -32,6 +32,33 @@ DROP is durable asynchronous delivery; LIVE is interactive ephemeral delivery
 with Core-owned crash-safe pending state. Text and Voice share stable logical
 message identities. Navigation is never a transport command.
 
+### Repository ownership map
+
+The source tree follows subsystem ownership; the distribution manifests select
+disjoint files from that tree. A directory named `core` does not make every
+module a public SDK dependency.
+
+| Path                                                     | Responsibility                                                                                    |
+| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `src/metor/client/`, `core/api/`, `core/auth/`           | Portable Python SDK, wire DTOs and credential proofs; no host runtime or UI imports               |
+| `src/metor/application/`                                 | Local profile, daemon-process and frontend-host orchestration                                     |
+| `src/metor/core/daemon/managed/`                         | Long-lived runtime, IPC authorization, peer transport, delivery and media lifetimes               |
+| `src/metor/core/daemon/headless/`                        | Short-lived offline execution for applicable CLI operations                                       |
+| `src/metor/data/`                                        | Profile configuration, persistence, SQL schemas, message/contact repositories and encrypted blobs |
+| `src/metor/cli/`, `src/metor/ui/`                        | Command presentation and independently packaged interactive frontends                             |
+| `src/metor/shared/`, `src/metor/versioning/`             | Lightweight SDK-safe values and the authoritative compatibility registry                          |
+| `src/metor/utils/`                                       | Base-owned operating-system and runtime services                                                  |
+| `packaging/`, `requirements/`                            | Distribution ownership and the pinned dependency closures                                         |
+| `tests/`, `scripts/`, `.github/`                         | Behavior fixtures, local validation/release tools and their CI orchestration                      |
+| `docs/contracts/`, `docs/generated/`, `docs/governance/` | Authored frontend contracts, code-generated references and review evidence                        |
+
+Use the public package facades at subsystem boundaries. Within a subsystem,
+import its implementation modules directly to avoid facade cycles. New behavior
+belongs with the state owner: a new UI does not duplicate delivery, encryption,
+authorization or durable-message logic. `check_boundaries.py` enforces the
+dependency direction; installed-wheel acceptance checks the packaging boundary
+that source-tree imports alone cannot prove.
+
 ## Documentation map
 
 - [README.md](../README.md) is the human entry point.
@@ -74,7 +101,36 @@ cannot guarantee deterministic erasure of every interpreter-created immutable
 copy, so this is honest best-effort process-memory hygiene rather than a claim
 of secure-memory behavior.
 
+### Profile process and mutation exclusion
+
+Catalog mutations acquire gates in one order: catalog, profile startup, profile
+instance, then migration. Startup and instance locks use persistent, bounded
+identity hashes in the data root, outside the profile directory that rename or
+migration may move. A managed process holds its instance lock from initialization
+through cleanup, including before PID/IPC publication and if its spawning parent
+exits. Startup ownership covers IPC readiness. A busy instance produces a typed
+refusal instead of allowing an offline mutation alongside a live writer.
+
+Offline runtime operations take startup then instance ownership, recheck profile
+eligibility and integrity, and clear sensitive storage before releasing those
+gates. Creation holds its lifecycle gates until keys, database and configuration
+are complete. Profile lifecycle commands own their catalog and mutation gates
+directly rather than nesting a generic offline-runtime guard around migration.
+Ordinary profile recovery takes only the migration gate and never acquires the
+other gates while holding it. This prevents lookup from discarding an active
+prepared migration and avoids a parent/child startup lock cycle.
+
 ## Profile encryption and storage
+
+### Short-lived offline execution
+
+Applicable one-shot CLI operations may run through a local offline Core when
+the managed daemon is absent. This executor uses a private non-inheritable
+socket pair owned by the invoking CLI, never a TCP listener. It accepts one
+command; its context joins the worker and releases SQLCipher and runtime keys
+before returning. Incomplete teardown fails visibly and retains lifecycle
+exclusion until cleanup succeeds or the process exits. It does not register a
+shared daemon, create a remote-control endpoint or start Tor.
 
 ### Retired development model
 
@@ -600,6 +656,12 @@ The IPC boundary is typed on purpose. Future changes should extend that contract
 4. Alias-bearing peer-state logs should stay rename-safe when the event still refers to the current peer identity.
    In chat mode this means preserving the `{alias}` placeholder together with alias metadata for dynamic redraws, while inherently final events such as completed removals may remain static.
 
+New contact aliases are validated in Core after trimming: labels must be
+nonempty and exclude Unicode control characters, surrogates and line/paragraph
+separators (`Cc`, `Cs`, `Zl`, `Zp`). Spaces, non-Latin scripts and joined emoji
+remain valid. Existing malformed labels remain addressable for rename or removal;
+presentation boundaries still escape untrusted terminal text independently.
+
 ## IPC Contract Evolution
 
 The typed IPC contract is versioned so client/daemon drift becomes a typed error
@@ -622,9 +684,11 @@ instead of silent misbehavior. Two version axes exist:
   protocol generation bump.
   Renames are never aliased; every caller migrates in the same release.
 - Strict unknown-field rejection stays in place: a payload with an unknown field
-  is a hard error, never a silent ignore. The version handshake converts
-  version drift into a typed `ProtocolMismatchEvent` before any payload parsing
-  could otherwise fail with an untyped error.
+  is a hard error, never a silent ignore. The version handshake rejects
+  non-overlapping protocol generations with a typed `ProtocolMismatchEvent`.
+  It does not negotiate individual additive fields within a generation:
+  integrations must use the documented schema and verify required capabilities
+  before sending newer routes or fields to an older daemon.
 
 ### IPC Version Handshake (UI -> Daemon)
 
@@ -638,9 +702,10 @@ instead of silent misbehavior. Two version axes exist:
    independently validates that result before accepting the session.
 
 Generation 3 changes `PrepareProfileExitCommand` from a global daemon lock to
-cleanup of the requesting socket. Both the current and minimum IPC generations
-are 3. The canonical handshake rejects a generation 2 client or daemon before
-either side applies the old meaning to the new lifecycle.
+cleanup of the requesting socket. Generation 4 introduces the current telephone
+call contract. The registry currently requires generation 4 for both peers of
+an IPC session, so generation 2 and 3 clients or daemons cannot negotiate the
+current lifecycle and call semantics.
 
 For the complete generated command/event reference, see [API.md](./generated/API.md).
 
@@ -660,10 +725,11 @@ short-lived queries do not require this lifetime registration. The lease does
 not authenticate a profile or grant content access.
 
 1. **Connect:** Connect to the daemon's local IPC listener (`127.0.0.1:<daemon_port>`). When connecting to a remote VPS daemon, the port is forwarded locally via SSH tunnel, keeping remote transparent.
-2. **Handshake:** Send `InitCommand(current_version, min_supported)` with a unique `request_id`. Await `InitEvent(negotiated_version)`.
+2. **Handshake:** Send `InitCommand(current_version, min_supported)` with a unique `request_id`. The reply may require authentication or unlocking before the daemon returns `InitEvent(negotiated_version)`.
 3. **Auth & Unlock Gate:**
    - If the daemon responds with `DaemonLockedEvent`, send `UnlockCommand(password=...)` and await `DaemonUnlockedEvent`.
-   - If the daemon responds with `AuthRequiredEvent(challenge, salt)`, compute `proof = HMAC-SHA256(Argon2i(password, salt), challenge)` and send `AuthenticateSessionCommand(proof=...)`, awaiting `SessionAuthenticatedEvent`.
+   - If the daemon responds with `AuthRequiredEvent(challenge, salt)`, derive the session-authentication key and HMAC proof using the exact domain prefix, byte encodings and Argon2i parameters in the [generated wire guide](./generated/API.md#portable-authentication-derivation). Send `AuthenticateSessionCommand(proof=...)` and await `SessionAuthenticatedEvent`. This derivation is distinct from the profile-keyslot Argon2id derivation; using the bare password as the Argon2i input produces an invalid proof.
+   - Gate commands and the resent original `InitCommand` use the same `request_id` for that exchange. After a successful gate, resend Init and continue until the daemon returns a supported `InitEvent`. Credential success alone does not establish protocol compatibility.
 4. **Register Live Consumer:** Send `RegisterLiveConsumerCommand()`. The daemon will now stream asynchronous push events (messages, status updates, contact requests) to this socket.
 5. **Initial State & Event Loop:** Terminal may fetch its compatibility projection
    with `GetChatStartupStateCommand`. Rich clients request
@@ -739,6 +805,17 @@ canonical contract for that path:
   attached client is the authoritative notification consumer.
 - UI developers register their own sink types for their frontend instead of
   bolting display logic onto the daemon broadcast path.
+
+The built-in sinks are explicit opt-ins and export peer metadata outside the
+encrypted profile. A file sink writes plaintext alias/Onion metadata to an
+owner-private, regular, non-link file. POSIX opening is nonblocking, and descriptor
+checks reject FIFOs, devices and multiple hard links before writing; a configured
+FIFO cannot stall notification delivery waiting for a reader. The operator owns
+the file's location and retention. A webhook uses ordinary host networking, DNS and proxy configuration,
+not the daemon's Tor transport. It discloses the host's network address and
+notification metadata to the configured service. Profile encryption does not
+protect either export, and notifications never include message bodies or Voice
+bytes.
 
 ## History Model
 

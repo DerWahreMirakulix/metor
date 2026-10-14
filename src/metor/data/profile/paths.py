@@ -10,6 +10,7 @@ from metor.utils import Constants, create_private_directory_tree
 
 # Local Package Imports
 from metor.data.profile.support import (
+    profile_lock_identity,
     require_profile_name,
     validate_profile_directory,
 )
@@ -154,6 +155,35 @@ class Paths:
             Path: The PID file path.
         """
         return self.get_config_dir() / Constants.DAEMON_PID_FILE
+
+    def get_daemon_start_lock_file(self) -> Path:
+        """Returns the stable startup/lifecycle lock target outside the profile.
+
+        Migration replaces the profile directory and rename moves it. Keeping
+        startup ownership in the data root prevents either operation from
+        replacing the held lock object or invalidating Windows file handles.
+        ``FileLock`` appends the lock suffix to this target.
+
+        Returns:
+            Path: Profile-qualified lock target in the shared data root.
+        """
+        return (
+            Constants.DATA / f'.daemon-start.{profile_lock_identity(self.profile_name)}'
+        )
+
+    def get_daemon_instance_lock_file(self) -> Path:
+        """Returns the external lock held throughout one managed daemon lifetime.
+
+        The child owns this gate even when its spawning parent disappears before
+        IPC publication. Profile lifecycle mutations must acquire the same gate
+        before replacing storage; PID and port files alone cannot prove idleness.
+
+        Returns:
+            Path: Stable profile-qualified daemon-lifetime lock target.
+        """
+        return Constants.DATA / (
+            f'.daemon-instance.{profile_lock_identity(self.profile_name)}'
+        )
 
     def get_hidden_service_dir(self) -> Path:
         """

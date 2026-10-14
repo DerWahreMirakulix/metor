@@ -16,6 +16,7 @@ from metor.core.api import (
     Delivery,
     IpcEvent,
     IpcCommand,
+    InvalidTargetEvent,
     RemoveContactCommand,
     RenameContactCommand,
     PeerNotFoundEvent,
@@ -474,6 +475,29 @@ class ContactIntentTests(unittest.TestCase):
         )
         self.assertEqual(self.gui.state.route.view, 'V12')
         self.assertIsNone(self.gui.contacts._continuation)
+
+    def test_invalid_alias_preserves_form_and_never_starts_live(self) -> None:
+        """A definite Core validation failure permits correction without lost input or continuation."""
+        self.gui.contacts.begin('live')
+        form = self.gui.contacts.form
+        form.raw, form.alias = address(2), 'unsafe\x1bname'
+        self.assertTrue(self.gui.contacts.save())
+        self.gui.contacts.install(
+            Update(
+                0,
+                'contact:save:' + str(form.serial),
+                InvalidTargetEvent(form.alias),
+            )
+        )
+        self.assertEqual((form.raw, form.alias), (address(2), 'unsafe\x1bname'))
+        self.assertIn('without control characters', form.error)
+        self.assertFalse(form.pending or form.unknown)
+        self.assertEqual(self.gui.state.route.view, 'V13')
+        self.assertIsNone(self.gui.contacts._continuation)
+        self.gui.command.assert_called_once()
+        form.alias = 'Corrected name'
+        self.assertTrue(self.gui.contacts.save())
+        self.assertEqual(self.gui.command.call_count, 2)
 
     def test_existing_active_live_opens_without_another_ring(self) -> None:
         """An explicit Live picker selection opens its existing logical context."""

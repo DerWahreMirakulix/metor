@@ -6,7 +6,7 @@ from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
 
-from metor.client import IpcClient
+from metor.client import BufferedIpcEventReader
 from metor.core.api import (
     AddProfileCommand,
     IpcCommand,
@@ -39,21 +39,13 @@ class ProfileResultIpcTests(unittest.TestCase):
     def exchange(self, command: IpcCommand) -> ProfileOperationResultEvent:
         """Send one actual NDJSON command to the production ephemeral daemon."""
         with HeadlessDaemon(self.profile) as daemon:
-            client = IpcClient(
-                daemon.port,
-                timeout=Constants.DEFAULT_IPC_TIMEOUT,
-                on_event=lambda _event: None,
-                on_disconnect=lambda: None,
-            )
-            try:
-                self.assertTrue(client.connect(start_listener=False))
-                client.send_command(command)
-                event = client.read_event(Constants.DEFAULT_IPC_TIMEOUT)
-                self.assertIsInstance(event, ProfileOperationResultEvent)
-                assert isinstance(event, ProfileOperationResultEvent)
-                return event
-            finally:
-                client.stop()
+            connected = daemon.client_socket
+            connected.settimeout(Constants.DEFAULT_IPC_TIMEOUT)
+            connected.sendall((command.to_json() + '\n').encode('utf-8'))
+            event = BufferedIpcEventReader().read_from_socket(connected)
+            self.assertIsInstance(event, ProfileOperationResultEvent)
+            assert isinstance(event, ProfileOperationResultEvent)
+            return event
 
     def test_every_domain_profile_result_has_a_strict_roundtrip_code(self) -> None:
         """Valid domain outcomes never collapse into internal-error IPC replies."""

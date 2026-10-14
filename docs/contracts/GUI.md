@@ -206,6 +206,15 @@ to 1180 × 760 logical units. A 480 × 800 native display at scale 1 and a
 960 × 1600 display at scale 2 describe the same logical size. Unsupported
 geometry fails instead of clipping essential controls.
 
+The configured scale sets Kivy density and the mounted native window size;
+rotation is applied to the native dimensions first. The simulator's status
+banner is added outside the configured usable display rather than subtracting
+from it. `gui_native_device_configuration.py` checks a parsed scale-2, rotated
+simulator configuration through the real native event loop and touch keyboard.
+Device-mode `[audio]` omission or `adapter = "none"` prevents PortAudio device
+scanning and selection. Native audio selection is available in desktop mode;
+configured devices require a supported audio adapter before it can be enabled.
+
 The file is bounded to 64 KiB and must be a trusted regular file. The parser
 does not follow symlinks or accept multiply linked files. On POSIX it requires
 current-user ownership and rejects group or world write permission; Windows
@@ -552,6 +561,14 @@ suspend ends real-time audio rather than replaying a backlog after resume.
 The Linux logind/screen-lock and Windows session/power adapters distinguish
 screen lock from suspend; physical continuation requires a named native run.
 
+Temporary Power menus and purge-arming covers do not replace session
+restriction. Native screen lock and application idle timeout still restrict the
+client and cancel reversible overlays. Returning from a device cover is valid
+only for the GUI generation that opened it; a disconnected or changed profile
+cannot reopen old content. Native focus loss, suspend and input loss cancel a
+held purge chord and require an explicit physical release before a fresh PTT
+press or destructive arming sequence.
+
 Profile switch is a public lifecycle transaction: stop local producers,
 preserve accepted Core work, clear old presentation, and attach the new profile
 only after the old boundary is safe. A failed transition shows its actual phase
@@ -592,8 +609,12 @@ The software keyboard is local and offers QWERTY and QWERTZ without cloud
 suggestions or a learned persistent dictionary. Desktop typing uses the
 physical keyboard by default. It opens on field focus only when the device
 configuration declares touch input; no keyboard button occupies the field.
-Focus order follows visible reading order;
-selection alone does not start communication. A focused PTT control may own
+Focus order follows visible reading order. Text fields expose their purpose
+independently of placeholder text or entered values. Password/PIN confirmation
+fields have distinct accessible names.
+Ordinary action names follow their visible labels as state changes; icon actions
+retain their explicit purpose.
+Selection alone does not start communication. A focused PTT control may own
 Space down/up, but text fields and global shortcuts cannot capture that press.
 The text composer uses Enter for explicit Send and Shift+Enter for a newline.
 Incoming call UI does not steal an active typing or PTT owner. Modal focus
@@ -650,7 +671,10 @@ foreground detail pane; root selection alone cannot promote a background peer
 into a media owner. For a peer opened from the master list, compact Back returns
 to the originating root tab and wide Back clears the detail to a neutral
 conversation prompt. A peer opened from a contact picker returns to that picker;
-switching DROP/LIVE within the peer does not add a navigation step. Contacts,
+switching DROP/LIVE within the peer does not add a navigation step. The LIVE
+conversation menu offers **Open Drop** for the same peer, including after a
+connection failure. Opening its archive neither sends pending messages nor ends
+the LIVE context, and preserves the original Back destination. Contacts,
 Notifications, and Settings replace the foreground detail,
 while authentication, restriction, profile transition, and purge cover the whole
 application. Desktop master tabs stay available on secondary pages; selecting a

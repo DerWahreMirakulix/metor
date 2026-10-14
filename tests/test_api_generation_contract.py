@@ -8,7 +8,7 @@ import unittest
 from pathlib import Path
 from typing import Any, cast
 
-from metor.core.api import CMD_MAP, EVENT_MAP, IpcCommand, IpcEvent
+from metor.core.api import CallStateEvent, CMD_MAP, EVENT_MAP, IpcCommand, IpcEvent
 from scripts.generate_api_docs import ApiDocGenerator, ApiSchemaGenerator
 from scripts.release.compatibility import ipc_breaking_changes
 
@@ -225,6 +225,33 @@ class ApiGenerationContractTests(unittest.TestCase):
         invalid = copy.deepcopy(valid)
         invalid['nested'].append({'bad': object()})
         self.assertFalse(_schema_accepts(params_schema, invalid, definitions))
+
+    def test_json_number_fields_accept_other_language_integer_spelling(self) -> None:
+        """A conforming encoder may write a whole timestamp without a decimal."""
+        with tempfile.TemporaryDirectory() as directory:
+            _, schema_path = self._generate(Path(directory))
+            schema = json.loads(schema_path.read_text(encoding='utf-8'))
+        definitions = schema['definitions']
+        for timestamp in (0, 1720000000, 1720000000.25):
+            payload = {
+                'event_type': 'call_state',
+                'call': {'started_at': timestamp},
+            }
+            with self.subTest(timestamp=timestamp):
+                self.assertTrue(
+                    _schema_accepts(
+                        schema['events']['call_state'], payload, definitions
+                    )
+                )
+                decoded = IpcEvent.from_dict(payload)
+                self.assertIsInstance(decoded, CallStateEvent)
+                self.assertIs(type(decoded.call.started_at), float)
+                self.assertEqual(decoded.call.started_at, timestamp)
+        for invalid in (True, '1720000000', 10**400):
+            with self.subTest(invalid=invalid), self.assertRaises(TypeError):
+                IpcEvent.from_dict(
+                    {'event_type': 'call_state', 'call': {'started_at': invalid}}
+                )
 
 
 if __name__ == '__main__':

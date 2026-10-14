@@ -15,13 +15,16 @@ from unittest.mock import Mock, patch
 
 from metor.client import FrontendProfileState
 from metor.client import FrontendLaunchContext, MetorClient, build_session_auth_proof
+from metor.client.platform import PlatformBindings
 from metor.core.api import (
+    ClientAccessRestrictedEvent,
     ClientUnlockMethod,
     Delivery,
     GetMessageOutcomeCommand,
     MessageOutcomeEvent,
     SendMessageCommand,
     GetGuiPreferencesCommand,
+    GetRuntimeSnapshotCommand,
     GuiPreferenceFailure,
     GuiPreferencesEvent,
     GuiPreferencesRejectedEvent,
@@ -37,6 +40,7 @@ from metor.data import ContactManager, HistoryManager, MessageManager, SettingKe
 from metor.data.profile import ProfileManager
 from metor.data.sql import SqlManager
 from metor.ui.gui.runtime import GuiController
+from metor.ui.gui.runtime.device import DeviceLifecycle
 from metor.ui.gui.state import Route
 from metor.ui.gui.state.mailbox import Update
 from metor.utils import Constants
@@ -173,6 +177,27 @@ class GuiSecurityIntegrationTests(unittest.TestCase):
         self.assertFalse(state.covered)
         self.assertEqual(state.snapshot.profile_instance_id, identity)
         self.assertEqual(state.route.view, 'V06')
+
+    def test_device_menu_screen_lock_restricts_real_core_session(self) -> None:
+        """A reversible hardware overlay cannot stand in for Core authorization."""
+        controller = self.controller
+        controller.device = DeviceLifecycle(
+            controller, PlatformBindings('fixture', Mock(), shutdown=Mock())
+        )
+        self.assertTrue(controller.device.open_power_menu())
+        controller.screen_lock()
+        controller.poll()
+        self.settle()
+        self.assertIsNotNone(controller.security.restriction)
+        denied = self.client.request(GetRuntimeSnapshotCommand(), IpcEvent)
+        self.assertIsInstance(denied, ClientAccessRestrictedEvent)
+        self.assertIsNotNone(self.other.runtime_snapshot())
+        controller.device.cancel()
+        self.assertTrue(controller.state.covered)
+        self.assertTrue(controller.security.unlock('test-password'))
+        self.settle()
+        self.assertFalse(controller.state.covered)
+        self.assertEqual(controller.state.route, Route('V06'))
 
     def test_pin_forgot_password_and_none_use_core_challenges(self) -> None:
         """PIN cannot weaken policy; explicit password recovery restores full strength."""

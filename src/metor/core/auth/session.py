@@ -12,7 +12,7 @@ from metor.shared.constants import Constants
 from metor.shared.security import secure_clear_buffer
 
 
-_SESSION_AUTH_PASSWORD_PREFIX: str = 'metor-ipc-auth:'
+SESSION_AUTH_PASSWORD_PREFIX: str = 'metor-ipc-auth:'
 ProofKeyBuffer = Union[bytes, bytearray, memoryview]
 
 
@@ -87,7 +87,7 @@ def _scope_password(password: str) -> bytes:
     Returns:
         bytes: The scoped password bytes.
     """
-    return f'{_SESSION_AUTH_PASSWORD_PREFIX}{password}'.encode('utf-8')
+    return f'{SESSION_AUTH_PASSWORD_PREFIX}{password}'.encode('utf-8')
 
 
 def derive_session_auth_proof_key(password: str, salt: bytes) -> bytearray:
@@ -188,6 +188,9 @@ def verify_session_auth_proof(
     Returns:
         bool: True if the proof matches, False otherwise.
     """
+    if not provided_proof.isascii():
+        return False
+
     try:
         expected_proof: str = build_session_auth_proof_from_key(
             proof_key,

@@ -198,6 +198,40 @@ class ClientDemuxContractTests(unittest.TestCase):
         self.assertTrue(delivered.wait(timeout=1.0))
         client.stop()
 
+    def test_invalid_event_ends_stream_and_wakes_correlated_waiter(self) -> None:
+        """Protocol drift cannot silently discard a security or state event."""
+        for malformed in (
+            b'{invalid json}\n',
+            b'{"event_type":"daemon_locked","unrecognized":true}\n',
+            b'{"event_type":"unrecognized_event"}\n',
+            b'[]\n',
+            b'\xff\n',
+        ):
+            with self.subTest(malformed=malformed):
+                disconnected = threading.Event()
+                events: list[IpcEvent] = []
+                client = IpcClient(1, 1.0, events.append, disconnected.set)
+                client_socket, daemon_socket = socket.socketpair()
+                with client_socket, daemon_socket:
+                    client_socket.settimeout(0.1)
+                    try:
+                        client._socket = client_socket
+                        lease = client.begin_request('pending')
+                        daemon_socket.sendall(
+                            malformed
+                            + AckEvent(msg_id='must-not-arrive', request_id='pending')
+                            .to_json()
+                            .encode('utf-8')
+                            + b'\n'
+                        )
+                        with self.assertRaises(IpcDisconnectedError):
+                            client.wait_for_response('pending', lease)
+                        self.assertTrue(disconnected.wait(timeout=1.0))
+                        self.assertEqual(events, [])
+                        self.assertIsNone(client._socket)
+                    finally:
+                        client.stop()
+
 
 if __name__ == '__main__':
     unittest.main()

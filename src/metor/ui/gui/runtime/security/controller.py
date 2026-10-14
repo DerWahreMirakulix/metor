@@ -107,7 +107,10 @@ class SecurityController:
             bool: Whether a new lock cycle started.
         """
         controller, state = self.controller, self.controller.state
-        if state.covered or controller.client is None:
+        if controller.client is None:
+            return False
+        return_route = controller.device.prepare_lock()
+        if state.covered and return_route is None:
             return False
         controller.live_invitations.clear()
         controller.resend.cancel()
@@ -122,7 +125,7 @@ class SecurityController:
         self._profile_instance = (
             state.snapshot.profile_instance_id if state.snapshot else None
         )
-        self._return_route = state.route
+        self._return_route = return_route or state.route
         self.profile_label = (
             state.snapshot.profile
             if state.snapshot and preferences.show_profile_locked
@@ -315,7 +318,7 @@ class SecurityController:
         client = controller.client
         if client is None:
             return
-        if not state.covered:
+        if not state.covered or controller.device.unrestricted_cover:
             timeout = (
                 state.preferences.preferences.idle_seconds
                 if state.preferences

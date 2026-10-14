@@ -272,6 +272,7 @@ class Help:
             f'{ind}{Theme.PURPLE}Chat Mode:{Theme.RESET}\n\n'
             f'{ind}* The [alias] can be omitted if you are currently focused on a peer.\n'
             f'{ind}* Any other text entered is sent to the focused peer.\n'
+            f'{ind}* Quote aliases containing spaces, for example /switch "Alice Smith".\n'
             f'{ind}* Enter sends; {newline_keys} inserts a newline.\n'
             f'{ind}* Ctrl-C exits; Ctrl-D exits an empty prompt.\n\n'
         )

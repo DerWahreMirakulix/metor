@@ -10,6 +10,7 @@ from unittest.mock import patch
 from metor.cli.dispatcher import CliDispatcher
 from metor.cli.entry import run_cli
 from metor.cli.handlers import CommandHandlers
+from metor.cli.models import CliCommandResult
 from metor.cli.parser import CliParser
 from metor.data import ProfileManager, ProfileSecurityMode
 from metor.utils import Constants
@@ -148,7 +149,7 @@ class CliLiteralBoundaryTests(unittest.TestCase):
             patch.object(
                 CommandHandlers,
                 'handle_profile_security_migration',
-                return_value='migrated',
+                return_value=CliCommandResult('migrated'),
             ) as operation,
             patch('sys.stdout', io.StringIO()),
         ):

@@ -196,7 +196,7 @@ class NativeCoreApp(MetorApp):
         self.last_tick = now
 
     def _arm(self, _elapsed: float) -> None:
-        """Waits for the first native draw to flush SDL's initial X11 window requests."""
+        """Arms OS input; the first step separately waits for a completed native draw."""
         self.native.activate()
         self._scenario()
         Clock.schedule_interval(self._step, POLL_SECONDS)
@@ -308,9 +308,10 @@ class NativeCoreApp(MetorApp):
                             is not None,
                             'live_connect_disabled': peer.connect.disabled,
                             'live_connect_in_slot': peer.connect.parent
-                            is peer.live_slot,
+                            is peer.header.live_slot,
                             'live_slot_actions': [
-                                item.accessible_name for item in peer.live_slot.children
+                                item.accessible_name
+                                for item in peer.header.live_slot.children
                             ],
                             'archive_count': len(self.controller.messages.messages)
                             if self.controller.messages
@@ -466,10 +467,15 @@ class NativeCoreApp(MetorApp):
     def _scenario(self) -> None:
         """Exercises actual startup, repeated sends, background events, navigation and audio help."""
         gui = self.controller
+        # Core setup can consume the Clock delay before the GUI's first frame.
+        # Native clicks must observe the drawn viewport, not its old startup size.
         self.add(
             'native_open',
             lambda: (
-                Window.width == self.args.width
+                self.last_frame > 0
+                and self.root is not None
+                and tuple(self.root.size) == tuple(Window.size)
+                and Window.width == self.args.width
                 and Window.height == self.args.height
                 and self.native.size() == tuple(Window.system_size)
                 and not gui.state.busy
@@ -785,20 +791,15 @@ class NativeCoreApp(MetorApp):
             self._live_failure_visible,
             self._verify_failed_live,
         )
-        if self.args.width < Geometry.BREAKPOINT:
-            self.add(
-                'live_leave_to_drop_picker',
-                lambda: not self.peer().connect.disabled,
-                lambda: self.click('Back', self.peer()),
-            )
         self.add(
-            'open_drop_from_master_or_picker',
-            lambda: (
-                not self.peer().connect.disabled
-                if self.args.width >= Geometry.BREAKPOINT
-                else self.route('V11') and self.contact_list() is not None
-            ),
-            self._open_return_drop,
+            'live_failure_open_conversation_actions',
+            lambda: not self.peer().connect.disabled,
+            lambda: self.click('Conversation actions', self.peer()),
+        )
+        self.add(
+            'live_failure_open_drop_without_resend',
+            lambda: self.action('Open Drop') is not None,
+            self._open_peer_drop,
         )
         self.add(
             'missing_audio_call_action',
@@ -843,18 +844,11 @@ class NativeCoreApp(MetorApp):
         self.add(
             'peer_back_leaves_conversation',
             lambda: (
-                self.route('V06' if self.args.width >= Geometry.BREAKPOINT else 'V11')
+                self.route('V11')
                 and self.peer() is None
-                and (
-                    self.args.width >= Geometry.BREAKPOINT
-                    or self.contact_list() is not None
-                )
+                and self.contact_list() is not None
             ),
-            lambda: (
-                self.ux.departed()
-                if self.args.width >= Geometry.BREAKPOINT
-                else self._leave_peer_picker()
-            ),
+            self._leave_peer_picker,
         )
         self.add(
             'picker_back_root',
@@ -1322,8 +1316,8 @@ class NativeCoreApp(MetorApp):
         assert peer.subtitle.text == message
         retry = self.action('Retry Live', peer)
         assert retry is not None and not retry.disabled
-        drop = self.action('DROP', peer)
-        assert drop is not None and not drop.disabled
+        more = self.action('Conversation actions', peer)
+        assert more is not None and not more.disabled
         assert not self.controller.state.feedback.visible()
         self.ux.peer_header()
         self.checks['live_failure_has_visible_recovery'] = True
@@ -1342,15 +1336,10 @@ class NativeCoreApp(MetorApp):
             and not retry.disabled
         )
 
-    def _open_return_drop(self) -> None:
-        """Opens DROP from its desktop master row or the originating contact picker."""
-        scope = (
-            self.shell._master
-            if self.args.width >= Geometry.BREAKPOINT
-            else self.contact_list()
-        )
-        action = self.action(self.controller.contacts.alias(self.target), scope)
-        assert action is not None
+    def _open_peer_drop(self) -> None:
+        """Opens the same peer's archive through deliberate native failure recovery."""
+        action = self.action('Open Drop')
+        assert action is not None and not action.disabled
         self.ux.arm_drop(action)
         self.native.click(action)
 

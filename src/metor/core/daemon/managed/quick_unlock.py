@@ -182,6 +182,8 @@ class QuickUnlockStore:
         Returns:
             bool: True only for configured matching verifier material.
         """
+        if not proof.isascii():
+            return False
         try:
             metadata = self.metadata()
         except QuickUnlockStorageError:

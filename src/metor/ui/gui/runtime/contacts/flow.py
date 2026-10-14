@@ -20,6 +20,7 @@ from metor.core.api import (
     GetContactsListCommand,
     IpcCommand,
     IpcEvent,
+    InvalidTargetEvent,
     RemoveContactCommand,
     RenameContactCommand,
     RenameSuccessEvent,
@@ -390,6 +391,12 @@ class ContactFlow:
                 self._complete(form)
             elif isinstance(event, AliasInUseEvent):
                 form.error = 'This local alias is already in use'
+            elif (
+                isinstance(event, InvalidTargetEvent)
+                and event.target == form.submitted_alias
+            ):
+                form.unknown = False
+                form.error = 'Use a nonempty local alias without control characters.'
             else:
                 form.unknown = event is None or isinstance(event, ContactsDataEvent)
                 form.error = (

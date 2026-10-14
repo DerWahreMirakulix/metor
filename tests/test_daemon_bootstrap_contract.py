@@ -7,6 +7,7 @@ from contextlib import nullcontext
 import os
 import subprocess
 import sys
+import threading
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -17,7 +18,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
 from link_fixtures import create_directory_alias
 from metor.data import ProfileManager, SettingKey
-from metor.utils import Constants
+from metor.data.profile.paths import Paths
+from metor.utils import Constants, FileLock
 
 
 class DaemonBootstrapContractTests(unittest.TestCase):
@@ -231,7 +233,9 @@ class DaemonBootstrapContractTests(unittest.TestCase):
         profile.uses_encrypted_storage.return_value = False
         profile.get_daemon_port.return_value = None
         profile.paths = Mock()
-        profile.paths.get_daemon_pid_file.return_value = Path('unused-daemon-pid')
+        profile.paths.get_daemon_start_lock_file.return_value = Path(
+            'unused-daemon-start'
+        )
         return cast(ProfileManager, profile)
 
     def test_secret_write_failure_terminates_owned_child(self) -> None:
@@ -370,6 +374,182 @@ class DaemonBootstrapContractTests(unittest.TestCase):
         self.assertEqual(diagnostics.phase, 'ready')
         process.terminate.assert_not_called()
         process.kill.assert_not_called()
+
+    def test_spawn_gate_survives_profile_directory_replacement(self) -> None:
+        """A migration cannot replace the lock identity held through child readiness."""
+        from metor.application.runtime.daemon import start_managed_daemon_process
+
+        with (
+            TemporaryDirectory() as temporary,
+            patch.object(Constants, 'DATA', Path(temporary)),
+        ):
+            profile = self._spawn_profile()
+            profile.paths = Paths('alpha')
+            profile.paths.base_dir.mkdir()
+            target = profile.paths.get_daemon_start_lock_file()
+
+            def during_start(*_args: object, **_kwargs: object) -> bool:
+                """Replace the profile root while the parent's real lock is held."""
+                profile.paths.base_dir.rename(Path(temporary) / 'previous')
+                profile.paths.base_dir.mkdir()
+                with self.assertRaises(TimeoutError):
+                    with FileLock(target, timeout=0.05):
+                        self.fail('Profile replacement changed launch ownership.')
+                return True
+
+            with patch(
+                'metor.application.runtime.daemon._start_managed_daemon_process_unlocked',
+                side_effect=during_start,
+            ):
+                self.assertTrue(start_managed_daemon_process(profile))
+            with FileLock(target, timeout=0.05):
+                pass
+            self.assertEqual(target.parent, Path(temporary))
+
+    def test_foreground_start_releases_external_gate_only_after_publication(
+        self,
+    ) -> None:
+        """Foreground launch excludes mutation until Core publishes ready IPC."""
+        from metor.application.runtime.daemon import DaemonStatus, run_managed_daemon
+
+        with (
+            TemporaryDirectory() as temporary,
+            patch.object(Constants, 'DATA', Path(temporary)),
+        ):
+            profile = self._spawn_profile()
+            profile.paths = Paths('alpha')
+            profile.paths.base_dir.mkdir()
+            target = profile.paths.get_daemon_start_lock_file()
+
+            def factory(*_args: object, **kwargs: object) -> Mock:
+                """Assert exclusion before construction and release after ready."""
+                with self.assertRaises(TimeoutError):
+                    with FileLock(target, timeout=0.05):
+                        self.fail('Foreground construction lacks startup ownership.')
+                status = kwargs['status_callback']
+                assert callable(status)
+
+                def run() -> None:
+                    """Publish Core readiness before exposing the lock to mutation."""
+                    status(DaemonStatus.ACTIVE, {})
+                    with FileLock(target, timeout=0.05):
+                        pass
+                    with self.assertRaises(TimeoutError):
+                        with FileLock(
+                            profile.paths.get_daemon_instance_lock_file(), timeout=0.05
+                        ):
+                            self.fail('Ready daemon lost lifetime ownership.')
+
+                return Mock(run=run)
+
+            with (
+                patch('metor.application.runtime.daemon.Settings.validate_integrity'),
+                patch(
+                    'metor.application.runtime.daemon.create_managed_daemon',
+                    side_effect=factory,
+                ),
+            ):
+                run_managed_daemon(profile)
+            with FileLock(profile.paths.get_daemon_instance_lock_file(), timeout=0.05):
+                pass
+
+    def test_start_lock_path_bounds_and_windows_alias_identity(self) -> None:
+        """Long accepted names and Windows case aliases keep one stable lock."""
+        with (
+            TemporaryDirectory() as temporary,
+            patch.object(Constants, 'DATA', Path(temporary)),
+        ):
+            longest = Paths('a' * Constants.FRONTEND_PROFILE_NAME_CHARACTERS)
+            self.assertLess(len(longest.get_daemon_start_lock_file().name) + 5, 255)
+            upper, lower = Paths('Alpha'), Paths('alpha')
+            with patch('metor.data.profile.support.os.name', 'nt'):
+                self.assertEqual(
+                    upper.get_daemon_start_lock_file(),
+                    lower.get_daemon_start_lock_file(),
+                )
+
+    def test_foreground_start_cannot_recreate_removed_profile(self) -> None:
+        """A lifecycle winner invalidates preflight without creating an empty root."""
+        from metor.application.runtime.daemon import (
+            DaemonProfileMissingError,
+            run_managed_daemon,
+        )
+
+        with (
+            TemporaryDirectory() as temporary,
+            patch.object(Constants, 'DATA', Path(temporary)),
+        ):
+            profile = self._spawn_profile()
+            profile.paths = Paths('alpha')
+            profile.exists.side_effect = profile.paths.exists
+            with self.assertRaises(DaemonProfileMissingError):
+                run_managed_daemon(profile)
+            self.assertFalse(profile.paths.base_dir.exists())
+
+    def test_detached_child_keeps_lifetime_gate_after_parent_gate_loss(self) -> None:
+        """A child initializing before IPC excludes mutation after parent loss."""
+        from metor.application.runtime.daemon import run_managed_daemon
+
+        entered, release = threading.Event(), threading.Event()
+        failures: list[BaseException] = []
+        with (
+            TemporaryDirectory() as temporary,
+            patch.object(Constants, 'DATA', Path(temporary)),
+        ):
+            profile = self._spawn_profile()
+            profile.paths = Paths('alpha')
+            profile.paths.base_dir.mkdir()
+
+            def factory(*_args: object, **_kwargs: object) -> Mock:
+                """Pause daemon construction before any PID or IPC publication."""
+                entered.set()
+                if not release.wait(5):
+                    raise TimeoutError('Fixture did not release daemon construction.')
+                return Mock()
+
+            def child() -> None:
+                """Run the production child path while collecting thread failures."""
+                try:
+                    run_managed_daemon(profile, parent_start_lock_held=True)
+                except BaseException as exc:
+                    failures.append(exc)
+
+            with (
+                patch('metor.application.runtime.daemon.Settings.validate_integrity'),
+                patch(
+                    'metor.application.runtime.daemon.create_managed_daemon',
+                    side_effect=factory,
+                ),
+            ):
+                worker = threading.Thread(target=child)
+                try:
+                    with FileLock(profile.paths.get_daemon_start_lock_file()):
+                        worker.start()
+                        self.assertTrue(entered.wait(2))
+                    # Releasing parent ownership models its death; the separate
+                    # cross-process FileLock tests verify kernel crash release.
+                    with FileLock(
+                        profile.paths.get_daemon_start_lock_file(), timeout=0.05
+                    ):
+                        with self.assertRaises(TimeoutError):
+                            with FileLock(
+                                profile.paths.get_daemon_instance_lock_file(),
+                                timeout=0.05,
+                            ):
+                                self.fail('Parent loss exposed an initializing child.')
+                        other = Paths('beta')
+                        with (
+                            FileLock(other.get_daemon_start_lock_file(), timeout=0.05),
+                            FileLock(
+                                other.get_daemon_instance_lock_file(), timeout=0.05
+                            ),
+                        ):
+                            pass
+                finally:
+                    release.set()
+                    worker.join(5)
+                self.assertFalse(worker.is_alive())
+                self.assertEqual(failures, [])
 
 
 if __name__ == '__main__':

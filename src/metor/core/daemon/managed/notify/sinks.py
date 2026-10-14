@@ -10,10 +10,12 @@ Both sink factories are registered into the shared registry on import.
 import json
 import threading
 from dataclasses import asdict
+from pathlib import Path
 from typing import Dict
 from urllib.request import Request, urlopen
 
 from metor.core.api import JsonValue
+from metor.utils import open_private_binary_file
 
 # Local Package Imports
 from metor.core.daemon.managed.notify.notification import (
@@ -38,7 +40,7 @@ class FileSink:
         Returns:
             None
         """
-        self._path: str = path
+        self._path: Path = Path(path)
         self._lock: threading.Lock = threading.Lock()
 
     def deliver(self, payload: NotificationPayload) -> None:
@@ -52,10 +54,8 @@ class FileSink:
         """
         record: str = json.dumps(asdict(payload), ensure_ascii=False)
         with self._lock:
-            with open(self._path, 'a', encoding='utf-8') as handle:
-                handle.write(record)
-                handle.write('\n')
-                handle.flush()
+            with open_private_binary_file(self._path, append=True) as handle:
+                handle.write((record + '\n').encode('utf-8'))
 
 
 class WebhookSink:

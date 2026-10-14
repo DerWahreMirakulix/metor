@@ -8,15 +8,34 @@ from pathlib import Path
 from typing import cast
 
 from metor.data import SqlManager
-from metor.utils import Constants, create_private_directory_tree, secure_remove_path
+from metor.utils import (
+    Constants,
+    FileLock,
+    create_private_directory_tree,
+    secure_remove_path,
+)
 
 # Local Package Imports
-from metor.data.profile.support import normalize_profile_name, require_profile_name
+from metor.data.profile.support import (
+    normalize_profile_name,
+    profile_lock_identity,
+    require_profile_name,
+)
 
 MIGRATION_PREPARED = 'prepared'
 MIGRATION_COMMITTED = 'committed'
 _MIGRATION_JOURNAL_VERSION = 1
 MigrationCheckpoint = Callable[[str], None]
+
+
+def migration_lock(profile_name: str) -> FileLock:
+    """Returns a stable transaction lock outside every renamed profile generation.
+
+    Catalog and daemon-start locks, when required, must be acquired first.
+    Recovery acquires only this lock and never mutates an active transaction.
+    """
+    identity = profile_lock_identity(profile_name)
+    return FileLock(Constants.DATA / f'.security-migration.{identity}')
 
 
 def _migration_checkpoint(_stage: str) -> None:
@@ -182,7 +201,10 @@ def recover_profile_security_migration(profile_name: str) -> None:
     Returns:
         None
     """
-    recover_staged_profile_migration(profile_name, _migration_checkpoint)
+    if not Constants.DATA.exists():
+        return
+    with migration_lock(profile_name):
+        recover_staged_profile_migration(profile_name, _migration_checkpoint)
 
 
 def recover_staged_profile_migration(
@@ -190,6 +212,8 @@ def recover_staged_profile_migration(
     checkpoint: MigrationCheckpoint,
 ) -> None:
     """Recovers a staged profile migration according to its journal state.
+
+    The caller must hold the stable profile migration lock for this transaction.
 
     Args:
         profile_name (str): Local profile name whose sibling journal is checked.

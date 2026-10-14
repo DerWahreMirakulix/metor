@@ -202,6 +202,17 @@ def audio_routes_body(
     blocked = routes.blocked
     body = BoxLayout(orientation='vertical', spacing=dp(12), size_hint_y=None)
     body.bind(minimum_height=body.setter('height'))
+    if not routes.available:
+        body.add_widget(
+            Label(
+                'Audio is unavailable in simulator mode.'
+                if controller.simulator
+                else 'Audio is unavailable in this device configuration.',
+                role='support',
+                tone='textSecondary',
+            )
+        )
+        return body
     body.add_widget(
         Label(
             'Changes apply immediately. Speakers may cause echo during calls; headphones can help.',
@@ -223,7 +234,7 @@ def audio_routes_body(
         Action(
             'Refresh audio devices' if routes.scanned else 'Find audio devices',
             scan,
-            disabled=blocked or controller.state.busy or controller.simulator,
+            disabled=blocked or controller.state.busy,
         )
     )
     for microphone, heading, selected in (

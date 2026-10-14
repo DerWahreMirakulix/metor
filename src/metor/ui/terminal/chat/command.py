@@ -1,5 +1,6 @@
 """Module defining the command parser and dispatcher for UI slash commands."""
 
+import shlex
 from typing import List, Optional
 
 from metor.core.api import (
@@ -128,14 +129,41 @@ class CommandDispatcher:
         Returns:
             bool: True if a command was successfully resolved and fired, False otherwise.
         """
-        parts: List[str] = input_str.split()
+        try:
+            parts: List[str] = shlex.split(input_str)
+        except ValueError:
+            self._print_system(
+                'Invalid quoting. Close quotes and escape literal quotes.'
+            )
+            return True
         if not parts:
             return False
         if dispatch_call_command(parts, self._ipc, self._renderer):
             return True
 
         cmd: str = parts[0]
-        arg: Optional[str] = parts[1].lower() if len(parts) > 1 else None
+        arg: Optional[str] = parts[1] if len(parts) > 1 else None
+
+        if cmd == '/contacts':
+            self._dispatch_contacts(cmd, parts)
+            return True
+        if cmd not in (
+            '/end',
+            '/connect',
+            '/accept',
+            '/reject',
+            '/switch',
+            '/fallback',
+            '/retunnel',
+            '/inbox',
+            '/sessions',
+            '/transport',
+        ):
+            return False
+        maximum_parts = 1 if cmd == '/sessions' else 2
+        if len(parts) > maximum_parts:
+            self._print_system(Help.show_command_help(cmd).strip())
+            return True
 
         if cmd == '/end':
             target: Optional[str] = arg if arg else self._session.focused_alias
@@ -191,10 +219,6 @@ class CommandDispatcher:
             self._ipc.send_command(GetConnectionsCommand())
         elif cmd == '/transport':
             self._ipc.send_command(GetTransportStateCommand(peer=arg))
-        elif cmd.startswith('/contacts'):
-            self._dispatch_contacts(cmd, parts)
-        else:
-            return False
 
         return True
 
@@ -210,7 +234,7 @@ class CommandDispatcher:
         """
         subcmd: str = parts[1] if len(parts) > 1 else 'list'
 
-        if subcmd == 'list':
+        if subcmd == 'list' and len(parts) <= 2:
             self._ipc.send_command(GetContactsListCommand(chat_mode=True))
         elif subcmd == 'add':
             if len(parts) == 2 and self._session.focused_alias:

@@ -3,20 +3,27 @@
 import socket
 import threading
 import types
+from contextlib import ExitStack
 from functools import cached_property
 from typing import Optional, Type
 
-from metor.core.api import IpcCommand, IpcEvent
+from metor.core.api import EventType, IpcCommand, IpcEvent, create_event
 from metor.core.key import KeyManager
 from metor.core.tor import TorManager
-from metor.data import ContactManager, HistoryManager, MessageManager
+from metor.data import (
+    ContactManager,
+    HistoryManager,
+    MessageManager,
+    Settings,
+    SqlManager,
+)
 from metor.data.blob import (
     BlobLifecycle,
     BlobStore,
     EncryptedBlobStore,
     PlaintextBlobStore,
 )
-from metor.data.profile import ProfileManager
+from metor.data.profile import ProfileManager, offline_profile_guard
 from metor.utils import Constants
 
 # Local Package Imports
@@ -26,8 +33,12 @@ from metor.core.daemon.handlers import (
     ProfileCommandHandler,
     SystemCommandHandler,
 )
-from metor.core.daemon.headless.dispatch import process_command, validate_password
-from metor.core.daemon.headless.server import handle_client, run_acceptor
+from metor.core.daemon.headless.dispatch import (
+    is_profile_lifecycle_command,
+    process_command,
+    validate_password,
+)
+from metor.core.daemon.headless.server import handle_client
 
 
 class HeadlessDaemon:
@@ -48,10 +59,13 @@ class HeadlessDaemon:
         self._pm: ProfileManager = pm
         self._password: Optional[str] = password
 
-        self.port: int = 0
+        self._client: Optional[socket.socket] = None
         self._server: Optional[socket.socket] = None
         self._stop_event: threading.Event = threading.Event()
         self._thread: Optional[threading.Thread] = None
+        self._cleanup_failed: threading.Event = threading.Event()
+        self._sensitive_state_released = False
+        self._runtime_guard: Optional[ExitStack] = None
 
     @cached_property
     def _cm(self) -> ContactManager:
@@ -234,8 +248,11 @@ class HeadlessDaemon:
         self.stop()
 
     def start(self) -> None:
-        """
-        Binds a random local port and starts the background listener thread.
+        """Starts one private connected IPC channel without a listening endpoint.
+
+        The channel is created in the calling process and is never published in
+        profile metadata. Possession of its client socket is the authorization
+        boundary for operations using the caller's supplied profile password.
 
         Args:
             None
@@ -243,17 +260,41 @@ class HeadlessDaemon:
         Returns:
             None
         """
-        self._server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self._server.bind((Constants.LOCALHOST, 0))
-        self._server.listen(Constants.SERVER_BACKLOG_HEADLESS)
-        self.port = self._server.getsockname()[1]
+        if self._thread is not None or self._stop_event.is_set():
+            raise RuntimeError('Headless daemon cannot be restarted.')
+        try:
+            self._server, self._client = socket.socketpair()
+            self._server.set_inheritable(False)
+            self._client.set_inheritable(False)
+            self._thread = threading.Thread(target=self._serve, daemon=True)
+            self._thread.start()
+        except BaseException:
+            self._stop_event.set()
+            for endpoint in (self._server, self._client):
+                if endpoint is not None:
+                    endpoint.close()
+            self._server = self._client = None
+            self._thread = None
+            self._release_sensitive_state()
+            raise
 
-        self._thread = threading.Thread(target=self._acceptor, daemon=True)
-        self._thread.start()
+    @property
+    def client_socket(self) -> socket.socket:
+        """Returns the private caller-owned side of this single-command channel.
+
+        Returns:
+            socket.socket: Connected non-inheritable endpoint, valid until stop.
+
+        Raises:
+            RuntimeError: If the channel has not started or has already stopped.
+        """
+        if self._client is None or self._stop_event.is_set():
+            raise RuntimeError('Headless IPC channel is unavailable.')
+        return self._client
 
     def stop(self) -> None:
         """
-        Signals the listener to stop and closes the ephemeral server socket.
+        Stops private IPC and confirms worker exit before releasing runtime keys.
 
         Args:
             None
@@ -262,20 +303,53 @@ class HeadlessDaemon:
             None
         """
         self._stop_event.set()
-        if self._server:
+        for endpoint in (self._client, self._server):
+            if endpoint is None:
+                continue
             try:
-                self._server.close()
+                endpoint.shutdown(socket.SHUT_RDWR)
             except OSError:
                 pass
-        if '_blobs' in self.__dict__:
-            self._blobs.close()
-        if '_km' in self.__dict__:
-            self._km.clear_sensitive_state()
-        self._password = None
+            endpoint.close()
+        if self._thread is not None:
+            self._thread.join(Constants.HEADLESS_SHUTDOWN_TIMEOUT_SEC)
+            if self._thread.is_alive():
+                raise RuntimeError('Headless IPC worker did not stop in time.')
+        self._client = self._server = None
+        self._release_sensitive_state()
+        if self._cleanup_failed.is_set():
+            raise RuntimeError('Headless runtime cleanup did not complete safely.')
 
-    def _acceptor(self) -> None:
-        """
-        Waits for a single client connection, processes it, and shuts down.
+    def _release_sensitive_state(self) -> None:
+        """Releases credential references only after command execution has ended."""
+        if self._sensitive_state_released:
+            return
+        self._cleanup_failed.clear()
+        try:
+            if any(name in self.__dict__ for name in ('_cm', '_hm', '_mm')):
+                SqlManager.close_connection(self._pm.paths.get_db_file())
+        except Exception:
+            self._cleanup_failed.set()
+        try:
+            if '_blobs' in self.__dict__:
+                self._blobs.close()
+        except Exception:
+            self._cleanup_failed.set()
+        try:
+            if '_km' in self.__dict__:
+                self._km.clear_sensitive_state()
+        except Exception:
+            self._cleanup_failed.set()
+        finally:
+            self._password = None
+        if not self._cleanup_failed.is_set():
+            self._sensitive_state_released = True
+            if self._runtime_guard is not None:
+                self._runtime_guard.close()
+                self._runtime_guard = None
+
+    def _serve(self) -> None:
+        """Processes only the preconnected private client and releases its secrets.
 
         Args:
             None
@@ -283,7 +357,11 @@ class HeadlessDaemon:
         Returns:
             None
         """
-        run_acceptor(self)
+        try:
+            if self._server is not None:
+                self._handle_client(self._server)
+        finally:
+            self._release_sensitive_state()
 
     def _handle_client(self, conn: socket.socket) -> None:
         """
@@ -337,4 +415,20 @@ class HeadlessDaemon:
         Returns:
             None
         """
-        process_command(self, cmd, conn)
+        if is_profile_lifecycle_command(cmd):
+            process_command(self, cmd, conn)
+            return
+        guard = ExitStack()
+        offline = guard.enter_context(offline_profile_guard(self._pm.paths))
+        self._runtime_guard = guard
+        try:
+            if not offline or self._pm.is_daemon_running() or not self._pm.exists():
+                self._send(conn, create_event(EventType.DAEMON_OFFLINE))
+                return
+            Settings.validate_integrity()
+            self._pm.validate_integrity()
+            process_command(self, cmd, conn)
+        finally:
+            # Failed cleanup retains the gate for a safe retry from stop. Once
+            # released, later calls must not close a subsequent runtime's pool.
+            self._release_sensitive_state()

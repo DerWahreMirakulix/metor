@@ -2,6 +2,7 @@
 
 from typing import TYPE_CHECKING, Protocol
 
+from metor.client import FrontendHost
 from metor.client.platform import PlatformActionResult, PlatformBindings
 from metor.core.api import IpcEvent, ReleaseVoiceOwnerCommand, VoiceOwnerReleasedEvent
 from metor.ui.gui.constants import GuiLimits
@@ -13,6 +14,37 @@ from .model import DevicePhase
 
 if TYPE_CHECKING:
     from ..controller import GuiController
+
+
+def local_shutdown_scope(
+    host: FrontendHost, profile: str | None, *, require_running: bool
+) -> bool:
+    """Check local profile ownership and competing runtimes before fixed actuation.
+
+    Post-purge cleanup may have removed the selected profile already. The
+    adapter must additionally enforce deployment-wide exclusive power authority.
+    """
+    selected = host.profile_state()
+    if (
+        selected is None
+        or selected.remote
+        or selected.issue is not None
+        or (profile is not None and selected.profile != profile)
+    ):
+        return False
+    profiles = host.list_profiles()
+    if any(
+        state.profile != selected.profile and not state.remote and state.daemon_running
+        for state in profiles
+    ):
+        return False
+    return not require_running or (
+        selected.daemon_running
+        and sum(
+            state.profile == selected.profile and not state.remote for state in profiles
+        )
+        == 1
+    )
 
 
 class DevicePresentation(Protocol):
@@ -90,6 +122,9 @@ class PowerFlow:
         ):
             return False
         presentation.remember_return()
+        controller.inputs.focus_lost()
+        controller.voice.depart()
+        controller.playback.stop()
         self._prepared = False
         controller.state.covered = True
         controller.state.route = Route('V21')
@@ -126,7 +161,13 @@ class PowerFlow:
                     IpcEvent | None: No wire event; typed actuator result is retained.
                 """
                 try:
-                    outcome = shutdown.request_shutdown()
+                    outcome = (
+                        shutdown.request_shutdown()
+                        if local_shutdown_scope(
+                            controller.context.host, None, require_running=False
+                        )
+                        else PlatformActionResult.DENIED
+                    )
                 except Exception:
                     outcome = PlatformActionResult.FAILED
                 self._result = (True, outcome)
@@ -164,28 +205,9 @@ class PowerFlow:
             prepared = False
             outcome = PlatformActionResult.UNKNOWN
             try:
-                host_state = controller.context.host.profile_state()
-                if (
-                    host_state is None
-                    or host_state.remote
-                    or (profile is not None and host_state.profile != profile)
+                if not local_shutdown_scope(
+                    controller.context.host, profile, require_running=True
                 ):
-                    outcome = PlatformActionResult.DENIED
-                    return None
-                profiles = controller.context.host.list_profiles()
-                selected = tuple(
-                    state
-                    for state in profiles
-                    if state.profile == host_state.profile and not state.remote
-                )
-                competing = tuple(
-                    state
-                    for state in profiles
-                    if state.profile != host_state.profile
-                    and not state.remote
-                    and state.daemon_running
-                )
-                if not host_state.daemon_running or len(selected) != 1 or competing:
                     outcome = PlatformActionResult.DENIED
                     return None
                 if capture is not None:

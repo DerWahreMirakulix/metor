@@ -36,10 +36,15 @@ from metor.core.api import (
     ContactEntry,
     Delivery,
     RuntimeSnapshotEvent,
+    SettingSnapshotEntry,
 )
+from metor.ui.gui.accessibility.model import AccessibleRole
+from metor.ui.gui.accessibility.projection import Projection
 from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.state import Route
 from metor.ui.gui.views.peer.header import PeerHeader
+from metor.ui.gui.views.profiles.forms import ProfileEditor
+from metor.ui.gui.views.settings.editor import SettingEditor
 from metor.ui.gui.widgets import Action, ActionRow, Label
 from metor.ui.gui.widgets.sheet import ActionSheet
 
@@ -213,6 +218,58 @@ class ReadableControlHarness(App):
             self.root, self.output.with_stem(self.output.stem + '-keyboard')
         )
         sheet.dismiss(animation=False)
+        self.sheet = ProfileEditor(self.gui, 'create')
+        self.sheet.show()
+        self.settled(self.inspect_profile_inputs)
+
+    def inspect_profile_inputs(self) -> None:
+        """Keeps scaled form glyphs inside their fields and distinguishes credential purposes."""
+        sheet = self.sheet
+        assert isinstance(sheet, ProfileEditor)
+        for field in (sheet.name, sheet.password, sheet.confirmation):
+            assert field.height >= field.minimum_height
+            assert (
+                field.height >= field.line_height + field.padding[1] + field.padding[3]
+            )
+        sheet.password.text = sheet.confirmation.text = 'fixture-secret'
+        snapshot = Projection().capture(sheet)
+        secrets = [
+            node for node in snapshot.nodes if node.role is AccessibleRole.PASSWORD
+        ]
+        assert {node.name for node in secrets} == {'New password', 'Confirm password'}
+        assert all(node.value is None for node in secrets)
+        assert any(node.name == 'Profile name' for node in snapshot.nodes)
+        sheet.dismiss(animation=False)
+        self.sheet = SettingEditor(
+            self.gui,
+            SettingSnapshotEntry(
+                'daemon.auto_reconnect',
+                'False',
+                'global',
+                'network',
+                value_type='bool',
+                display_name='Reconnect automatically',
+            ),
+        )
+        self.sheet.show()
+        self.settled(self.inspect_setting_semantics)
+
+    def inspect_setting_semantics(self) -> None:
+        """Exposes a real setting toggle's current action while retaining explicit icon names."""
+        sheet = self.sheet
+        assert isinstance(sheet, SettingEditor)
+        projection = Projection()
+        for expected in ('Off', 'On'):
+            snapshot = projection.capture(sheet)
+            assert any(
+                node.role is AccessibleRole.BUTTON and node.name == expected
+                for node in snapshot.nodes
+            )
+            sheet.boolean._activate()
+        assert sheet.close_action.accessible_name == 'Close'
+        assert self.header.call.accessible_name == 'Open call controls'
+        sheet.dismiss(animation=False)
+        assert sheet.boolean.accessible_name == ''
         self.completed = True
         self.stop()
 

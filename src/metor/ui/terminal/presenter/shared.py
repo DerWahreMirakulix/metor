@@ -3,6 +3,9 @@
 from datetime import datetime, timezone
 from typing import Optional, Tuple
 
+from metor.shared import escape_terminal_text
+from metor.ui.terminal.cells import cell_width
+
 # Local Package Imports
 from metor.ui.terminal.theme import Theme
 
@@ -42,7 +45,9 @@ def format_fallback_timestamp(timestamp: str, compact: bool) -> str:
     Returns:
         str: The best-effort display label.
     """
-    normalized_timestamp: str = timestamp.strip().replace('T', ' ')
+    normalized_timestamp: str = (
+        escape_terminal_text(timestamp.strip()).replace('\n', r'\n').replace('T', ' ')
+    )
     if not normalized_timestamp:
         return ''
 
@@ -158,7 +163,7 @@ def format_prefixed_message(
     Returns:
         str: The fully formatted line.
     """
-    padded_text: str = indent_multiline_text(text, len(visible_prefix))
+    padded_text: str = indent_multiline_text(text, cell_width(visible_prefix))
     return f'{rendered_prefix}{padded_text}'
 
 

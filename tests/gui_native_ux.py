@@ -19,7 +19,6 @@ from kivy.uix.behaviors import FocusBehavior
 from frontend_e2e_runtime import FIXTURE_WAIT_SECONDS
 from gui_native_x11 import rectangle
 from metor.core.api import Delivery
-from metor.ui.gui.constants import Geometry
 from metor.ui.gui.widgets import Action, Label
 from metor.ui.gui.views.peer import PeerView
 
@@ -232,26 +231,15 @@ class NativeUxProbe:
             }
             self.records['live_to_drop_first_draw'] = record
             print('NATIVE_GUI_ROUTE_TIMING ' + json.dumps(record), flush=True)
-            if app.args.width >= Geometry.BREAKPOINT:
-                assert 'Existing Drop' in texts, (
-                    'Cached DROP messages are absent after same-peer master selection',
-                    record,
-                )
-                assert peer is self._drop_panel
-                assert peer.composer.entry is self._drop_editor
-                assert peer.timeline is self._drop_timeline
-                assert next(iter(peer.timeline._widgets.values())) is self._first_drop
-                app.checks['master_open_drop_reuses_native_pane'] = True
-            else:
-                assert texts or peer.timeline.empty.text == 'Loading messages…', (
-                    'Reopened archive is blank before its read completes',
-                    record,
-                )
-                assert self._drop_panel is not None and peer is not self._drop_panel
-                assert self._drop_panel.name.text == ''
-                assert not self._drop_panel.timeline._widgets
-                self._drop_panel = peer
-                app.checks['back_and_picker_reopen_drop_truthful_first_draw'] = True
+            assert 'Existing Drop' in texts, (
+                'Cached DROP messages are absent after same-peer menu selection',
+                record,
+            )
+            assert peer is self._drop_panel
+            assert peer.composer.entry is self._drop_editor
+            assert peer.timeline is self._drop_timeline
+            assert next(iter(peer.timeline._widgets.values())) is self._first_drop
+            app.checks['peer_open_drop_reuses_native_pane'] = True
             assert self._live_panel is not None
             self._hidden(self._live_panel)
             assert peer.name.text == app.controller.contacts.alias(app.target)

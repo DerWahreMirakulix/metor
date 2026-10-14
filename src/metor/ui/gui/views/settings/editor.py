@@ -30,6 +30,7 @@ class SettingEditor(ActionSheet):
         self._reload_revision: int | None = None
         self.proposed_bool = entry.value == 'True'
         self.field = TextField(
+            accessible_name=entry.display_name,
             text=entry.value,
             multiline=False,
             size_hint_y=None,

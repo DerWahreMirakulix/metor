@@ -65,6 +65,7 @@ class GuiController:
         simulator: bool = False,
         *,
         clipboard_own_address: bool = False,
+        native_audio: bool = True,
     ) -> None:
         """Creates an inert controller; no host/transport starts before Open.
 
@@ -72,12 +73,14 @@ class GuiController:
             context: Injected public host and typed launch options.
             simulator: Explicit isolated mode; host/client creation is prohibited.
             clipboard_own_address: Whether explicit own-address export is permitted.
+            native_audio: Whether desktop endpoint selection is allowed by deployment.
         Returns:
             None
         """
         self.context = context
         self.simulator = simulator
         self.clipboard_own_address = clipboard_own_address
+        self.native_audio = native_audio
         self.state = GuiState()
         self.mailbox = Mailbox()
         self.interactions = Interactions(self.state.generation, self.mailbox)
@@ -183,6 +186,7 @@ class GuiController:
         self.inputs.focus_lost()
         self.voice.depart()
         self.playback.stop()
+        self.device.focus_lost()
 
     def suspend(self) -> None:
         """Covers private state and keeps input revoked until fresh native events.

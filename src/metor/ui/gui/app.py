@@ -8,7 +8,7 @@ from kivy.clock import Clock
 from kivy.config import Config
 from kivy.core.window import Window
 from kivy.input.motionevent import MotionEvent
-from kivy.metrics import dp
+from kivy.metrics import Metrics, dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.widget import Widget
@@ -61,6 +61,7 @@ class MetorApp(App):
             context,
             configuration.mode == 'simulator',
             clipboard_own_address=configuration.clipboard_own_address,
+            native_audio=configuration.mode == 'desktop',
         )
         self.title = 'Metor · Simulator' if self.controller.simulator else 'Metor'
         self.exit_status: int = 0
@@ -76,6 +77,7 @@ class MetorApp(App):
         self.invitation_slot: BoxLayout | None = None
         self.invitation_anchor: Widget | None = None
         self._prompt_identity: object = None
+        self._native_unit_scale = (1.0, 1.0)
         self.accessibility: AccessibilityBridge | None = None
         self._lifecycle_source: DesktopLifecycleSource | None = None
         self._render_trigger = Clock.create_trigger(self._render, 0)
@@ -117,11 +119,12 @@ class MetorApp(App):
                 self.accessibility = None
                 raise
         Window.clearcolor = color('background')
-        width, height = self.configuration.logical_size
-        Window.size = (width, height)
-        Window.minimum_width = Geometry.MIN_WIDTH
-        Window.minimum_height = Geometry.MIN_HEIGHT + (
-            24 if self.controller.simulator else 0
+        width, height = self.configuration.native_size
+        if self.configuration.mode != 'desktop':
+            Metrics.density = self.configuration.scale
+        self._set_window_minimum()
+        Window.size = self._window_units(
+            width, height + (dp(24) if self.controller.simulator else 0)
         )
         root = BoxLayout(orientation='vertical')
         if self.controller.simulator:
@@ -135,7 +138,6 @@ class MetorApp(App):
                 )
             )
             root.add_widget(simulator_bar)
-            Window.size = (width, height + 24)
         self.shell = Shell(self.controller, self.refresh)
         self.viewport = BoxLayout(orientation='vertical')
         self.viewport.add_widget(self.shell)
@@ -223,6 +225,32 @@ class MetorApp(App):
         """
         self._metrics_trigger()
 
+    def _window_units(self, width: float, height: float) -> tuple[int, int]:
+        """Map configured drawable pixels into SDL's native window coordinate units.
+
+        Kivy reads ``Window.size`` in drawable pixels but writes it in system
+        units on HiDPI hosts. Desktop sizing retains its native host policy.
+        """
+        if self.configuration.mode != 'desktop':
+            system_width, system_height = Window.system_size
+            if min(system_width, system_height, Window.width, Window.height) > 0:
+                self._native_unit_scale = (
+                    system_width / Window.width,
+                    system_height / Window.height,
+                )
+            width *= self._native_unit_scale[0]
+            height *= self._native_unit_scale[1]
+        return round(width), round(height)
+
+    def _set_window_minimum(self) -> None:
+        """Keep minimum geometry in the same coordinate domain as native sizing."""
+        scale = self.configuration.scale
+        minimum = self._window_units(
+            Geometry.MIN_WIDTH * scale,
+            scale * (Geometry.MIN_HEIGHT + (24 if self.controller.simulator else 0)),
+        )
+        Window.minimum_width, Window.minimum_height = minimum
+
     def _reflow_metrics(self, _elapsed: float) -> None:
         """Applies the current pixel scale without discarding editor or cover input.
 
@@ -231,10 +259,7 @@ class MetorApp(App):
         Returns:
             None
         """
-        Window.minimum_width = Geometry.MIN_WIDTH
-        Window.minimum_height = Geometry.MIN_HEIGHT + (
-            24 if self.controller.simulator else 0
-        )
+        self._set_window_minimum()
         if ActionSheet.current is not None:
             ActionSheet.current._resize()
         self._settle_viewport_layout()

@@ -788,7 +788,7 @@ Sends a typed rejection reason when inbound drops are refused, instead of closin
 
 #### `daemon.notification_sink`
 
-JSON sink configuration for detached notifications, e.g. `{"type": "file", "path": "/tmp/metor-notify.jsonl"}` or `{"type": "webhook", "url": "https://..."}`. Empty disables the notification sink.
+Opt-in JSON sink configuration for detached notification metadata. `{"type": "file", "path": "/private/path/metor-notify.jsonl"}` appends plaintext peer metadata to an owner-private regular file. `{"type": "webhook", "url": "https://..."}` uses direct host networking, not Tor, and exposes host IP and notification metadata to the endpoint. Empty disables the notification sink.
 
 | Property         | Value                 |
 | ---------------- | --------------------- |
@@ -810,7 +810,7 @@ JSON sink configuration for detached notifications, e.g. `{"type": "file", "path
 
 #### `daemon.max_concurrent_connections`
 
-Limits simultaneous authenticated and unauthenticated live sockets handled by the daemon.
+Limits admission of incoming peer connections and outgoing LIVE connections. The capacity check counts all tracked handshakes and authenticated LIVE, DROP, and CALL transports once across ownership transitions.
 
 | Property         | Value                         |
 | ---------------- | ----------------------------- |

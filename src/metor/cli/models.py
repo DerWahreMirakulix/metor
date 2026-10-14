@@ -7,6 +7,19 @@ from dataclasses import dataclass
 from enum import Enum
 
 
+@dataclass(frozen=True)
+class CliCommandResult:
+    """Rendered local command outcome, independent of wording or IPC events.
+
+    Attributes:
+        message: The complete terminal-safe output for the dispatcher.
+        failed: Whether local interaction prevented completing the command.
+    """
+
+    message: str
+    failed: bool = False
+
+
 class StatusTone(str, Enum):
     """Standardized tone levels for translated daemon status messages."""
 

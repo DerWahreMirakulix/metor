@@ -600,11 +600,15 @@ def create_private_directory_tree(
 
 
 @contextmanager
-def open_private_binary_file(file_path: Path) -> Iterator[BinaryIO]:
+def open_private_binary_file(
+    file_path: Path, *, append: bool = False
+) -> Iterator[BinaryIO]:
     """Opens one private regular output file under a locked anchored parent.
 
     Args:
         file_path (Path): Exact internal file to create or replace.
+        append (bool): Preserve existing data and write at the end of the file.
+            The caller serializes writes when sharing an output destination.
 
     Yields:
         BinaryIO: Binary output stream bound to the validated file descriptor.
@@ -621,11 +625,12 @@ def open_private_binary_file(file_path: Path) -> Iterator[BinaryIO]:
             descriptor = _open_windows_file(file_path, _WINDOWS_OPEN_ALWAYS)
             if descriptor is None:
                 raise OSError(errno.ENOENT, 'Private output file could not be created.')
-            with os.fdopen(descriptor, 'wb') as handle:
+            with os.fdopen(descriptor, 'ab' if append else 'wb') as handle:
                 opened = os.fstat(descriptor)
                 if not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1:
                     raise OSError(errno.EINVAL, 'Private output is not a regular file.')
-                os.ftruncate(descriptor, 0)
+                if not append:
+                    os.ftruncate(descriptor, 0)
                 yield handle
                 handle.flush()
                 os.fsync(descriptor)
@@ -644,22 +649,29 @@ def open_private_binary_file(file_path: Path) -> Iterator[BinaryIO]:
 
     with _open_anchored_parent(file_path) as (parent_descriptor, name):
         no_follow = getattr(os, 'O_NOFOLLOW', None)
-        if no_follow is None:
-            raise OSError(errno.ENOTSUP, 'No-follow file opening is unavailable.')
+        nonblock = getattr(os, 'O_NONBLOCK', None)
+        if no_follow is None or nonblock is None:
+            raise OSError(errno.ENOTSUP, 'Safe private file opening is unavailable.')
         descriptor = os.open(
             name,
-            os.O_WRONLY | os.O_CREAT | no_follow | int(getattr(os, 'O_CLOEXEC', 0)),
+            os.O_WRONLY
+            | os.O_CREAT
+            | nonblock
+            | (os.O_APPEND if append else 0)
+            | no_follow
+            | int(getattr(os, 'O_CLOEXEC', 0)),
             0o600,
             dir_fd=parent_descriptor,
         )
-        with os.fdopen(descriptor, 'wb') as handle:
+        with os.fdopen(descriptor, 'ab' if append else 'wb') as handle:
             opened = os.fstat(descriptor)
             if not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1:
                 raise OSError(errno.EINVAL, 'Private output is not a regular file.')
             _set_descriptor_mode(descriptor, 0o600)
             if not _same_entry(parent_descriptor, name, opened):
                 raise OSError(errno.ESTALE, 'Private output path changed during open.')
-            os.ftruncate(descriptor, 0)
+            if not append:
+                os.ftruncate(descriptor, 0)
             yield handle
             handle.flush()
             os.fsync(descriptor)

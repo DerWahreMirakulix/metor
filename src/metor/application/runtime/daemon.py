@@ -275,7 +275,7 @@ def start_managed_daemon_process(
     """
 
     def start() -> bool:
-        """Run the existing readiness path under the optional catalog lock.
+        """Run readiness while profile startup and lifecycle mutation are excluded.
 
         Args:
             None
@@ -292,7 +292,7 @@ def start_managed_daemon_process(
         )
 
     with FileLock(
-        pm.paths.get_daemon_pid_file(),
+        pm.paths.get_daemon_start_lock_file(),
         timeout=_build_daemon_start_timeout(pm, start_locked=start_locked),
     ):
         return start()
@@ -484,12 +484,12 @@ def run_managed_daemon(
         None
         if parent_start_lock_held
         else FileLock(
-            pm.paths.get_daemon_pid_file(),
+            pm.paths.get_daemon_start_lock_file(),
             timeout=_build_daemon_start_timeout(pm, start_locked=start_locked),
         )
     )
     instance_lock = FileLock(
-        pm.paths.get_config_dir() / Constants.DAEMON_INSTANCE_LOCK_FILE,
+        pm.paths.get_daemon_instance_lock_file(),
         timeout=_build_daemon_start_timeout(pm, start_locked=start_locked),
     )
     lock_held = False
@@ -511,6 +511,12 @@ def run_managed_daemon(
             status_callback(code, params)
 
     try:
+        # A removal or rename may have won the lifecycle gate after CLI preflight.
+        # Never let the profile-local instance lock recreate that vanished root.
+        if not pm.exists():
+            raise DaemonProfileMissingError(
+                f"Profile '{pm.profile_name}' does not exist."
+            )
         if pm.is_daemon_running():
             return
         try:

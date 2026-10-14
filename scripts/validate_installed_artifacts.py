@@ -191,7 +191,8 @@ print("TERMINAL_MINIMAL_VOICE_METADATA_OK", metor.ui.terminal.__file__)
 
 
 def audit_wheel_records(wheels: tuple[Path, ...]) -> None:
-    """Checks real RECORD hashes, disjoint ownership and namespace marker placement."""
+    """Checks RECORD hashes, licensing, disjoint ownership and namespace markers."""
+    license_text = (Path(__file__).resolve().parents[1] / 'LICENSE').read_bytes()
     selected = {
         path.name: path
         for path in wheels
@@ -213,6 +214,13 @@ def audit_wheel_records(wheels: tuple[Path, ...]) -> None:
     for path in sorted(path for path in wheels if path.name in selected):
         with ZipFile(path) as archive:
             members = set(archive.namelist())
+            licenses = [
+                name for name in members if name.endswith('.dist-info/licenses/LICENSE')
+            ]
+            if len(licenses) != 1 or archive.read(licenses[0]) != license_text:
+                raise RuntimeError(
+                    f'Distribution must include the canonical GPL license: {path.name}'
+                )
             record = next(
                 name for name in members if name.endswith('.dist-info/RECORD')
             )

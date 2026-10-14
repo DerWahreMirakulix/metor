@@ -1,6 +1,8 @@
 # Contributing to Metor
 
-Metor is a highly critical, secure, Tor-based terminal messenger. Code quality, OPSEC, and cryptographic integrity are absolute priorities. There is zero tolerance for bad practices.
+Metor is a security-critical Tor messaging framework with independent graphical,
+Terminal and CLI frontends. Code quality, OPSEC, and cryptographic integrity are
+absolute priorities.
 
 When contributing to this repository, you MUST strictly adhere to the following rules:
 
@@ -51,6 +53,19 @@ authorization, and process lifetimes. GUI acceptance runs the installed packages
 with a real Kivy event loop on a virtual Linux display or native Windows
 desktop. Physical device acceptance is a separate, explicit run on named
 hardware; the simulator does not establish physical support.
+
+Choose tests by the failure they detect. Prefer observable outcomes across an
+owned boundary: denied requests must leave state unchanged, committed messages
+must survive reopening, and a UI action must reach the expected Core command.
+Use narrow unit fixtures for malformed input, state transitions and failure
+cleanup; use IPC/process/native-window fixtures where serialization, concurrency
+or event-loop ordering is the actual risk. A second frontend is useful coverage
+when it exercises a different client path, not when it repeats the same mock.
+Static source checks are appropriate for dependency direction, packaging and
+release-write restrictions; do not use source substrings as proof of runtime
+behavior. Extend the nearest domain regression instead of creating a new
+audit-named collection or asserting private implementation order. Remove a
+duplicate gate only when its behavior and failure propagation remain covered.
 
 ### Python and platform policy
 
@@ -179,7 +194,7 @@ deterministic PR gate. After building the platform bundles, run
 - **State ownership & IPC:** Frontends may retain interaction/presentation state. Transport, durable delivery, cryptographic lifecycle and authorization truth belong to the daemon. Frontends MUST NOT access databases, Tor, keys or profile runtime files; use typed DTOs and the public narrow host/settings services.
 - **Configuration Cascade:** Metor uses a strict configuration hierarchy. Global settings apply to all profiles. Profile-specific overrides apply only locally. Maintain the boundary between client-side configs (`ui.*`) and server-side configs (`daemon.*`).
 - **No Magic Numbers:** Do not use raw numeric or string literals for system parameters (e.g., `10.0`, `4096`). Define them as constants in a centralized utility file or as user-configurable settings. This applies globally to timeouts, buffer limits, retry counts, etc.
-- **Import Architecture (Facade Pattern & PEP 420 Namespaces):** Metor uses PEP 420 namespace packages at the root (`metor`) and core (`metor.core`) levels so `metor-sdk`, `metor`, and `metor-ui-terminal` can own disjoint files in one namespace. Namespace directories do not have an `__init__.py`. The SDK owns `metor.client`, `metor.core.api`, proof helpers, and lightweight shared helpers; base owns `metor.cli`, application/daemon/storage/Tor code; Terminal owns only `metor.ui.terminal`. Base and SDK MUST NOT import a frontend implementation. Frontends launch only through the versioned `metor.client` contract and MUST NOT access storage or transport internals. When importing from an _external_ or _parent_ functional domain, use that package's public `__init__.py` Facade. Core transport and key modules are imported directly from their respective domain modules (`metor.core.key`, `metor.core.tor`). Use `metor.core.daemon` only for daemon-shared bootstrap helpers, `metor.core.daemon.managed` for the full managed runtime facade plus managed-only subpackages, and `metor.core.daemon.headless` for the ephemeral offline runtime facade. The shared handler facade `metor.core.daemon.handlers` is limited to config/system/db handlers, while managed-only transport handlers belong under `metor.core.daemon.managed.handlers`. Importing implementation files such as `metor.core.daemon.managed.engine`, `metor.core.daemon.managed.bootstrap`, `metor.core.daemon.managed.factory`, `metor.core.daemon.managed.local_auth`, or `metor.core.daemon.headless.manager` from outside the package boundary is forbidden. When importing from a sibling module within the _same_ domain/directory (horizontal imports), explicitly bypass the Facade and import directly from the file to prevent circular dependencies.
+- **Import Architecture (Facade Pattern & PEP 420 Namespaces):** Metor uses PEP 420 namespace packages at the root (`metor`) and core (`metor.core`) levels so `metor-sdk`, `metor`, `metor-ui-terminal`, and `metor-ui-gui` can own disjoint files in one namespace. Namespace directories do not have an `__init__.py`. The SDK owns `metor.client`, `metor.core.api`, proof helpers, and lightweight shared helpers; base owns `metor.cli`, application/daemon/storage/Tor code; Terminal and GUI own only their respective `metor.ui` subpackages. Base and SDK MUST NOT import a frontend implementation. Frontends launch only through the versioned `metor.client` contract and MUST NOT access storage or transport internals. When importing from an _external_ or _parent_ functional domain, use that package's public `__init__.py` Facade. Core transport and key modules are imported directly from their respective domain modules (`metor.core.key`, `metor.core.tor`). Use `metor.core.daemon` only for daemon-shared bootstrap helpers, `metor.core.daemon.managed` for the full managed runtime facade plus managed-only subpackages, and `metor.core.daemon.headless` for the ephemeral offline runtime facade. The shared handler facade `metor.core.daemon.handlers` is limited to config/system/db handlers, while managed-only transport handlers belong under `metor.core.daemon.managed.handlers`. Importing implementation files such as `metor.core.daemon.managed.engine`, `metor.core.daemon.managed.bootstrap`, `metor.core.daemon.managed.factory`, `metor.core.daemon.managed.local_auth`, or `metor.core.daemon.headless.manager` from outside the package boundary is forbidden. When importing from a sibling module within the _same_ domain/directory (horizontal imports), explicitly bypass the Facade and import directly from the file to prevent circular dependencies.
 - **Context Managers:** Always use `with` statements for file operations, databases, sockets, and locks to ensure proper resource cleanup.
 - **Modern Path Handling:** Use Python's `pathlib.Path` strictly over the legacy `os.path` module for all filesystem operations.
 

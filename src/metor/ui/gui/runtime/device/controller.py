@@ -28,7 +28,7 @@ from metor.ui.gui.state.mailbox import Update
 from ..voice import PressSource
 from .model import DevicePhase
 from .feedback import HardwareFeedback
-from .power import PowerFlow
+from .power import PowerFlow, local_shutdown_scope
 from .status import HardwareStatusProjection
 from .settings import DeviceSettings
 
@@ -73,6 +73,7 @@ class DeviceLifecycle:
         self._subscription: InputSubscription | None = None
         self._return_route = Route('V06')
         self._return_covered = False
+        self._return_generation = controller.state.generation
         self.power = PowerFlow(controller, bindings)
         self._purge_requested = False
         self._purge_shutdown_requested = False
@@ -127,6 +128,48 @@ class DeviceLifecycle:
             bool: Whether a non-idle phase is visible.
         """
         return self.phase is not DevicePhase.IDLE
+
+    @property
+    def reversible_cover(self) -> bool:
+        """Identify a temporary cover that cannot replace session restriction."""
+        return (
+            self.phase
+            in {
+                DevicePhase.POWER_MENU,
+                DevicePhase.PURGE_ARMING,
+                DevicePhase.PURGE_CANCELLED,
+                DevicePhase.PURGE_UNAVAILABLE,
+            }
+            and not self._purge_requested
+            and self._return_generation == self.controller.state.generation
+        )
+
+    @property
+    def unrestricted_cover(self) -> bool:
+        """Report a device overlay above an otherwise unrestricted session."""
+        state = self.controller.state
+        return (
+            self.active
+            and not self._return_covered
+            and self._return_generation == state.generation
+            and state.route.view in {'V21', 'V22'}
+        )
+
+    def focus_lost(self) -> None:
+        """Invalidate queued physical edges and require an observed fresh release."""
+        if not self.enabled:
+            return
+        with self._input_lock:
+            self._samples.clear()
+        self._apply(self.buttons.lost())
+
+    def prepare_lock(self) -> Route | None:
+        """Return the underlying lock route; accepted device work stays covered."""
+        route = self._return_route if self.unrestricted_cover else None
+        if self.reversible_cover:
+            self.focus_lost()
+            self.restore_return()
+        return route
 
     def start(self) -> bool:
         """Subscribes after configuration validation and GUI construction.
@@ -208,6 +251,7 @@ class DeviceLifecycle:
                 self.controller.inputs.up(PressSource.PHYSICAL, 'platform-ptt')
             elif action is ButtonAction.STOP_CAPTURE:
                 self.controller.voice.depart()
+                self.controller.inputs.up(PressSource.PHYSICAL, 'platform-ptt')
             elif action is ButtonAction.LOCK:
                 self.controller.security.lock()
             elif action is ButtonAction.POWER_MENU:
@@ -286,8 +330,10 @@ class DeviceLifecycle:
         Returns:
             None
         """
-        self._return_route = self.controller.state.route
-        self._return_covered = self.controller.state.covered
+        if not self.active:
+            self._return_route = self.controller.state.route
+            self._return_covered = self.controller.state.covered
+            self._return_generation = self.controller.state.generation
 
     def restore_return(self) -> None:
         """Restores a pre-arming view only before any destructive acceptance.
@@ -301,8 +347,12 @@ class DeviceLifecycle:
         self.progress = 0.0
         self._purge_requested = False
         state = self.controller.state
-        state.route = self._return_route
-        state.covered = self._return_covered
+        if state.generation == self._return_generation and state.route.view in {
+            'V21',
+            'V22',
+        }:
+            state.route = self._return_route
+            state.covered = self._return_covered
         self.feedback.indicator(IndicatorState.OFF)
 
     def _arm_purge(self) -> None:
@@ -313,9 +363,19 @@ class DeviceLifecycle:
         Returns:
             None
         """
-        if not self.enabled or self.controller.purge.active:
+        if (
+            not self.enabled
+            or self.controller.purge.active
+            or self.phase
+            in {
+                DevicePhase.POWER_PREPARING,
+                DevicePhase.POWER_FAILED,
+                DevicePhase.POWERING_OFF,
+            }
+        ):
             return
         self.remember_return()
+        self.controller.playback.stop()
         self.phase = DevicePhase.PURGE_ARMING
         self.title = 'Hold both buttons'
         self.detail = 'Keep holding Power and PTT'
@@ -424,6 +484,7 @@ class DeviceLifecycle:
             return False
         self._purge_shutdown_requested = True
         bindings = self.bindings
+        profile = self.controller.purge.profile
 
         def request() -> None:
             """Invokes the fixed privileged adapter away from the native UI thread.
@@ -436,7 +497,14 @@ class DeviceLifecycle:
             outcome = PlatformActionResult.UNAVAILABLE
             if bindings is not None and bindings.shutdown is not None:
                 try:
-                    outcome = bindings.shutdown.request_shutdown()
+                    outcome = (
+                        bindings.shutdown.request_shutdown()
+                        if profile is not None
+                        and local_shutdown_scope(
+                            self.controller.context.host, profile, require_running=False
+                        )
+                        else PlatformActionResult.DENIED
+                    )
                 except Exception:
                     outcome = PlatformActionResult.FAILED
             with self._purge_shutdown_lock:

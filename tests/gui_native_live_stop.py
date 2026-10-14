@@ -103,7 +103,7 @@ class NativeLiveStopProbe:
             and self.app.controller.live.pending is None
             and peer.subtitle.text == 'No Live connection'
             and not peer.connect.disabled
-            and peer.connect.parent is peer.live_slot
+            and peer.connect.parent is peer.header.live_slot
             and peer.connect.get_root_window() is not None
         )
 

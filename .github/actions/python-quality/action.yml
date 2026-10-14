@@ -9,7 +9,7 @@ inputs:
   pip-version:
     description: Pip version to install before dependency setup.
     required: false
-    default: "26.0.1"
+    default: "26.2.1"
   ruff-check-paths:
     description: Space-delimited paths for ruff check.
     required: false

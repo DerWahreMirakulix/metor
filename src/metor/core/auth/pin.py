@@ -10,6 +10,7 @@ from metor.shared.security import secure_clear_buffer
 
 PIN_VERIFIER_BYTES: int = 32
 PIN_SALT_BYTES: int = nacl.pwhash.argon2id.SALTBYTES
+PIN_PASSWORD_PREFIX: str = 'metor-pin-quick-unlock:'
 
 
 def derive_pin_verifier(pin: str, salt_hex: str) -> bytearray:
@@ -31,7 +32,7 @@ def derive_pin_verifier(pin: str, salt_hex: str) -> bytearray:
     return bytearray(
         nacl.pwhash.argon2id.kdf(
             PIN_VERIFIER_BYTES,
-            f'metor-pin-quick-unlock:{pin}'.encode('utf-8'),
+            f'{PIN_PASSWORD_PREFIX}{pin}'.encode('utf-8'),
             salt,
             opslimit=nacl.pwhash.argon2id.OPSLIMIT_INTERACTIVE,
             memlimit=nacl.pwhash.argon2id.MEMLIMIT_INTERACTIVE,

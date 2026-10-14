@@ -1697,7 +1697,8 @@ class UiIpcContractTests(unittest.TestCase):
                 ProfileSecurityMode.PLAINTEXT,
             )
 
-        self.assertEqual(result, '\nmigration-complete')
+        self.assertEqual(result.message, '\nmigration-complete')
+        self.assertFalse(result.failed)
 
     def test_remote_nuke_requires_typed_self_destruct_success_event(self) -> None:
         """

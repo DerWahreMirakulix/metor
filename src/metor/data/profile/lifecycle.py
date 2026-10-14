@@ -14,6 +14,7 @@ from metor.data.profile.models import (
     ProfileSecurityMode,
 )
 from metor.data.profile.paths import Paths
+from metor.data.profile.locking import offline_profile_guard
 from metor.data.profile.support import normalize_profile_name
 from metor.data.profile.catalog import get_all_profiles, load_default_profile
 
@@ -80,8 +81,6 @@ def _add_profile_folder_locked(
     Returns:
         ProfileOperationResult: Actual creation result.
     """
-    from metor.data.profile.manager import ProfileManager
-
     safe_name = normalize_profile_name(name)
     if not safe_name:
         return ProfileOperationResult(False, ProfileOperationType.INVALID_NAME, {})
@@ -103,9 +102,32 @@ def _add_profile_folder_locked(
         )
 
     try:
-        target_dir = Paths(safe_name).base_dir
+        paths = Paths(safe_name)
     except ValueError:
         return ProfileOperationResult(False, ProfileOperationType.INVALID_NAME, {})
+    with offline_profile_guard(paths) as offline:
+        if not offline:
+            return ProfileOperationResult(
+                False,
+                ProfileOperationType.PROFILE_CREATION_FAILED,
+                {'profile': safe_name, 'reason': 'Profile is currently in use.'},
+            )
+        return _initialize_new_profile_locked(
+            safe_name, is_remote, port, security_mode, master_password
+        )
+
+
+def _initialize_new_profile_locked(
+    safe_name: str,
+    is_remote: bool,
+    port: Optional[int],
+    security_mode: ProfileSecurityMode,
+    master_password: Optional[str],
+) -> ProfileOperationResult:
+    """Initializes complete storage while catalog, startup and instance gates are held."""
+    from metor.data.profile.manager import ProfileManager
+
+    target_dir = Paths(safe_name).base_dir
     if target_dir.exists():
         return ProfileOperationResult(
             False, ProfileOperationType.PROFILE_EXISTS, {'profile': safe_name}
@@ -195,12 +217,14 @@ def migrate_profile_security(
     Returns:
         ProfileOperationResult: Structured local outcome for the CLI layer.
     """
-    return migration.migrate_profile_security(
-        name,
-        target_mode,
-        current_password,
-        new_password,
-    )
+    if not Constants.DATA.exists():
+        return migration.migrate_profile_security(
+            name, target_mode, current_password, new_password
+        )
+    with FileLock(Constants.DATA / '.profile-catalog'):
+        return migration.migrate_profile_security(
+            name, target_mode, current_password, new_password
+        )
 
 
 def remove_profile_folder(
@@ -253,24 +277,31 @@ def _remove_profile_folder_locked(
         return ProfileOperationResult(
             False, ProfileOperationType.PROFILE_NOT_FOUND, {'profile': safe_name}
         )
-    pm = ProfileManager(safe_name)
-    if pm.is_daemon_running() and not pm.is_remote():
-        return ProfileOperationResult(
-            False,
-            ProfileOperationType.CANNOT_REMOVE_RUNNING,
-            {'profile': safe_name},
-        )
-    from metor.core.profile_destruction import destroy_profile_storage
+    with offline_profile_guard(Paths(safe_name)) as offline:
+        if not offline:
+            return ProfileOperationResult(
+                False,
+                ProfileOperationType.CANNOT_REMOVE_RUNNING,
+                {'profile': safe_name},
+            )
+        pm = ProfileManager(safe_name)
+        if pm.is_daemon_running() and not pm.is_remote():
+            return ProfileOperationResult(
+                False,
+                ProfileOperationType.CANNOT_REMOVE_RUNNING,
+                {'profile': safe_name},
+            )
+        from metor.core.profile_destruction import destroy_profile_storage
 
-    destroy_profile_storage(pm)
-    remaining = get_all_profiles()
-    if default == safe_name or (len(remaining) == 1 and default not in remaining):
-        Settings.set(
-            SettingKey.DEFAULT_PROFILE, remaining[0] if len(remaining) == 1 else ''
+        destroy_profile_storage(pm)
+        remaining = get_all_profiles()
+        if default == safe_name or (len(remaining) == 1 and default not in remaining):
+            Settings.set(
+                SettingKey.DEFAULT_PROFILE, remaining[0] if len(remaining) == 1 else ''
+            )
+        return ProfileOperationResult(
+            True, ProfileOperationType.PROFILE_REMOVED, {'profile': safe_name}
         )
-    return ProfileOperationResult(
-        True, ProfileOperationType.PROFILE_REMOVED, {'profile': safe_name}
-    )
 
 
 def rename_profile_folder(old_name: str, new_name: str) -> ProfileOperationResult:
@@ -319,30 +350,39 @@ def _rename_profile_folder_locked(
         return ProfileOperationResult(
             False, ProfileOperationType.PROFILE_EXISTS, {'profile': safe_new}
         )
-    pm = ProfileManager(safe_old)
-    if pm.is_daemon_running() and not pm.is_remote():
-        return ProfileOperationResult(
-            False,
-            ProfileOperationType.CANNOT_RENAME_RUNNING,
-            {'old_profile': safe_old},
-        )
-    old_dir.rename(new_dir)
-    if load_default_profile() == safe_old:
-        try:
-            Settings.set(SettingKey.DEFAULT_PROFILE, safe_new, expected_value=safe_old)
-        except SettingValidationError:
-            pass
-        except OSError:
+    with offline_profile_guard(Paths(safe_old)) as offline:
+        if not offline:
             return ProfileOperationResult(
                 False,
-                ProfileOperationType.RENAMED_DEFAULT_UNCONFIRMED,
-                {'old_profile': safe_old, 'new_profile': safe_new},
+                ProfileOperationType.CANNOT_RENAME_RUNNING,
+                {'old_profile': safe_old},
             )
-    return ProfileOperationResult(
-        True,
-        ProfileOperationType.PROFILE_RENAMED,
-        {'old_profile': safe_old, 'new_profile': safe_new},
-    )
+        pm = ProfileManager(safe_old)
+        if pm.is_daemon_running() and not pm.is_remote():
+            return ProfileOperationResult(
+                False,
+                ProfileOperationType.CANNOT_RENAME_RUNNING,
+                {'old_profile': safe_old},
+            )
+        old_dir.rename(new_dir)
+        if load_default_profile() == safe_old:
+            try:
+                Settings.set(
+                    SettingKey.DEFAULT_PROFILE, safe_new, expected_value=safe_old
+                )
+            except SettingValidationError:
+                pass
+            except OSError:
+                return ProfileOperationResult(
+                    False,
+                    ProfileOperationType.RENAMED_DEFAULT_UNCONFIRMED,
+                    {'old_profile': safe_old, 'new_profile': safe_new},
+                )
+        return ProfileOperationResult(
+            True,
+            ProfileOperationType.PROFILE_RENAMED,
+            {'old_profile': safe_old, 'new_profile': safe_new},
+        )
 
 
 def clear_profile_db(

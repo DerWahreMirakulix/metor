@@ -47,6 +47,7 @@ from metor.core.api import (
 from metor.core.daemon.managed.engine.session_access import SessionAccessController
 from metor.core.daemon.managed.local_auth import (
     LocalAuthTracker,
+    SessionAuthContext,
     create_session_auth_context,
 )
 from metor.core.daemon.managed.quick_unlock import (
@@ -62,6 +63,33 @@ class SessionAuthContractTests(unittest.TestCase):
     """
     Covers session auth contract regression scenarios.
     """
+
+    def test_non_ascii_password_proofs_count_toward_lockout(self) -> None:
+        """Malformed Unicode cannot bypass failure accounting by raising."""
+        tracker = LocalAuthTracker()
+        tracker.install_context(
+            SessionAuthContext(salt_hex='11' * 16, proof_key=bytearray(b'k' * 32))
+        )
+        conn = cast(socket.socket, object())
+        try:
+            for _ in range(3):
+                self.assertIsNotNone(tracker.issue_session_challenge(conn))
+                result = tracker.verify_session_proof(
+                    conn, '\u2603' * 64, lockout_seconds=30.0, failure_limit=3
+                )
+                self.assertFalse(result.authenticated)
+            self.assertTrue(result.should_disconnect)
+            self.assertIsNotNone(tracker.get_retry_after_seconds())
+        finally:
+            tracker.install_context(None)
+
+    def test_non_ascii_pin_proof_is_rejected(self) -> None:
+        """PIN verification rejects arbitrary protocol strings without exceptions."""
+        with TemporaryDirectory() as temp_dir:
+            store = QuickUnlockStore(Path(temp_dir) / 'protected' / 'pin.json')
+            salt, verifier = create_pin_verifier('1234')
+            store.configure(salt, verifier)
+            self.assertFalse(store.verify('11' * 32, '\u2603' * 64))
 
     def test_quick_unlock_configuration_requires_full_password_proof(self) -> None:
         """Keeps PIN mutation gated when ordinary session auth is optional."""

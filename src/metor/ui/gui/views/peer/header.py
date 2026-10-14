@@ -216,12 +216,14 @@ class PeerHeader(BoxLayout):
             )
             self._end_identity = identity
         self.subtitle.text = (
-            'Drop conversation'
-            if self.route.delivery is Delivery.DROP
-            else stopping
+            stopping
             if stopping
             else failure
             if failure
+            else 'Connecting Live…'
+            if starting
+            else 'Drop conversation'
+            if self.route.delivery is Delivery.DROP
             else 'Changing route…'
             if live and live.route_changing
             else 'Reconnecting…'
@@ -229,7 +231,7 @@ class PeerHeader(BoxLayout):
             else 'Connected · Live'
             if active
             else 'Connecting Live…'
-            if connecting or starting
+            if connecting
             else 'Incoming Live request'
             if live and live.session_state == 'pending'
             else 'No Live connection'

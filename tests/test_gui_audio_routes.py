@@ -47,6 +47,21 @@ class AudioSelectionTests(unittest.TestCase):
         )
         self.addCleanup(self.gui.close)
 
+    def test_device_policy_and_simulator_cannot_activate_native_endpoints(self) -> None:
+        """A disabled device route cannot silently fall back to desktop hardware."""
+        for simulator in (True, False):
+            with self.subTest(simulator=simulator):
+                self.gui.simulator = simulator
+                self.gui.native_audio = simulator
+                with patch.object(HeadsetAudio, 'endpoints') as endpoints:
+                    self.assertFalse(self.routes.available)
+                    self.assertFalse(self.routes.scan())
+                    self.assertFalse(self.routes.select(1, microphone=True))
+                    self.assertFalse(self.routes.select(2, microphone=False))
+                    endpoints.assert_not_called()
+                    self.assertIsNone(self.gui.voice.audio)
+                    self.assertIsNone(self.gui.playback.audio)
+
     def test_output_only_selection_supports_actual_manual_playback(self) -> None:
         """An explicit output alone plays the complete source without microphone setup."""
         native_output = Mock()

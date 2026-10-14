@@ -11,6 +11,11 @@ use the [architecture guide](../ARCHITECTURE.md) and
 [release policy](../RELEASING.md) for their respective decisions. Evidence must
 describe what was actually exercised.
 
+Dated reviews are retained separately, including the
+[2026-10-14 embedded UI release review](../audits/2026-10-14-embeddedui-release.md).
+Their results apply to the recorded candidate and capabilities, not to future
+revisions or untested hardware.
+
 ## 1. Ownership and architecture
 
 See the [architecture guide](../ARCHITECTURE.md) and

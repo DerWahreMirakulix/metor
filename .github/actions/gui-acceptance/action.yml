@@ -1,0 +1,75 @@
+name: Native GUI acceptance
+description: Exercise Linux rendering, GUI/Core interaction, native accessibility privacy, and bounded streams.
+inputs:
+  revision:
+    description: Immutable source candidate identifier recorded with evidence.
+    required: true
+  artifact-name:
+    description: Workflow-unique name for the captured acceptance evidence.
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Run Linux GUI rendering and bounded stream fixtures
+      shell: bash
+      env:
+        METOR_CANDIDATE_REVISION: ${{ inputs.revision }}
+        KIVY_WINDOW: sdl2
+        KIVY_CLIPBOARD: dummy
+        LIBGL_ALWAYS_SOFTWARE: "1"
+        SDL_VIDEODRIVER: x11
+      run: |
+        set -euo pipefail
+        xvfb-run -a --server-args='-screen 0 1280x1024x24' python tests/gui_native_capture.py --view root_refresh --width 360 --height 640 --font-scale 1.5 --output "${RUNNER_TEMP}/root-refresh.png" > "${RUNNER_TEMP}/root-refresh.log" 2>&1
+        xvfb-run -a --server-args='-screen 0 1280x1024x24' python tests/gui_native_capture.py --view setting_keyboard --width 360 --height 640 --font-scale 1.5 --output "${RUNNER_TEMP}/setting-keyboard.png" > "${RUNNER_TEMP}/setting-keyboard.log" 2>&1
+        xvfb-run -a --server-args='-screen 0 1280x1024x24' python tests/gui_native_capture.py --view qr --width 1180 --height 760 --font-scale 1.5 --output "${RUNNER_TEMP}/qr-wide.png" > "${RUNNER_TEMP}/qr-wide.log" 2>&1
+        xvfb-run -a --server-args='-screen 0 1280x1024x24' python tests/gui_native_dpi.py --output "${RUNNER_TEMP}/dpi-reflow.png" > "${RUNNER_TEMP}/dpi-reflow.log" 2>&1
+        xvfb-run -a --server-args='-screen 0 1280x1024x24' python tests/gui_native_presentation.py --output "${RUNNER_TEMP}/gui-presentation.png" > "${RUNNER_TEMP}/gui-presentation.log" 2>&1
+        xvfb-run -a --server-args='-screen 0 1280x1024x24' python tests/gui_native_readable_controls.py --output "${RUNNER_TEMP}/readable-controls.png" > "${RUNNER_TEMP}/readable-controls.log" 2>&1
+        xvfb-run -a --server-args='-screen 0 1280x1600x24' python tests/gui_native_device_configuration.py --output "${RUNNER_TEMP}/device-configuration.png" > "${RUNNER_TEMP}/device-configuration.log" 2>&1
+        xvfb-run -a --server-args='-screen 0 1280x1024x24' python tests/gui_native_core.py --width 360 --height 640 --font-scale 1.5 --revision "$METOR_CANDIDATE_REVISION" --result "${RUNNER_TEMP}/gui-core-compact.json" --images "${RUNNER_TEMP}/gui-core-compact-images" > "${RUNNER_TEMP}/gui-core-compact.log" 2>&1
+        xvfb-run -a --server-args='-screen 0 1280x1024x24' python tests/gui_native_core.py --width 1180 --height 760 --font-scale 1.5 --revision "$METOR_CANDIDATE_REVISION" --result "${RUNNER_TEMP}/gui-core-wide.json" --images "${RUNNER_TEMP}/gui-core-wide-images" > "${RUNNER_TEMP}/gui-core-wide.log" 2>&1
+        python tests/gui_stream_pressure.py --result "${RUNNER_TEMP}/stream-pressure.json" > "${RUNNER_TEMP}/stream-pressure.log" 2>&1
+    - name: Verify native AT-SPI privacy and actions on an isolated bus
+      shell: bash
+      env:
+        KIVY_WINDOW: sdl2
+        KIVY_CLIPBOARD: dummy
+        LIBGL_ALWAYS_SOFTWARE: "1"
+        SDL_VIDEODRIVER: x11
+      run: |
+        set -euo pipefail
+        metor_accessibility_dir="$(mktemp -d "${RUNNER_TEMP}/metor-a11y.XXXXXX")"
+        trap 'rm -rf -- "$metor_accessibility_dir"' EXIT
+        mkdir -m 700 "$metor_accessibility_dir/config" "$metor_accessibility_dir/runtime"
+        XDG_CONFIG_HOME="$metor_accessibility_dir/config" XDG_RUNTIME_DIR="$metor_accessibility_dir/runtime" \
+          timeout --kill-after=5s 90s xvfb-run -a --server-args='-screen 0 1280x1024x24' \
+          dbus-run-session -- python tests/gui_native_accessibility.py 2>&1 \
+          | tail -c 65536 > "${RUNNER_TEMP}/native-accessibility.log"
+    - name: Upload bounded GUI and stream evidence
+      if: always()
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: |
+          ${{ runner.temp }}/root-refresh.png
+          ${{ runner.temp }}/setting-keyboard.png
+          ${{ runner.temp }}/qr-wide.png
+          ${{ runner.temp }}/dpi-reflow.png
+          ${{ runner.temp }}/root-refresh.log
+          ${{ runner.temp }}/setting-keyboard.log
+          ${{ runner.temp }}/qr-wide.log
+          ${{ runner.temp }}/dpi-reflow.log
+          ${{ runner.temp }}/gui-presentation.png
+          ${{ runner.temp }}/gui-presentation.log
+          ${{ runner.temp }}/readable-controls.png
+          ${{ runner.temp }}/readable-controls.log
+          ${{ runner.temp }}/device-configuration.png
+          ${{ runner.temp }}/device-configuration.log
+          ${{ runner.temp }}/native-accessibility.log
+          ${{ runner.temp }}/gui-core-compact*
+          ${{ runner.temp }}/gui-core-wide*
+          ${{ runner.temp }}/stream-pressure.json
+          ${{ runner.temp }}/stream-pressure.log
+        if-no-files-found: warn
+        retention-days: 14

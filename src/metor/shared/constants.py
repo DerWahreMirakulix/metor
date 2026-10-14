@@ -5,6 +5,7 @@ class Constants:
     """Deterministic limits shared by protocol producers and consumers."""
 
     LOCALHOST: str = '127.0.0.1'
+    TCP_PORT_MAX: int = 65535
     MAX_STREAM_BYTES: int = 1048576  # 1 MB Limit for Tor TCP streams (OOM Protection)
     MAX_IPC_BYTES: int = 5242880  # 5 MB Limit for local IPC streams (OOM Protection)
     VOICE_CHUNK_MAX_BYTES: int = 65536

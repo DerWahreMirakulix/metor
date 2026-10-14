@@ -141,7 +141,11 @@ def security_view(
         restriction = security.restriction
         if restriction is not None:
             method = restriction.unlock_method
-            secret = SecretInput()
+            secret = SecretInput(
+                accessible_name='PIN'
+                if method is ClientUnlockMethod.PIN
+                else 'Profile password'
+            )
             if method is ClientUnlockMethod.PIN:
                 secret.input_purpose = 'pin'
             if method is not ClientUnlockMethod.NONE:
@@ -245,7 +249,8 @@ def security_view(
                 tone='textSecondary',
             )
         )
-        pin, confirm = SecretInput(), SecretInput()
+        pin = SecretInput(accessible_name='New PIN')
+        confirm = SecretInput(accessible_name='Confirm PIN')
         pin.input_purpose = confirm.input_purpose = 'pin'
         error = Label('', role='support', tone='danger')
 
