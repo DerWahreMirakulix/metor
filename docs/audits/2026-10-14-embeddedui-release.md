@@ -83,28 +83,40 @@ verification record below.
 
 ## Verification record
 
-Local acceptance uses the reviewed source candidate and fresh CPython 3.11.16
-consumer environments. Open entries below are not implied passes; native CI
-must validate the immutable pull-request candidate before merge.
+Local acceptance uses source commit `ee1ff40dc848684e081095a2bd46c3181c8c5c13`
+and fresh CPython 3.11.16 consumer environments. The final native Core rerun used
+the same production and fixture bytes: compact recorded 139 checks and 378
+XTest events; wide recorded 146 checks and 352 events. Both confirmed cleanup
+and an independent client remaining usable after GUI exit. Event counts vary
+with the fixture's foreground state; every named acceptance check must pass.
+
+[PR #11](https://github.com/DerWahreMirakulix/metor/pull/11) owns the completed
+verification summary and native CI results. Its checks and bounded workflow
+artifacts identify each immutable tested revision. A CI-linked entry below is
+a required gate, not a locally inferred native-platform pass.
 
 | Check                                                | Result                                    | Evidence or scope                                                                                                                                                                                                                                                                           |
 | ---------------------------------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Focused release/versioning tests                     | Pass                                      | `python -m unittest discover -s tests -p test_versioning_release.py`: 37 tests, including four source-wheel builds and atomic ref-push rejection; Linux CPython 3.12.                                                                                                                       |
 | Changed release scripts and tests                    | Pass                                      | Ruff lint and formatting checks; five focused release-contract cases including cleanup preservation, unsafe output rejection, SDK/Terminal closures and the offline install guide.                                                                                                          |
 | Static and generated-reference gates                 | Pass                                      | Ruff lint/format (695 files); Mypy (527 files) for Linux/Python 3.11 and Windows/Python 3.13; all four GUI Basedpyright targets; package boundaries; reproducible generated references; central version and first-release compatibility baseline; Markdown formatting and local links.      |
-| Complete unit/integration suite                      | Running — final candidate                 | Linux CPython 3.11 supervised full inventory; native CI also runs Linux/Windows CPython 3.11 and 3.13.                                                                                                                                                                                      |
+| Complete unit/integration suite                      | CI verification record                    | The PR records the final local Linux CPython 3.11 full inventory and the native Linux/Windows CPython 3.11 and 3.13 matrix, including exact totals and platform skips.                                                                                                                      |
 | Dependency vulnerability audit                       | Pass                                      | `pip-audit` on all 32 resolved third-party distributions: no known vulnerabilities after the pinned updates. `npm audit`: no known vulnerabilities in the three resolved tooling packages. This is an advisory-database result, not proof that dependencies contain no defects.             |
 | Installed namespace and offline bundle acceptance    | Pass — native Linux CPython 3.11          | All four fresh offline bundles built at version 0.2.0. Wheel version, ownership and canonical license checks passed; isolated SDK typing/imports, dynamic frontend IPC, managed daemon startup, native GUI start, uninstall/reinstall isolation, and all four actual ZIP installers passed. |
-| Native Linux GUI and simulator                       | Open — root audit                         | Record final compact/wide, text scaling, input, privacy and Core interaction evidence.                                                                                                                                                                                                      |
-| Native Windows acceptance                            | Open — release owner                      | Native Windows CI is required for a Windows release claim; Linux/WSL tests do not establish it.                                                                                                                                                                                             |
+| Native Linux GUI and simulator                       | Pass — X11/SDL2 native input              | Final compact/wide Core scenarios passed as recorded above. The 42-screen capture sweep, text scaling, simulator scale/rotation/touch configuration and isolated AT-SPI privacy/action gate passed. The shared native CI action retains equivalent candidate evidence.                      |
+| Native Windows acceptance                            | CI verification record                    | Native Windows unit tests, fresh installed consumers, actual ZIP installers, GUI startup and process-launch checks run on the PR candidate. Linux/WSL results do not substitute for these jobs.                                                                                             |
 | Physical embedded appliance                          | Not applicable                            | Explicitly outside Desktop/Simulator release scope.                                                                                                                                                                                                                                         |
 | Public Tor bootstrap and physical media/OS lifecycle | Not established by deterministic fixtures | Record separately on a named host when making these runtime claims.                                                                                                                                                                                                                         |
 
 ## Release decision
 
-Final acceptance is pending the root audit's completed verification record and
-the native release workflow. This review does not claim formal third-party
-security certification, verified physical erasure, universal audio routing,
-acoustic echo cancellation, complete screen-reader certification or physical
-device support. Publishing remains the explicit, candidate-bound process in
-[RELEASING.md](../RELEASING.md).
+Merge requires the PR's **Required CI result** to pass with every static,
+runtime and installed-package job successful. Publication additionally runs
+the native release workflow against its exact candidate; a branch audit does
+not replace that gate. The completed verification summary belongs to the PR
+linked above, avoiding a second mutable copy of workflow state in this record.
+
+This review does not claim formal third-party security certification, verified
+physical erasure, universal audio routing, acoustic echo cancellation, complete
+screen-reader certification or physical device support. Publishing remains the
+explicit, candidate-bound process in [RELEASING.md](../RELEASING.md).
