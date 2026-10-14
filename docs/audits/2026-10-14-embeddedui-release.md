@@ -1,16 +1,30 @@
 # Embedded UI release review — 2026-10-14
 
-This record captures the final review of the `embeddedui` development state,
-starting at `87724a1`, on the `codex/embeddedui-release-audit` branch. The release
-target is **Desktop and Simulator**. Physical embedded products and their native
-hardware acceptance belong to a later release and are not blockers for this
-scope. The reusable checklist remains in [AUDIT.md](../governance/AUDIT.md);
-this document is dated evidence, not a second source of product contracts.
+This is the test report for the audit and repairs of `embeddedui`, starting at
+`87724a1cdcd46a6099485061c9ea4c2e2e230faa`. The target is **Desktop and Simulator**
+on the documented Linux/Windows platforms. Physical embedded hardware is deferred
+by the owner. This dated record is evidence; the reusable checklist and product
+contracts remain in [AUDIT.md](../governance/AUDIT.md),
+[ARCHITECTURE.md](../ARCHITECTURE.md), [FRONTENDS.md](../contracts/FRONTENDS.md)
+and [GUI.md](../contracts/GUI.md).
 
-The review covers ownership and packaging, daemon/IPC/SDK integration, GUI and
-Terminal interaction, CLI interoperability, security boundaries, installation,
-documentation and release gates. Implemented corrections are part of the review
-candidate; an initial baseline result does not validate later edits.
+**Disposition:** the implemented review candidate is ready for native desktop
+acceptance after its required CI passes. Final release approval remains open for
+real public-Tor messaging, physical audio and actual OS lock/suspend evidence.
+Automated or simulated success does not establish those results. The owner has
+requested that a local agent complete them using the
+[self-contained handoff prompt](./2026-10-14-embeddedui-handoff.md).
+
+[PR #11](https://github.com/DerWahreMirakulix/metor/pull/11) records the final
+candidate SHA, CI run, complete matrix results and merge into `embeddedui`.
+That merge is gated on all required jobs succeeding. A local agent must record
+the actual pulled HEAD and verify this evidence before continuing; this report
+does not predeclare a still-running CI result. The final documentation-only
+handoff commit follows source/test anchor
+`f9ba1ae64c749f90b70582f105ae234bc9e2bc51` and receives the same full CI gates.
+No `main` merge, application version bump, tag or release publication is part of
+this handoff. The application remains `0.2.0`; compatibility generations are
+unchanged.
 
 ## Architecture assessment
 
@@ -50,152 +64,149 @@ additive fields with an older implementation.
 | CLI outcomes           | Rejected arguments, cancelled or invalid migration credentials, transport/authentication failures and incomplete offline teardown produce nonzero status. Unconfirmed execution is reported as an unknown outcome without leaking exception details. Human-readable CLI output remains distinct from the typed SDK/IPC integration contract.            |
 | Installation           | README instructions now create and select an environment, explain first-profile setup, distinguish GUI autostart from independent daemon lifetime, and accurately describe Windows wheels and unpublished package-index targets.                                                                                                                        |
 | Distribution integrity | Every distribution includes the canonical GPL license text; installed-artifact validation checks the actual wheel bytes. Terminal dependency closure remains separate from Base and SDK.                                                                                                                                                                |
-| Dependencies           | Identified vulnerable pins are updated to `pip==26.2.1`, `setuptools==83.0.0` and `urllib3==2.8.0`; the dependency audit must be repeated against the final environment.                                                                                                                                                                                |
+| Dependencies           | Identified vulnerable pins are updated to `pip==26.2.1`, `setuptools==83.0.0` and `urllib3==2.8.0`; the final strict advisory audit covers all 39 pinned Linux/Windows third-party distributions with none skipped.                                                                                                                                     |
 | Build cleanup          | Packaging removes only its own generated directories, preserving `build/test-report.txt`, audit evidence and earlier release variants. Destinations inside setuptools-owned directories fail before mutation.                                                                                                                                           |
 | Release validation     | CI and release use one native GUI acceptance action, including compact/wide Core-backed windows, rendering, simulator configuration, stream pressure and an isolated native AT-SPI privacy gate. Redundant shell installer smoke blocks are removed; the checked native installer validator remains mandatory on both OS jobs.                          |
 | Test strategy          | Behavioral regression, source-boundary and installed/native gates have distinct purposes. Contributor guidance rejects private-implementation mirrors as substitutes for observable behavior and keeps duplicate removal conditional on retained coverage.                                                                                              |
 
-## Native Linux evidence observed during the review
+## Additional security and frontend repairs
 
-The [Core-backed native fixture](../../tests/gui_native_core.py) passed on Linux
-with CPython 3.12.14, Kivy SDL2 and X11 XTest input through the native event queue.
-At font scale 1.5, the 360 × 640 run recorded 139 successful checks and 378 input
-events; the 1180 × 760 run recorded 146 successful checks and 484 input events.
-Each run retained 20 screen captures and confirmed that closing the GUI left an
-independent client usable. The broader native visual review examined 42 screen
-captures. These runs used actual Core IPC, SQLCipher and peer framing; bounded
-loopback TCP replaced Tor to make transport outcomes deterministic.
+- **Protected files and migrations:** Windows PIN credentials and profile keys
+  share one owner-only ACL policy. Migration staging validates private ownership,
+  bounded regular files and source identity, rejects links/special files, and
+  uses exclusive temporary files. POSIX PIN reads open with nonblocking,
+  no-follow descriptors and validate the actual descriptor before reading;
+  replacing a candidate with a FIFO cannot hang authentication.
+- **IPC and SDK failures:** malformed proof text, non-object JSON, invalid
+  endpoints and non-finite limits fail explicitly. Connection budgets include
+  DROP/CALL paths. Secret DTO fields are excluded from representations. Invalid
+  or unknown SDK events terminate the connection and wake pending requests;
+  failed initialization releases its lease.
+- **GUI privacy after monitor failure:** loss of the native security observer
+  permanently closes that GUI session. Unlock, reconnect, profile activation or
+  a stale callback cannot restore private content. Accepted purge may expose
+  only sanitized progress. The final cover offers Close and exits with failure;
+  independent daemon clients remain usable.
+- **GUI scrolling and completion:** bounded scrolling keeps footer controls
+  reachable at low frame rates. Outgoing optimistic message rows do not count
+  as confirmed Core completion in native acceptance. Real scale/rotation,
+  control readability, accessible names, LIVE connecting state and DROP opening
+  are exercised through the native event loop.
+- **CLI encoding:** redirected stdout/stderr use UTF-8 while normal terminal and
+  absent-windowed streams retain their appropriate behavior. Piped credentials
+  use strict bounded UTF-8. Windows interactive prompting retains the TTY path.
+- **Native Windows evidence:** the fixture owns a visible console, follows the
+  actual launcher/interpreter chain, and checks that both GUI launchers preserve
+  the original console without creating an extra one. Windowed startup without
+  standard streams, native error handling, autostart cancellation, PIN security
+  and Tor-child console suppression are covered. Hosted validation explicitly
+  selects the pinned ANGLE backend; the product's default backend is unchanged.
 
-The [native accessibility fixture](../../tests/gui_native_accessibility.py) also
-passed through an external AT-SPI client with `NATIVE_ATSPI_PRIVACY_OK`. The exact
-shared-action command was rerun using a private `dbus-run-session`, writable
-isolated XDG configuration/runtime directories, runtime permissions `0700`,
-Xvfb/SDL2, a 90-second deadline with a 5-second kill grace, and a 64 KiB log cap.
-It exited successfully and produced a 5,639-byte log. The same fixture and
-isolation now run in both CI and release through the
-[shared GUI action](../../.github/actions/gui-acceptance/action.yml).
+The security review covered authentication and replay, framing and resource
+bounds, credential/PMK lifecycle, storage permissions and replacement races,
+profile exclusion and migration recovery, process ownership, notification export
+boundaries, untrusted presentation and privacy revocation. Corrections have
+behavioral regressions at the relevant boundaries. This is a source and runtime
+review with the recorded evidence, not a formal cryptographic proof or a claim
+that undiscovered vulnerabilities cannot exist.
 
-These observations establish the exercised Linux virtual-display interactions,
-including accessibility privacy revocation; they do not establish physical
-input/audio, native OS lock/suspend providers, public Tor bootstrap or native
-Windows behavior. Final candidate reruns and artifact retention belong in the
-verification record below.
+## Verification evidence
 
-## Verification record
+The table distinguishes reproducible automated coverage from physical acceptance.
+Final CI status and exact per-platform totals belong to PR #11's immutable run;
+previous successful jobs must not be substituted for a failed final candidate.
 
-The local passes below are historical evidence for source commit
-`ee1ff40dc848684e081095a2bd46c3181c8c5c13`, using fresh CPython 3.11.16 consumer
-environments. They do not certify subsequent edits. That revision's native Core
-rerun used the same production and fixture bytes: compact recorded 139 checks and 378
-XTest events; wide recorded 146 checks and 352 events. Both confirmed cleanup
-and an independent client remaining usable after GUI exit. Event counts vary
-with the fixture's foreground state; every named acceptance check must pass.
+| Gate                                  | Recorded result and scope                                                                                                                                                                                                                                                                    |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Static analysis                       | Ruff and formatting pass over 703 Python files; Mypy passes over 529 files for Linux/Python 3.11 and Windows/Python 3.13. The focused GUI Basedpyright gate passes all four platform/version targets.                                                                                        |
+| Repository contracts                  | Import boundaries, generated-reference reproducibility, version/compatibility checks, Markdown formatting and local links pass. Generated documents are produced from their owners.                                                                                                          |
+| Full runtime suite                    | Required matrix: Linux and Windows x86-64, CPython 3.11 and 3.13, each discovering 1,452 tests. Skips are explicit capability decisions, not passes: the preceding completed runs recorded 14 Linux and 31 Windows skips. Consult the final run for actual totals and failures.              |
+| Packages and installers               | Fresh CPython 3.11 offline bundles, all four independently owned packages, isolated installed consumers, SDK typing, dynamic frontend IPC, uninstall/reinstall isolation and all four actual ZIP installers pass on both native CI platforms at the source/test anchor.                      |
+| Linux native GUI                      | Compact/wide real Core-backed interaction, keyboard/mouse dispatch, low-frame-rate scrolling, scale/reflow/readability, simulator configuration, stream pressure and permanent monitor-failure cover pass. Native AT-SPI privacy checks pass from a separate process.                        |
+| Windows native GUI                    | Both installed launchers, console preservation, no-stream error dialog, encrypted autostart cancellation, PIN and Tor-child launch checks pass. These are native CI desktop checks, not physical audio or OS-state transitions.                                                              |
+| Targeted security and CLI regressions | Six POSIX PIN special-file/replacement cases, 12 actual CLI process cases with forced cp1252, and 12 prompt/output/failure cases pass.                                                                                                                                                       |
+| Writer/cancellation regressions       | 53 related Voice tests and 12 focused transport cases pass. Deliberate slow encrypted staging reproduces the former fixture failure; explicit release fixes ordering. Injected extra coalesced bytes are detected; early-failure cleanup releases blocked workers.                           |
+| Dependency advisories                 | Strict audit of all 39 pinned Linux/Windows third-party Python distributions reports zero known vulnerabilities and zero skipped distributions; all three resolved npm tooling packages also report zero. This is the advisory database result on the review date, not a security guarantee. |
+| Public Tor peer roundtrip             | **OPEN:** no public-Tor relay connectivity in this cloud environment. Loopback routing and bootstrap-only checks are insufficient.                                                                                                                                                           |
+| Physical audio and OS transitions     | **OPEN:** real microphone/playback/call audio, actual screen lock and suspend/resume need named-host evidence.                                                                                                                                                                               |
 
-The subsequent native CI investigation corrected positive protected-storage
-fixtures to create user-owned roots on elevated Windows runners; production
-ownership checks remain strict. The GUI fixture now waits for native scrolling
-to settle and for the local action button to become ready before the next input.
-The packaging cleanup test compares canonical paths on Windows. A production CLI
-fix makes redirected password prompts read one bounded stdin line on Windows,
-instead of entering the console-only `getpass` path; EOF and inputs exceeding
-4,096 UTF-8 bytes abort without credential truncation. These corrections require
-fresh candidate checks and do not establish a Windows acceptance pass.
+### Native artifact at the source/test anchor
 
-Native Windows testing also exposed default ownership on migration staging and
-journal files. Migration now uses canonical private writers and bounded copying,
-rejecting links, multiple hard links and special files. PIN verification and
-keyslots share the same native owner-only storage policy, replacing the PIN's
-separate PowerShell/SYSTEM ACL path. Formats and derivation are unchanged;
-incompatible existing PIN permissions remain unavailable until password unlock
-and explicit PIN setup. Native Windows confirmation of these changes is pending.
+[Run 38629245682](https://github.com/DerWahreMirakulix/metor/actions/runs/38629245682)
+checks `f9ba1ae64c749f90b70582f105ae234bc9e2bc51`. Its Linux installed/native job
+`116076301823`, Windows installed/native job `116076301488`, and static job
+`116076301100` succeeded. The Linux artifact ID is `11925147798`, with archive
+SHA-256 `2e7cf8933d628e78df9db09b5e59e16a4cea9e36cc7a1061e14cd3c121f4a260`.
+It contains 48 PNGs and structured acceptance results:
 
-The resumed POSIX review found that PIN metadata could be replaced with a FIFO
-between path validation and opening, blocking the credential read. Metadata now
-opens with no-follow and nonblocking flags and validates the actual descriptor
-as a privately owned regular file with one hard link before reading. The size
-check and bounded read apply to that same descriptor; unsafe permissions,
-ownership, links and special files fail closed. Final candidate verification of
-this correction remains pending.
+- Compact 360 × 640 at font scale 1.5: 139 entries, including 137 successful
+  Boolean checks and two geometry records; 378 XTest events.
+- Desktop 1180 × 760 at font scale 1.5: 146 entries, including 144 successful
+  Boolean checks and two geometry records; 352 XTest events.
+- Both Core-backed scenarios retain 20 captures each and confirm GUI detach,
+  an independently usable client and cleanup of their temporary Core runtime.
 
-Redirected CLI confirmation and password input now use one strict UTF-8 decoder;
-an actual process round trip verifies Unicode credentials despite a Windows-style
-legacy encoding default. The capture fixture now waits within the existing IPC
-budget instead of a shorter independent deadline, with a delayed-response
-regression proving the distinction.
+These runs use real GUI/SDK/Core IPC, SQLCipher and signed peer framing.
+Loopback replaces Tor/SOCKS, and lifecycle events are supplied by controlled
+fixtures. Neither is counted as actual Tor-network or OS-provider acceptance.
+Artifact retention is finite; archive the relevant evidence with the final
+release record if it must outlive GitHub Actions retention. Final handoff CI
+regenerates native artifacts; PR #11 identifies that final run as well.
 
-The next native Windows Unicode case exposed a separate redirected-output
-failure: the host's legacy stdout encoding could reject a valid contact label.
-CLI dispatch now configures redirected stdout and stderr as UTF-8, preserving
-valid Unicode and escaping isolated surrogate code points. Console handling
-remains unchanged. Native Windows validation of this output correction is pending.
+### Why the test corrections improve evidence
 
-The next native CI investigation identified the installed Windows GUI startup
-block in Kivy's OpenGL-version error dialog on the hosted runner. The Windows
-installed-GUI steps in CI and release now select `angle_sdl2` explicitly; product
-defaults are unchanged. The subsequent
-[native Windows run](https://github.com/DerWahreMirakulix/metor/actions/runs/38545872010/job/115791655204)
-passed installed GUI startup, close and callback-failure cleanup with ANGLE.
-Its later process-chain fixture mishandled a native NULL window handle. The
-installed-artifact validator now creates an explicit visible console owned by
-the fixture and requires it to remain attached and visible throughout each
-launch. Window discovery includes the installed launcher's interpreter children;
-additional consoles still fail acceptance. These fixture corrections require a
-new complete native Windows acceptance run.
+The native send fixture previously advanced when an optimistic row appeared,
+before its pending Core request completed. A controlled 3.2-second real reply
+reproduced the failure. Waiting for the visible row **and** no matching pending
+request passes at both window sizes without extending production deadlines.
 
-A late security review found that loss of the native OS lock/suspend observer
-did not remain a permanent barrier for the GUI process. The correction adds a
-controller-lifetime failure state: detach the local client, invalidate stale
-callbacks and keep private content covered with only Close available until a
-fresh GUI process starts. An independently running daemon and other clients
-continue. Focused regression and candidate validation of this correction remain
-pending; ordinary IPC disconnect is a separate condition.
+A Voice cancellation fixture previously released a writer barrier after two
+seconds even if encrypted staging had not finished. On a slower Windows runner,
+voice frames could pass before the cancellation being tested. The replacement
+barrier is explicitly released by test cleanup; real socket and observation
+deadlines remain bounded. The reader is retained so bytes already buffered after
+the expected frame cannot disappear from the assertion. Negative controls show
+both the former false failure and the former false pass. Cleanup failure tests
+confirm the correction cannot strand the fixture's workers.
 
-A slower-frame Linux reproduction exposed a product scroll-boundary defect:
-Kivy wheel overscroll could settle with the Exit action still clipped by
-5–7 pixels. Existing GUI scroll views now explicitly disable always-on
-overscroll, bounding wheel movement at the content edges and keeping short
-content still while preserving touch dragging for longer content. This changes
-the shared scroll policy without relaxing geometry assertions or test deadlines.
-Native wheel/touch and complete candidate acceptance must verify the final change.
-The shared CI/release action now includes a focused native XTest regression at
-20 FPS: a long Settings page must expose its full footer and remain draggable,
-while a short Profiles page stays fixed after wheel and pointer-drag input. It
-passed locally with the correction and failed its pre-fix negative control;
-the bounded log and screen capture accompany candidate workflow evidence.
+These are concurrency and stream-boundary checks with observable failure modes.
+The test policy now distinguishes narrow state tests, process/IPC regressions,
+native interaction, package ownership and physical acceptance. Redundant shell
+installer checks were removed only where the checked native validator preserves
+failure propagation; a coverage percentage is not used as a quality claim.
 
-Public Tor execution was unavailable in this cloud environment because its
-network policy does not permit the required relay TCP connections. The existing
-optional public-Tor gate checks daemon bootstrap to 100% and IPC availability;
-it does not establish an actual peer-to-peer message round trip over Tor.
-Deterministic loopback peer tests do not supply that missing network evidence.
+## Native acceptance still required
 
-[PR #11](https://github.com/DerWahreMirakulix/metor/pull/11) owns the completed
-verification summary and native CI results. Its checks and bounded workflow
-artifacts identify each immutable tested revision. A CI-linked entry below is
-a required gate, not a locally inferred native-platform pass.
+The [handoff prompt](./2026-10-14-embeddedui-handoff.md) is intended to be given
+in full to the local agent after pulling `embeddedui`. It covers:
 
-| Check                                                | Result                                    | Evidence or scope                                                                                                                                                                                                                                                                           |
-| ---------------------------------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Focused release/versioning tests                     | Pass                                      | `python -m unittest discover -s tests -p test_versioning_release.py`: 37 tests, including four source-wheel builds and atomic ref-push rejection; Linux CPython 3.12.                                                                                                                       |
-| Changed release scripts and tests                    | Pass                                      | Ruff lint and formatting checks; five focused release-contract cases including cleanup preservation, unsafe output rejection, SDK/Terminal closures and the offline install guide.                                                                                                          |
-| Static and generated-reference gates                 | Pass                                      | Ruff lint/format (695 files); Mypy (527 files) for Linux/Python 3.11 and Windows/Python 3.13; all four GUI Basedpyright targets; package boundaries; reproducible generated references; central version and first-release compatibility baseline; Markdown formatting and local links.      |
-| Complete unit/integration suite                      | CI verification record                    | The PR records the final local Linux CPython 3.11 full inventory and the native Linux/Windows CPython 3.11 and 3.13 matrix, including exact totals and platform skips.                                                                                                                      |
-| Dependency vulnerability audit                       | Pass                                      | `pip-audit` on all 32 resolved third-party distributions: no known vulnerabilities after the pinned updates. `npm audit`: no known vulnerabilities in the three resolved tooling packages. This is an advisory-database result, not proof that dependencies contain no defects.             |
-| Installed namespace and offline bundle acceptance    | Pass — native Linux CPython 3.11          | All four fresh offline bundles built at version 0.2.0. Wheel version, ownership and canonical license checks passed; isolated SDK typing/imports, dynamic frontend IPC, managed daemon startup, native GUI start, uninstall/reinstall isolation, and all four actual ZIP installers passed. |
-| Native Linux GUI and simulator                       | Pass — X11/SDL2 native input              | The recorded baseline's compact/wide Core scenarios passed as described above. The 42-screen capture sweep, text scaling, simulator scale/rotation/touch configuration and isolated AT-SPI privacy/action gate passed. The shared native CI action retains candidate evidence.              |
-| Native Windows acceptance                            | CI verification record                    | Native Windows unit tests, fresh installed consumers, actual ZIP installers, GUI startup and process-launch checks run on the PR candidate. Linux/WSL results do not substitute for these jobs.                                                                                             |
-| Physical embedded appliance                          | Not applicable                            | Explicitly outside Desktop/Simulator release scope.                                                                                                                                                                                                                                         |
-| Public Tor bootstrap and physical media/OS lifecycle | Not established by deterministic fixtures | Record separately on a named host when making these runtime claims.                                                                                                                                                                                                                         |
+1. Actual public-Tor DROP and LIVE messages across GUI, Terminal and CLI, with
+   received content and independent frontend/daemon lifetime evidence.
+2. Real Voice capture, explicit preview/send, receipt/playback in both directions,
+   device failure recovery, and accepted telephone-call audio/mute/hangup.
+3. Actual OS screen lock and suspend/resume: protected private content, stopped
+   Voice recording/playback, continued accepted calls on screen lock, and ended
+   real-time audio after suspend. Simulated events do not close this item.
+4. Native GUI screen/control review, resizing, text scale, focus/navigation,
+   menus, destructive holds, and simulator scale/rotation/input behavior.
+5. Fixes and suitable regressions for any defect, followed by final-commit CI and
+   a result table with PASS/FAIL/BLOCKED, host details and concrete observations.
 
-## Release decision
+Linux desktop and simulator require SDL/OpenGL, system D-Bus and a registered
+logind login resolvable through `GetSessionByPID`. An SSH shell, WSL or an Xvfb
+display alone does not establish that production environment. Do not disable the
+security observer to obtain a pass. Native Windows mixed-DPI and a user's actual
+accessibility tools should be checked on the available desktop; the AT-SPI and
+UIA fixtures do not certify every screen reader or display configuration.
 
-Merge requires the PR's **Required CI result** to pass with every static,
-runtime and installed-package job successful. Publication additionally runs
-the native release workflow against its exact candidate; a branch audit does
-not replace that gate. The completed verification summary belongs to the PR
-linked above, avoiding a second mutable copy of workflow state in this record.
+Only the tested host can receive a physical acceptance claim. A Linux-only local
+run cannot establish Windows audio/OS behavior, or vice versa. Physical embedded
+hardware, other operating systems/architectures and acoustic echo cancellation
+are not established by this review. Remaining failures or unavailable required
+capabilities must stay explicit release blockers, with no blanket "release ready"
+claim.
 
-This review does not claim formal third-party security certification, verified
-physical erasure, universal audio routing, acoustic echo cancellation, complete
-screen-reader certification or physical device support. Publishing remains the
-explicit, candidate-bound process in [RELEASING.md](../RELEASING.md).
+After native acceptance, follow [RELEASING.md](../RELEASING.md). Its release
+workflow must validate the actual proposed version and native archives; ordinary
+PR CI is not a substitute. A release dry run and publication were not executed
+by this audit. Final merge into `main` and publication are separate owner actions.
