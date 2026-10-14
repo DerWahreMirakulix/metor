@@ -1,9 +1,10 @@
 """Isolated public host profile-catalog operations and selection boundaries."""
 
 from pathlib import Path
-from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
+
+from private_fixtures import PrivateTemporaryDirectory
 
 from metor.application import create_local_frontend_host
 from metor.client import (
@@ -40,7 +41,7 @@ class ProfileHostTests(unittest.TestCase):
         Returns:
             None
         """
-        temporary = TemporaryDirectory()
+        temporary = PrivateTemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         change = patch.object(Constants, 'DATA', self.root)

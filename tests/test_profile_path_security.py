@@ -14,6 +14,8 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
 from link_fixtures import create_directory_alias
+from private_fixtures import PrivateTemporaryDirectory
+
 from metor.data.profile.manager import ProfileManager
 from metor.data.profile.migration.journal import migration_paths
 from metor.data.profile.models import ProfileOperationType
@@ -91,7 +93,7 @@ class ProfilePathSecurityTests(unittest.TestCase):
         Returns:
             None
         """
-        with TemporaryDirectory() as temp_dir:
+        with PrivateTemporaryDirectory() as temp_dir:
             data_root = Path(temp_dir)
             existing = data_root / 'alpha'
             existing.mkdir()

@@ -327,6 +327,139 @@ sys.exit(GuiEntry()(FrontendLaunchContext(None, object())))
 class InstalledGuiSmokeContractTests(unittest.TestCase):
     """Check the installed callback gate without starting a native toolkit."""
 
+    def test_worker_timeout_retains_safe_live_positions_and_reaps_child(self) -> None:
+        """A real blocked import produces bounded diagnostics before parent timeout."""
+        fixture = str(Path(installed_fixture.__file__).resolve())
+        child = """
+import builtins, runpy, sys, threading
+scope = runpy.run_path(sys.argv[1])
+worker = scope['_worker']
+worker.__globals__['_WORKER_SECONDS'] = 3.0
+original_import = builtins.__import__
+def blocked_import(name, *args, **kwargs):
+    if name == 'metor.application':
+        print('private-output-sentinel', flush=True)
+        print('private-error-sentinel', file=sys.stderr, flush=True)
+        threading.Event().wait(60)
+    return original_import(name, *args, **kwargs)
+builtins.__import__ = blocked_import
+worker('empty')
+"""
+        run = subprocess.run
+
+        def run_blocked(
+            _argv: list[str], **kwargs: object
+        ) -> subprocess.CompletedProcess[str]:
+            """Keep the real timeout/kill path while injecting one blocked import."""
+            return run([sys.executable, '-I', '-c', child, fixture], **kwargs)
+
+        with TemporaryDirectory(prefix='private-gui-timeout-') as directory:
+            data = Path(directory) / 'empty'
+            data.mkdir()
+            (data / '.gui-smoke-owner').write_text('isolated\n', encoding='utf-8')
+            with (
+                patch.object(installed_fixture, '_WORKER_SECONDS', 3.0),
+                patch.object(
+                    installed_fixture.subprocess, 'run', side_effect=run_blocked
+                ),
+                patch('sys.stdout', StringIO()) as output,
+                self.assertRaises(SystemExit) as outcome,
+            ):
+                installed_fixture._run_worker_process(
+                    'empty', data, {**os.environ, 'METOR_DATA_DIR_PARENT': str(data)}
+                )
+            self.assertEqual(outcome.exception.code, 1)
+            text = output.getvalue()
+            self.assertNotIn('private-output-sentinel', text)
+            self.assertNotIn('private-error-sentinel', text)
+            self.assertNotIn(directory, text)
+            self.assertNotIn('Traceback', text)
+            observation = json.loads(text.removeprefix('INSTALLED_GUI_WORKER_TIMEOUT '))
+            self.assertEqual(observation['case'], 'empty')
+            self.assertEqual(observation['timeout_seconds'], 3.0)
+            records = observation['observations']
+            self.assertEqual(records[1]['stage'], 'runtime-import')
+            watchdogs = [record for record in records if record['kind'] == 'watchdog']
+            self.assertEqual(len(watchdogs), 2)
+            for watchdog in watchdogs:
+                self.assertEqual(watchdog['stage'], 'runtime-import')
+                main = next(
+                    thread for thread in watchdog['threads'] if thread['role'] == 'main'
+                )
+                self.assertTrue(main['locations'])
+                self.assertTrue(
+                    all(
+                        site['source'] == 'tests/gui_installed_launcher.py'
+                        and 0 < site['line'] < 100000
+                        for site in main['locations']
+                    )
+                )
+
+    def test_worker_observations_reject_malformed_or_private_fields(self) -> None:
+        """Worker data cannot smuggle paths, locals or arbitrary labels into CI."""
+        marker = installed_fixture._WORKER_MARKER
+        valid = {
+            'case': 'empty',
+            'kind': 'watchdog',
+            'stage': 'cli-launch',
+            'threads': [
+                {
+                    'role': 'main',
+                    'locations': [{'source': 'kivy/core/gl/__init__.py', 'line': 20}],
+                }
+            ],
+        }
+        encoded = marker + json.dumps(valid)
+        self.assertEqual(
+            installed_fixture._read_worker_observations(encoded.encode(), 'empty'),
+            [valid],
+        )
+        for record in (
+            marker + '{',
+            marker + 'x' * (installed_fixture._WORKER_RECORD_MAX_CHARS + 1),
+            '\n'.join([encoded] * (installed_fixture._WORKER_RECORD_LIMIT + 1)),
+            encoded.replace('"cli-launch"', '[]'),
+            encoded.replace('"watchdog"', '{}'),
+            encoded.replace('"main"', '{}'),
+            encoded.replace('"main"', '"private-thread-name"'),
+            encoded.replace('kivy/core/gl/__init__.py', '/private/profile.py'),
+            encoded.replace('kivy/core/gl/__init__.py', 'kivy/../private.py'),
+            encoded.replace('"line": 20', '"line": true'),
+            encoded.replace('"line": 20', '"line": 20, "locals": "private"'),
+            encoded.replace('"empty"', '"picker"'),
+        ):
+            with self.subTest(record_length=len(record)):
+                self.assertEqual(
+                    installed_fixture._read_worker_observations(record, 'empty'), []
+                )
+
+    def test_live_source_names_require_actual_installed_files(self) -> None:
+        """Repository-shaped private paths outside the wheel root stay private."""
+        with TemporaryDirectory(prefix='private-gui-source-') as directory:
+            root = Path(directory)
+            installed = root / 'consumer'
+            public = (
+                installed / 'Lib' / 'site-packages' / 'metor' / 'ui' / 'gui' / 'app.py'
+            )
+            public.parent.mkdir(parents=True)
+            public.write_text('# fixture\n', encoding='utf-8')
+            private = root / 'private' / 'site-packages' / 'metor' / 'secret.py'
+            private.parent.mkdir(parents=True)
+            private.write_text('# private\n', encoding='utf-8')
+            self.assertEqual(
+                installed_fixture._source_name(str(public), installed),
+                'metor/ui/gui/app.py',
+            )
+            self.assertEqual(
+                installed_fixture._source_name(str(private), installed), ''
+            )
+            self.assertEqual(
+                installed_fixture._source_name(
+                    str(public.with_name('absent.py')), installed
+                ),
+                '',
+            )
+
     @staticmethod
     def _result(
         *,

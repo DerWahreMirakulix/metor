@@ -4,6 +4,7 @@
 
 import argparse
 import importlib
+import io
 import json
 import shutil
 import subprocess
@@ -330,7 +331,8 @@ class ReleaseContractTests(unittest.TestCase):
                 return_value='ok',
             ) as add_profile,
             patch('builtins.print'),
-            patch('getpass.getpass', side_effect=['test-pw-123', 'test-pw-123']),
+            patch('sys.stdin', io.StringIO('test-pw-123\ntest-pw-123\n')),
+            patch('sys.stderr', io.StringIO()),
         ):
             dispatcher.dispatch()
 
@@ -923,7 +925,8 @@ class ReleaseContractTests(unittest.TestCase):
             self.assertFalse(stale_module.exists())
             self.assertFalse(stale_frontend.exists())
             self.assertEqual(
-                validate_output_directory(archive.parent, root), archive.parent
+                validate_output_directory(archive.parent, root),
+                archive.parent.resolve(),
             )
 
     def test_release_output_rejects_setuptools_owned_directory_before_build(

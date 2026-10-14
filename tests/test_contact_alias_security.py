@@ -2,9 +2,10 @@
 
 import json
 from pathlib import Path
-from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
+
+from private_fixtures import PrivateTemporaryDirectory
 
 from metor.client import BufferedIpcEventReader
 from metor.core.api import (
@@ -28,7 +29,7 @@ class ContactAliasSecurityTests(unittest.TestCase):
 
     def setUp(self) -> None:
         """Creates a disposable encrypted profile used by every actual IPC request."""
-        temporary = TemporaryDirectory(prefix='metor-contact-alias-')
+        temporary = PrivateTemporaryDirectory(prefix='metor-contact-alias-')
         self.addCleanup(temporary.cleanup)
         data = patch.object(Constants, 'DATA', Path(temporary.name))
         data.start()

@@ -26,6 +26,7 @@ from metor.utils.windows_acl import (
     apply_private_windows_dacl,
     validate_private_windows_dacl,
 )
+from private_fixtures import PrivateTemporaryDirectory
 
 
 class WindowsAclFailureTests(unittest.TestCase):
@@ -98,6 +99,24 @@ class WindowsAclFailureTests(unittest.TestCase):
 @unittest.skipUnless(os.name == 'nt', 'Windows-native ACL regression.')
 class WindowsAclNativeTests(unittest.TestCase):
     """Exercises real Windows directory and file DACL lifecycle operations."""
+
+    def test_storage_fixture_root_has_exact_native_owner_and_supports_reopening(
+        self,
+    ) -> None:
+        """Positive fixtures work under elevated tokens without adopting a foreign owner."""
+        with PrivateTemporaryDirectory(prefix='metor owned ü ') as directory:
+            root = Path(directory)
+            container = root.parent
+            handle, close_handle = _open_windows_directory_handle(root)
+            try:
+                validate_private_windows_dacl(handle, directory=True)
+            finally:
+                close_handle(handle)
+            create_private_directory_tree(root, (('protected',),))
+            with open_private_binary_file(root / 'protected' / 'payload') as stream:
+                stream.write(b'fixture')
+            self.assertEqual((root / 'protected' / 'payload').read_bytes(), b'fixture')
+        self.assertFalse(container.exists())
 
     def test_private_tree_and_output_use_exact_owner_only_dacls(self) -> None:
         """Real directories and output files receive validated private DACLs.

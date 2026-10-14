@@ -2,10 +2,11 @@
 
 from pathlib import Path
 import socket
-from tempfile import TemporaryDirectory
 import threading
 import unittest
 from unittest.mock import Mock, patch
+
+from private_fixtures import PrivateTemporaryDirectory
 
 from metor.client import BufferedIpcEventReader
 from metor.core.api import (
@@ -25,7 +26,7 @@ class HeadlessChannelSecurityTests(unittest.TestCase):
 
     def setUp(self) -> None:
         """Isolates every encrypted profile and runtime resource."""
-        temporary = TemporaryDirectory(prefix='metor-private-offline-')
+        temporary = PrivateTemporaryDirectory(prefix='metor-private-offline-')
         self.addCleanup(temporary.cleanup)
         data = patch.object(Constants, 'DATA', Path(temporary.name))
         data.start()

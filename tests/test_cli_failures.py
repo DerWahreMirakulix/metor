@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 
 from metor.cli.dispatcher import CliDispatcher
 from metor.cli.parser import CliParser
-from metor.cli.prompt import PromptAbortedError
+from metor.cli.prompt import PromptAbortedError, prompt_hidden
 from metor.data import ProfileManager, ProfileSecurityMode
 from metor.utils import Constants
 
@@ -29,6 +29,78 @@ class CliFailureTests(unittest.TestCase):
         """Build the real parser, dispatcher, proxy and output-status boundary."""
         args, extra = CliParser.parse(argv)
         return CliDispatcher(args, extra, self.profile)
+
+    def test_redirected_secrets_never_use_windows_console_or_echo(self) -> None:
+        """Original stdin can be a pipe; Windows getpass must never see it."""
+        secret = '  unicode-λ-secret  '
+        stream = io.StringIO(secret + '\r\n\nlast-secret')
+        with (
+            patch('sys.stdin', stream),
+            patch('sys.__stdin__', stream),
+            patch('sys.stderr', io.StringIO()) as output,
+            patch(
+                'getpass.getpass', side_effect=AssertionError('console input')
+            ) as console,
+        ):
+            self.assertEqual(prompt_hidden('Password: '), secret)
+            self.assertEqual(prompt_hidden('Password: '), '')
+            self.assertEqual(prompt_hidden('Password: '), 'last-secret')
+            with self.assertRaises(PromptAbortedError):
+                prompt_hidden('Password: ')
+        console.assert_not_called()
+        self.assertNotIn(secret, output.getvalue())
+        self.assertNotIn('last-secret', output.getvalue())
+
+    def test_terminal_secrets_keep_native_hidden_input(self) -> None:
+        """A genuine terminal continues through getpass without an echoed read."""
+        stream = Mock()
+        stream.isatty.return_value = True
+        with (
+            patch('sys.stdin', stream),
+            patch('getpass.getpass', return_value='private-terminal-secret') as console,
+            patch('sys.stderr', io.StringIO()) as output,
+        ):
+            self.assertEqual(prompt_hidden('Password: '), 'private-terminal-secret')
+        console.assert_called_once_with('Password: ')
+        stream.readline.assert_not_called()
+        self.assertEqual(output.getvalue(), '')
+
+    def test_oversized_pipe_secret_aborts_before_confirmation_or_creation(self) -> None:
+        """A bounded read cannot turn a truncated prefix or suffix into a password."""
+        dispatcher = self.dispatcher(['profiles', 'add', 'bounded-secret'])
+        stream = io.StringIO(
+            'x' * (Constants.CLI_PIPE_SECRET_MAX_BYTES * 4) + '\nsuffix-secret\n'
+        )
+        with (
+            patch('sys.stdin', stream),
+            patch('sys.stderr', io.StringIO()) as errors,
+            patch('sys.stdout', io.StringIO()) as output,
+            patch.object(dispatcher._proxy, 'add_profile') as create,
+        ):
+            self.assertEqual(dispatcher.dispatch(), 1)
+        create.assert_not_called()
+        self.assertLessEqual(stream.tell(), Constants.CLI_PIPE_SECRET_MAX_BYTES + 2)
+        self.assertIn('exceeds the supported limit', errors.getvalue())
+        self.assertNotIn('suffix-secret', errors.getvalue() + output.getvalue())
+
+    def test_pipe_secret_limit_counts_utf8_bytes_and_rejects_invalid_text(self) -> None:
+        """Multibyte input obeys the byte budget and never leaks invalid text."""
+        at_limit = 'λ' * (Constants.CLI_PIPE_SECRET_MAX_BYTES // 2)
+        with (
+            patch('sys.stdin', io.StringIO(at_limit + '\n')),
+            patch('sys.stderr', io.StringIO()),
+        ):
+            self.assertEqual(prompt_hidden('Password: '), at_limit)
+        for secret in (at_limit + 'λ', '\ud800private-surrogate'):
+            with self.subTest(length=len(secret)):
+                with (
+                    patch('sys.stdin', io.StringIO(secret + '\n')),
+                    patch('sys.stderr', io.StringIO()) as output,
+                    self.assertRaises(PromptAbortedError),
+                ):
+                    prompt_hidden('Password: ')
+                self.assertNotIn('λ', output.getvalue())
+                self.assertNotIn('private-surrogate', output.getvalue())
 
     def test_migration_rejections_never_dispatch_or_exit_successfully(self) -> None:
         """Decline, EOF, empty passwords and mismatch are failed local outcomes."""

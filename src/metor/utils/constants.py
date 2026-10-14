@@ -62,6 +62,7 @@ class Constants(ContractConstants):
     SECURE_SHRED_BLOCK_BYTES: int = 65536
 
     # Application & UI Constraints
+    CLI_PIPE_SECRET_MAX_BYTES: int = 4096
     UUID_MSG_BYTES: int = 8  # Byte length for persistent message UUIDs
     UUID_CHAT_BYTES: int = 4  # Byte length for ephemeral live-chat UUIDs
     LIVE_MSG_DEDUPE_CACHE_SIZE: int = (

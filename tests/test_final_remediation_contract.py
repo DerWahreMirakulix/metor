@@ -14,6 +14,8 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
+from private_fixtures import PrivateTemporaryDirectory
+
 from metor.cli.handlers import CommandHandlers
 from metor.client import (
     FRONTEND_LAUNCH_CONTRACT_VERSION,
@@ -128,7 +130,7 @@ class FinalRemediationContractTests(unittest.TestCase):
         self,
     ) -> None:
         """C02: idempotent auth cannot upgrade PIN/NONE-strength sessions."""
-        with TemporaryDirectory() as temp_dir:
+        with PrivateTemporaryDirectory() as temp_dir:
             events: list[IpcEvent] = []
             store = QuickUnlockStore(Path(temp_dir) / 'quick-unlock.json')
             controller = SessionAccessController(

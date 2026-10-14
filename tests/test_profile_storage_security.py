@@ -5,11 +5,12 @@ import os
 import sys
 import unittest
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from typing import TextIO, cast
 from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
+
+from private_fixtures import PrivateTemporaryDirectory
 
 from metor.core.daemon.managed.engine import Daemon
 from metor.core.api import (
@@ -99,7 +100,7 @@ class ProfileStorageSecurityTests(unittest.TestCase):
         """
         original_data = Constants.DATA
         try:
-            with TemporaryDirectory() as temp_dir:
+            with PrivateTemporaryDirectory() as temp_dir:
                 Constants.DATA = Path(temp_dir)
                 profile = ProfileManager('corrupt-config')
                 profile.paths.create_directories()
@@ -152,7 +153,7 @@ class ProfileStorageSecurityTests(unittest.TestCase):
 
         original_data = Constants.DATA
         try:
-            with TemporaryDirectory() as temp_dir:
+            with PrivateTemporaryDirectory() as temp_dir:
                 Constants.DATA = Path(temp_dir)
                 profile = ProfileManager('atomic-config')
                 profile.paths.create_directories()
@@ -214,7 +215,7 @@ class ProfileStorageSecurityTests(unittest.TestCase):
         Returns:
             None
         """
-        with TemporaryDirectory() as temp_dir:
+        with PrivateTemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             first_pmk = bytes(range(PROFILE_MASTER_KEY_BYTES))
             second_pmk = bytes(reversed(range(PROFILE_MASTER_KEY_BYTES)))
@@ -237,7 +238,7 @@ class ProfileStorageSecurityTests(unittest.TestCase):
         """
         original_data = Constants.DATA
         try:
-            with TemporaryDirectory() as temp_dir:
+            with PrivateTemporaryDirectory() as temp_dir:
                 root = Path(temp_dir)
                 first_pm = self._profile(root, 'first')
                 second_pm = self._profile(root, 'second')
@@ -272,7 +273,7 @@ class ProfileStorageSecurityTests(unittest.TestCase):
         Returns:
             None
         """
-        with TemporaryDirectory() as temp_dir:
+        with PrivateTemporaryDirectory() as temp_dir:
             pmk = b'p' * PROFILE_MASTER_KEY_BYTES
             password = 'unique-password-value'
             path = Path(temp_dir) / 'keyslot.json'
@@ -297,7 +298,7 @@ class ProfileStorageSecurityTests(unittest.TestCase):
         """
         original_data = Constants.DATA
         try:
-            with TemporaryDirectory() as temp_dir:
+            with PrivateTemporaryDirectory() as temp_dir:
                 root = Path(temp_dir)
                 Constants.DATA = root
                 created = ProfileManager.add_profile_folder(
@@ -339,7 +340,7 @@ class ProfileStorageSecurityTests(unittest.TestCase):
         """
         private_detail = 'private-keyslot-path-and-secret'
         with (
-            TemporaryDirectory() as temp_dir,
+            PrivateTemporaryDirectory() as temp_dir,
             patch.object(Constants, 'DATA', Path(temp_dir)),
             patch.object(
                 KeyManager,
@@ -379,7 +380,7 @@ class ProfileStorageSecurityTests(unittest.TestCase):
         """
         private_detail = 'private-database-path-and-secret'
         with (
-            TemporaryDirectory() as temp_dir,
+            PrivateTemporaryDirectory() as temp_dir,
             patch.object(Constants, 'DATA', Path(temp_dir)),
             patch.object(Settings, 'get_bool', return_value=True),
         ):
@@ -437,7 +438,7 @@ class ProfileStorageSecurityTests(unittest.TestCase):
         Returns:
             None
         """
-        with TemporaryDirectory() as temp_dir:
+        with PrivateTemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             protector = self._keyslot(root, 'correct', b'k' * PROFILE_MASTER_KEY_BYTES)
             with self.assertRaises(InvalidCredentialError):
@@ -468,7 +469,7 @@ class ProfileStorageSecurityTests(unittest.TestCase):
         Returns:
             None
         """
-        with TemporaryDirectory() as temp_dir:
+        with PrivateTemporaryDirectory() as temp_dir:
             pmk = b'r' * PROFILE_MASTER_KEY_BYTES
             protector = self._keyslot(Path(temp_dir), 'old', pmk)
             before = ProfileKeySet.derive(pmk)
@@ -497,7 +498,7 @@ class ProfileStorageSecurityTests(unittest.TestCase):
         Returns:
             None
         """
-        with TemporaryDirectory() as temp_dir:
+        with PrivateTemporaryDirectory() as temp_dir:
             pmk = b'v' * PROFILE_MASTER_KEY_BYTES
             protector = self._keyslot(Path(temp_dir), 'old', pmk)
             with (
@@ -518,7 +519,7 @@ class ProfileStorageSecurityTests(unittest.TestCase):
         Returns:
             None
         """
-        with TemporaryDirectory() as temp_dir:
+        with PrivateTemporaryDirectory() as temp_dir:
             protector = PasswordKeyProtector(Path(temp_dir) / 'keyslot.json')
             with (
                 patch(
@@ -550,7 +551,7 @@ class ProfileStorageSecurityTests(unittest.TestCase):
         Returns:
             None
         """
-        with TemporaryDirectory() as temp_dir:
+        with PrivateTemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / 'keyslot.json'
             protector = self._keyslot(Path(temp_dir), 'password', b'p' * 32)
             with patch('metor.core.profile_keys.secure_shred_file') as shred:
@@ -568,7 +569,7 @@ class ProfileStorageSecurityTests(unittest.TestCase):
         """
         original_data = Constants.DATA
         try:
-            with TemporaryDirectory() as temp_dir:
+            with PrivateTemporaryDirectory() as temp_dir:
                 Constants.DATA = Path(temp_dir)
                 self.assertTrue(
                     ProfileManager.add_profile_folder(
@@ -612,7 +613,7 @@ class ProfileStorageSecurityTests(unittest.TestCase):
         """
         original_data = Constants.DATA
         try:
-            with TemporaryDirectory() as temp_dir:
+            with PrivateTemporaryDirectory() as temp_dir:
                 Constants.DATA = Path(temp_dir)
                 self.assertTrue(
                     ProfileManager.add_profile_folder(
@@ -686,7 +687,7 @@ class ProfileStorageSecurityTests(unittest.TestCase):
         """
         original_data = Constants.DATA
         try:
-            with TemporaryDirectory() as temp_dir:
+            with PrivateTemporaryDirectory() as temp_dir:
                 pm = self._profile(Path(temp_dir))
                 first = KeyManager(pm, 'user-password')
                 first.unlock_profile_keys()
@@ -737,7 +738,7 @@ class ProfileStorageSecurityTests(unittest.TestCase):
         """
         original_data = Constants.DATA
         try:
-            with TemporaryDirectory() as temp_dir:
+            with PrivateTemporaryDirectory() as temp_dir:
                 Constants.DATA = Path(temp_dir)
                 result = ProfileManager.add_profile_folder(
                     'rewrap', master_password='old-password'
@@ -800,7 +801,7 @@ class ProfileStorageSecurityTests(unittest.TestCase):
         """
         original_data = Constants.DATA
         try:
-            with TemporaryDirectory() as temp_dir:
+            with PrivateTemporaryDirectory() as temp_dir:
                 Constants.DATA = Path(temp_dir)
                 self.assertTrue(
                     ProfileManager.add_profile_folder(
@@ -871,7 +872,7 @@ class ProfileStorageSecurityTests(unittest.TestCase):
         """
         original_data = Constants.DATA
         try:
-            with TemporaryDirectory() as temp_dir:
+            with PrivateTemporaryDirectory() as temp_dir:
                 Constants.DATA = Path(temp_dir)
                 self.assertTrue(
                     ProfileManager.add_profile_folder(
@@ -1005,7 +1006,7 @@ class ProfileStorageSecurityTests(unittest.TestCase):
         )
         original_data = Constants.DATA
         try:
-            with TemporaryDirectory() as temp_dir:
+            with PrivateTemporaryDirectory() as temp_dir:
                 Constants.DATA = Path(temp_dir)
                 for source_mode in (
                     ProfileSecurityMode.ENCRYPTED,
@@ -1131,7 +1132,7 @@ class ProfileStorageSecurityTests(unittest.TestCase):
         """
         original_data = Constants.DATA
         try:
-            with TemporaryDirectory() as temp_dir:
+            with PrivateTemporaryDirectory() as temp_dir:
                 Constants.DATA = Path(temp_dir)
                 self.assertTrue(
                     ProfileManager.add_profile_folder(
@@ -1254,7 +1255,7 @@ class ProfileStorageSecurityTests(unittest.TestCase):
         """
         original_data = Constants.DATA
         try:
-            with TemporaryDirectory() as temp_dir:
+            with PrivateTemporaryDirectory() as temp_dir:
                 Constants.DATA = Path(temp_dir)
                 self.assertTrue(
                     ProfileManager.add_profile_folder(
@@ -1306,7 +1307,7 @@ class ProfileStorageSecurityTests(unittest.TestCase):
         )
         original_data = Constants.DATA
         try:
-            with TemporaryDirectory() as temp_dir:
+            with PrivateTemporaryDirectory() as temp_dir:
                 Constants.DATA = Path(temp_dir)
                 for index, stage in enumerate(stages):
                     with self.subTest(stage=stage):
@@ -1354,7 +1355,7 @@ class ProfileStorageSecurityTests(unittest.TestCase):
         """
         original_data = Constants.DATA
         try:
-            with TemporaryDirectory() as temp_dir:
+            with PrivateTemporaryDirectory() as temp_dir:
                 Constants.DATA = Path(temp_dir)
                 source_pm = self._profile(Constants.DATA, 'plaintext-failure')
                 source_pm.config.set(
@@ -1397,7 +1398,7 @@ class ProfileStorageSecurityTests(unittest.TestCase):
         """
         original_data = Constants.DATA
         try:
-            with TemporaryDirectory() as temp_dir:
+            with PrivateTemporaryDirectory() as temp_dir:
                 Constants.DATA = Path(temp_dir)
                 for name, stage in (
                     ('post-commit', 'immediately_after_commit'),
@@ -1464,7 +1465,7 @@ class ProfileStorageSecurityTests(unittest.TestCase):
         """
         original_data = Constants.DATA
         try:
-            with TemporaryDirectory() as temp_dir:
+            with PrivateTemporaryDirectory() as temp_dir:
                 Constants.DATA = Path(temp_dir)
                 source_pm = self._profile(Constants.DATA, 'encrypted-recovery')
                 source_pm.config.set(
@@ -1549,7 +1550,7 @@ class ProfileStorageSecurityTests(unittest.TestCase):
         Returns:
             None
         """
-        with TemporaryDirectory() as temp_dir:
+        with PrivateTemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             plaintext = b'future voice payload with private content'
             right_keys = ProfileKeySet.derive(b'a' * PROFILE_MASTER_KEY_BYTES)
@@ -1596,7 +1597,7 @@ class ProfileStorageSecurityTests(unittest.TestCase):
         Returns:
             None
         """
-        with TemporaryDirectory() as temp_dir:
+        with PrivateTemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             store = self._blob_store(root, b'c' * 32)
             blob_id = store.put(b'content')
@@ -1634,7 +1635,7 @@ class ProfileStorageSecurityTests(unittest.TestCase):
         Returns:
             None
         """
-        with TemporaryDirectory() as temp_dir:
+        with PrivateTemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             store = self._blob_store(root, b'd' * 32)
             blob_id = store.put(b'pending voice', BlobLifecycle.TEMPORARY)
@@ -1657,7 +1658,7 @@ class ProfileStorageSecurityTests(unittest.TestCase):
         Returns:
             None
         """
-        with TemporaryDirectory() as temp_dir:
+        with PrivateTemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             store = self._blob_store(root, b'e' * 32)
             blob_id = store.put(b'value')
@@ -1678,7 +1679,7 @@ class ProfileStorageSecurityTests(unittest.TestCase):
         Returns:
             None
         """
-        with TemporaryDirectory() as temp_dir:
+        with PrivateTemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             store = EncryptedBlobStore(
                 root / 'persistent',
@@ -1701,7 +1702,7 @@ class ProfileStorageSecurityTests(unittest.TestCase):
         """
         original_data = Constants.DATA
         try:
-            with TemporaryDirectory() as temp_dir:
+            with PrivateTemporaryDirectory() as temp_dir:
                 pm = self._profile(Path(temp_dir))
                 order: list[str] = []
                 protector = Mock()
@@ -1736,7 +1737,7 @@ class ProfileStorageSecurityTests(unittest.TestCase):
         """
         original_data = Constants.DATA
         try:
-            with TemporaryDirectory() as temp_dir:
+            with PrivateTemporaryDirectory() as temp_dir:
                 pm = self._profile(Path(temp_dir))
                 protector = PasswordKeyProtector(pm.paths.get_keyslot_file())
                 protector.protect(b'z' * PROFILE_MASTER_KEY_BYTES, 'password')
@@ -1773,7 +1774,7 @@ class ProfileStorageSecurityTests(unittest.TestCase):
         """G26: nonessential preparation failure cannot prevent key destruction."""
         original_data = Constants.DATA
         try:
-            with TemporaryDirectory() as temp_dir:
+            with PrivateTemporaryDirectory() as temp_dir:
                 pm = self._profile(Path(temp_dir))
                 protector = Mock()
                 cleanup = Mock()
@@ -1802,7 +1803,7 @@ class ProfileStorageSecurityTests(unittest.TestCase):
         """G26: keyslot failure is distinct and does not claim erasure."""
         original_data = Constants.DATA
         try:
-            with TemporaryDirectory() as temp_dir:
+            with PrivateTemporaryDirectory() as temp_dir:
                 pm = self._profile(Path(temp_dir))
                 protector = Mock()
                 protector.destroy.side_effect = OSError('keyslot failed')
@@ -1860,7 +1861,7 @@ class ProfileStorageSecurityTests(unittest.TestCase):
         """
         original_data = Constants.DATA
         try:
-            with TemporaryDirectory() as temp_dir:
+            with PrivateTemporaryDirectory() as temp_dir:
                 pm = self._profile(Path(temp_dir))
                 destroy_profile_storage(pm)
                 destroy_profile_storage(pm)
@@ -1879,7 +1880,7 @@ class ProfileStorageSecurityTests(unittest.TestCase):
         """
         original_data = Constants.DATA
         try:
-            with TemporaryDirectory() as temp_dir:
+            with PrivateTemporaryDirectory() as temp_dir:
                 pm = self._profile(Path(temp_dir))
                 pm.config.set(
                     ProfileConfigKey.SECURITY_MODE,

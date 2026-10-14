@@ -2,9 +2,10 @@
 
 import json
 from pathlib import Path
-from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import patch
+
+from private_fixtures import PrivateTemporaryDirectory
 
 from metor.client import BufferedIpcEventReader
 from metor.core.api import (
@@ -28,7 +29,7 @@ class ProfileResultIpcTests(unittest.TestCase):
 
     def setUp(self) -> None:
         """Give all profile operations an empty isolated protected catalog."""
-        temporary = TemporaryDirectory(prefix='metor-profile-result-ipc-')
+        temporary = PrivateTemporaryDirectory(prefix='metor-profile-result-ipc-')
         self.addCleanup(temporary.cleanup)
         root = Path(temporary.name)
         data = patch.object(Constants, 'DATA', root)

@@ -206,6 +206,38 @@ class CliProcessTests(unittest.TestCase):
         self.assertEqual(missing_clear.returncode, 1)
         self.assertIn("Profile 'Absent' does not exist", missing_clear.stdout)
 
+    def test_redirected_password_authenticates_offline_without_console_input(
+        self,
+    ) -> None:
+        """The same stdin secret creates and reopens encrypted storage on Windows too."""
+        password = '  disposable-pipe-secret  '
+        created = self.run_cli(
+            'profiles', 'add', 'PipeInput', input_text=f'{password}\n{password}\n'
+        )
+        self.assertEqual(created.returncode, 0)
+        reopened = self.run_cli(
+            '-p', 'PipeInput', 'contacts', 'list', input_text=password + '\n'
+        )
+        self.assertEqual(reopened.returncode, 0)
+        self.assertNotIn('Invalid password', reopened.stdout)
+        for result in (created, reopened):
+            self.assertNotIn(password, result.stdout + result.stderr)
+            self.assertNotIn('Password input may be echoed', result.stderr)
+
+        oversized = self.run_cli(
+            'profiles',
+            'add',
+            'OversizedPipeInput',
+            input_text='x' * (Constants.CLI_PIPE_SECRET_MAX_BYTES + 1)
+            + '\nnext-secret\n',
+        )
+        self.assertEqual(oversized.returncode, 1)
+        self.assertIn('exceeds the supported limit', oversized.stderr)
+        self.assertNotIn('next-secret', oversized.stdout + oversized.stderr)
+        self.assertFalse(
+            (self.root / Constants.DATA_DIR / 'OversizedPipeInput').exists()
+        )
+
     def test_plaintext_refusal_has_specific_reason_and_failure_status(self) -> None:
         """The deployment restriction survives typed IPC instead of a generic error."""
         result = self.run_cli('profiles', 'add', 'Unsafe', '--plaintext')

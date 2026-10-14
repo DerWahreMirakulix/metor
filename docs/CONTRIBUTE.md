@@ -67,6 +67,13 @@ behavior. Extend the nearest domain regression instead of creating a new
 audit-named collection or asserting private implementation order. Remove a
 duplicate gate only when its behavior and failure propagation remain covered.
 
+Positive protected-storage fixtures use `PrivateTemporaryDirectory` from
+[`tests/private_fixtures.py`](../tests/private_fixtures.py). It creates an
+explicitly user-owned private child: an elevated Windows process can create an
+ordinary temporary directory owned by the Administrators group, which production
+storage correctly refuses to adopt. Keep raw temporary directories for tests
+that deliberately exercise foreign ownership, unsafe permissions or links.
+
 ### Python and platform policy
 
 All four distributions require CPython 3.11 through 3.13. The PR runtime matrix

@@ -1,10 +1,11 @@
 """Profile migration and lifecycle gates against competing recovery and startup."""
 
 from pathlib import Path
-from tempfile import TemporaryDirectory
 import threading
 import unittest
 from unittest.mock import patch
+
+from private_fixtures import PrivateTemporaryDirectory
 
 from metor.data import SettingKey, Settings, SqlManager
 from metor.data.profile import ProfileManager, ProfileOperationType, ProfileSecurityMode
@@ -19,7 +20,7 @@ class ProfileMigrationConcurrencyTests(unittest.TestCase):
 
     def setUp(self) -> None:
         """Creates an isolated encrypted profile for actual filesystem transitions."""
-        temporary = TemporaryDirectory(prefix='metor-migration-race-')
+        temporary = PrivateTemporaryDirectory(prefix='metor-migration-race-')
         self.addCleanup(temporary.cleanup)
         data = patch.object(Constants, 'DATA', Path(temporary.name))
         data.start()

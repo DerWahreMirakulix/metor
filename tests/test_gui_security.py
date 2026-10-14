@@ -9,9 +9,10 @@ import time
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
-from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import Mock, patch
+
+from private_fixtures import PrivateTemporaryDirectory
 
 from metor.client import FrontendProfileState
 from metor.client import FrontendLaunchContext, MetorClient, build_session_auth_proof
@@ -56,7 +57,7 @@ class GuiSecurityIntegrationTests(unittest.TestCase):
 
     def setUp(self) -> None:
         """Creates one encrypted runtime with two authenticated public SDK clients."""
-        temporary = TemporaryDirectory()
+        temporary = PrivateTemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         patcher = patch.object(Constants, 'DATA', Path(temporary.name))
         patcher.start()

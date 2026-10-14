@@ -8,11 +8,12 @@ import socket
 import sys
 import unittest
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from typing import cast
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
+
+from private_fixtures import PrivateTemporaryDirectory
 
 from metor.core.api import ContentType, Delivery, MessageReceivedEvent
 from metor.core.daemon.managed.network.state import StateTracker
@@ -41,7 +42,7 @@ class VoiceContractTests(unittest.TestCase):
     """Covers logical Voice turns on the canonical message/blob foundation."""
 
     def setUp(self) -> None:
-        self._temp = TemporaryDirectory()
+        self._temp = PrivateTemporaryDirectory()
         self.addCleanup(self._temp.cleanup)
         root = Path(self._temp.name)
         self._data_patch = patch.object(Constants, 'DATA', root / Constants.DATA_DIR)

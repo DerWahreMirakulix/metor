@@ -5,10 +5,11 @@ import base64
 import hashlib
 import threading
 from pathlib import Path
-from tempfile import TemporaryDirectory
 import time
 import unittest
 from unittest.mock import Mock, patch
+
+from private_fixtures import PrivateTemporaryDirectory
 
 from metor.client import MetorClient
 from metor.client.auth import IpcAuthResult
@@ -41,7 +42,7 @@ class ColdUnlockBudgetTests(unittest.TestCase):
         Returns:
             None
         """
-        temporary = TemporaryDirectory()
+        temporary = PrivateTemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         data_patch = patch.object(Constants, 'DATA', Path(temporary.name))
         data_patch.start()

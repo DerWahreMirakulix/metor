@@ -7,9 +7,10 @@ import socket
 import threading
 import time
 from pathlib import Path
-from tempfile import TemporaryDirectory
 import unittest
 from unittest.mock import Mock, patch
+
+from private_fixtures import PrivateTemporaryDirectory
 
 from metor.client import MetorClient, build_session_auth_proof
 from metor.client.session import MetorRequestRejectedError
@@ -55,7 +56,7 @@ class GuiProducerTests(unittest.TestCase):
 
     def setUp(self) -> None:
         """Creates an isolated protected daemon and two independently authenticated clients."""
-        temporary = TemporaryDirectory()
+        temporary = PrivateTemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         root = Path(temporary.name)
         patcher = patch.object(Constants, 'DATA', root)

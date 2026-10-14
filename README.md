@@ -374,8 +374,14 @@ human-readable text and may contain ANSI formatting;
 there is no JSON output mode. Use the typed SDK or documented IPC for structured
 results and stable field names. Put `--` before literal option-looking operands,
 for example `metor send alice -- "--help"` sends the text `--help` instead of
-requesting command help. Authentication may prompt on the controlling terminal;
-do not assume piping a password to stdin makes every invocation unattended.
+requesting command help.
+
+Password prompts hide terminal input. With redirected stdin, each prompt reads
+one line without echo, including on Windows; confirmation prompts need a second
+line. Spaces are preserved and the line ending is removed. Each redirected secret
+is limited to 4,096 bytes when encoded as UTF-8. EOF, invalid text or an oversized secret
+aborts the operation with a nonzero status, without using a truncated credential.
+Scripts should supply credentials through stdin rather than command arguments.
 
 ### 4. Profile Management & Remote Setup
 

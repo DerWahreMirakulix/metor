@@ -15,6 +15,8 @@ import nacl.pwhash
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
+from private_fixtures import PrivateTemporaryDirectory
+
 from metor.core.api import (
     AcceptCommand,
     AuthenticateSessionCommand,
@@ -85,7 +87,7 @@ class SessionAuthContractTests(unittest.TestCase):
 
     def test_non_ascii_pin_proof_is_rejected(self) -> None:
         """PIN verification rejects arbitrary protocol strings without exceptions."""
-        with TemporaryDirectory() as temp_dir:
+        with PrivateTemporaryDirectory() as temp_dir:
             store = QuickUnlockStore(Path(temp_dir) / 'protected' / 'pin.json')
             salt, verifier = create_pin_verifier('1234')
             store.configure(salt, verifier)
@@ -129,7 +131,7 @@ class SessionAuthContractTests(unittest.TestCase):
 
     def test_quick_unlock_verifier_has_owner_only_permissions(self) -> None:
         """Treats the persisted PIN verifier as protected credential material."""
-        with TemporaryDirectory() as temp_dir:
+        with PrivateTemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / 'protected' / 'quick-unlock.json'
             store = QuickUnlockStore(path)
             salt, verifier = create_pin_verifier('1234')
@@ -185,7 +187,7 @@ class SessionAuthContractTests(unittest.TestCase):
 
     def test_restricted_client_enforces_scope_and_pin_password_escalation(self) -> None:
         """Blocks normal access and requires password after three failed PIN proofs."""
-        with TemporaryDirectory() as temp_dir:
+        with PrivateTemporaryDirectory() as temp_dir:
             store = QuickUnlockStore(Path(temp_dir) / 'quick-unlock.json')
             salt, verifier = create_pin_verifier('1234')
             store.configure(salt, verifier)
@@ -295,7 +297,7 @@ class SessionAuthContractTests(unittest.TestCase):
 
     def test_forgot_pin_issues_password_challenge_without_failed_attempt(self) -> None:
         """Switches proof methods explicitly and accepts the resulting challenge."""
-        with TemporaryDirectory() as temp_dir:
+        with PrivateTemporaryDirectory() as temp_dir:
             store = QuickUnlockStore(Path(temp_dir) / 'quick-unlock.json')
             pin_salt, verifier = create_pin_verifier('1234')
             store.configure(pin_salt, verifier)

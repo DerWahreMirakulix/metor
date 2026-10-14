@@ -2,10 +2,11 @@
 
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from tempfile import TemporaryDirectory
 import threading
 import unittest
 from unittest.mock import patch
+
+from private_fixtures import PrivateTemporaryDirectory
 
 from metor.core.key import KeyManager
 from metor.data import ContactManager
@@ -21,7 +22,7 @@ class ContactAliasAtomicityTests(unittest.TestCase):
 
     def setUp(self) -> None:
         """Opens two manager instances on the same SQLCipher profile and pooled connection."""
-        temporary = TemporaryDirectory()
+        temporary = PrivateTemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         data = patch.object(Constants, 'DATA', Path(temporary.name))
         data.start()

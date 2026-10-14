@@ -724,7 +724,11 @@ class NativeCoreApp(MetorApp):
         )
         self.add(
             'live_cancel_counterpart_pending',
-            self._peer_pending,
+            lambda: (
+                self._peer_pending()
+                and (cancel := self.action('Cancel Live', self.peer())) is not None
+                and not cancel.disabled
+            ),
             self.live_stop_probe.cancel,
         )
         self.add(
@@ -1559,8 +1563,13 @@ class NativeCoreApp(MetorApp):
             bottom >= lower - GEOMETRY_TOLERANCE
             and bottom + height <= lower + viewport_height + GEOMETRY_TOLERANCE
         )
+        effect = scroll.effect_y
+        settled = effect is None or (effect.velocity == 0 and effect.overscroll == 0)
+        # A returning overscroll briefly crosses below the viewport edge. More
+        # wheel input then restarts the bounce and prevents the footer settling.
         if (
             not visible
+            and settled
             and not self.native._wheel
             and time.monotonic() - self.last_settings_scroll > 0.4
         ):
@@ -1575,6 +1584,7 @@ class NativeCoreApp(MetorApp):
             return False
         ready = (
             visible
+            and settled
             and not self.native._wheel
             and time.monotonic() - self.exit_geometry_since > INPUT_SETTLE_SECONDS
         )
@@ -1583,6 +1593,7 @@ class NativeCoreApp(MetorApp):
                 'action': current,
                 'viewport': rectangle(scroll),
                 'native_wheel_queue_empty': True,
+                'native_scroll_effect_settled': True,
                 'stability_tolerance_pixels': GEOMETRY_TOLERANCE,
             }
         return ready
