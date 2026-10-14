@@ -1,6 +1,7 @@
 """Shared validation helpers for public profiles and owned profile paths."""
 
 import os
+import hashlib
 import stat
 from pathlib import Path
 
@@ -54,6 +55,18 @@ def require_profile_name(profile_name: str) -> str:
     if not is_valid_profile_name(profile_name):
         raise ValueError('Invalid public profile name.')
     return profile_name
+
+
+def profile_lock_identity(profile_name: str) -> str:
+    """Returns a bounded stable identity for locks outside movable profile roots.
+
+    Windows profile names share case-insensitive filesystem identities. Hashing
+    the normalized name also keeps lock components within filesystem limits
+    when a valid profile name already reaches the maximum component length.
+    """
+    name = require_profile_name(profile_name)
+    canonical = name.casefold() if os.name == 'nt' else name
+    return hashlib.sha256(canonical.encode('utf-8')).hexdigest()
 
 
 def validate_profile_directory(path: Path) -> None:

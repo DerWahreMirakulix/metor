@@ -115,13 +115,14 @@ class ProfilesDispatchMixin:
                 self._print_usage('profiles', sub)
                 return
 
-            self._emit(
-                CommandHandlers.handle_profile_security_migration(
-                    self._proxy,
-                    profile_args[0],
-                    target_mode,
-                )
+            result = CommandHandlers.handle_profile_security_migration(
+                self._proxy,
+                profile_args[0],
+                target_mode,
             )
+            self._emit(result.message)
+            if result.failed:
+                self._exit_code = 1
             return
 
         if sub in ('rm', 'remove'):

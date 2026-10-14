@@ -29,7 +29,7 @@ system model, then use the focused references when you need exact contracts.
 ## 🌟 Key Features
 
 - **Client-Daemon Architecture (Daemon-owned operational state):**
-  The heavy lifting (Tor process management, cryptography, network sockets, outbox routing) runs in the background as a headless daemon. The Chat UI merely acts as a client communicating via a strictly typed IPC interface. You can close the UI at any time without dropping active Tor connections.
+  The heavy lifting (Tor process management, cryptography, network sockets, outbox routing) runs in the background as a headless daemon. The Chat UI acts as a client communicating via a strictly typed IPC interface. A separately started daemon keeps running when a UI closes; an automatically started daemon stops after its last participating frontend exits.
 - **Asynchronous Offline Messaging ("Drops"):**
   Send messages even when your contact is offline. The daemon safely queues outgoing messages in a local SQLite Outbox and automatically delivers them in the background as soon as the peer comes online (Drop & Go).
 - **Network Resilience & Retunneling:**
@@ -50,7 +50,9 @@ system model, then use the focused references when you need exact contracts.
 Desktop and simulator claims are capability- and evidence-based. The [GUI contract](docs/contracts/GUI.md) describes current capabilities. No physical appliance, universal
 audio route, speaker AEC, or complete screen-reader certification is claimed.
 
-For Windows source installs from a checkout, make sure the Microsoft C++ Build Tools are available before running `python -m pip`.
+The pinned dependencies provide wheels for the supported CPython and x86-64
+combinations. A custom Windows SQLCipher source build additionally requires
+Microsoft C++ Build Tools.
 
 ## 🏗️ Architecture & API
 
@@ -74,6 +76,12 @@ Recommended reading order:
 
 For security reasons and to prevent supply-chain attacks, Metor **does not** bundle the Tor binary. You must install it from the official Tor Project sources.
 
+The Linux GUI and simulator require an SDL2/OpenGL display, access to system
+D-Bus, and a logind-registered login session for the GUI process. A display alone
+is insufficient in containers, SSH or WSL sessions without that login binding.
+See the [GUI startup prerequisites](docs/contracts/GUI.md#installation-and-startup)
+for the exact Linux requirements and Windows graphics setup.
+
 ### Distribution Matrix
 
 Metor is split into four non-overlapping packages:
@@ -86,8 +94,12 @@ Metor is split into four non-overlapping packages:
 | **`metor-ui-gui`**      | Native Kivy desktop/simulator GUI and bundled local assets                                   | Desktop GUI within the [GUI contract](docs/contracts/GUI.md) | `pip install metor-ui-gui`      |
 
 Official package versions are coordinated exactly. `metor` depends on the
-matching SDK; installing the Terminal UI pulls in matching base and SDK
+matching SDK; installing either frontend pulls in matching base and SDK
 packages. Neither base nor SDK depends on an interactive UI.
+The install targets identify distribution names; the current release workflow
+publishes GitHub wheel bundles, not packages to PyPI. Use the matching bundle
+or the local project paths below until an official package-index publication is
+announced. SDK-only clients need no local Tor or SQLCipher installation.
 
 Choose the install path that matches your role:
 
@@ -121,6 +133,13 @@ sh install.sh
 
 On Windows, run `install.cmd` from the extracted bundle folder.
 
+Use the installed environment for the commands below. On Linux run
+`source .venv/bin/activate`; in Windows PowerShell run
+`.\.venv\Scripts\Activate.ps1`. Alternatively invoke `.venv/bin/metor` or
+`.venv\Scripts\metor.exe` directly. For the GUI, open
+`.venv\Scripts\metor-gui.exe` on Windows or run
+`.venv/bin/metor chat --ui gui --start-daemon` on Linux.
+
 The installer first checks the exact CPython minor/ABI, OS, architecture, and
 every file listed in `SHA256SUMS.txt`, including the pinned `pip` wheel. It then
 creates a local `.venv` and installs entirely from the bundled wheelhouse. An
@@ -145,7 +164,13 @@ git clone https://github.com/DerWahreMirakulix/metor.git
 
 # Enter the repository
 cd metor
+
+# Create an isolated environment (use py -3.11 on Windows if needed)
+python -m venv .venv
 ```
+
+Activate it with `source .venv/bin/activate` on Linux or
+`.\.venv\Scripts\Activate.ps1` in Windows PowerShell before continuing.
 
 ```bash
 # Complete developer installation in the selected Python environment, from the repository root
@@ -173,7 +198,7 @@ For a non-editable source installation, pass the desired local projects together
 without `-e` and leave build isolation enabled:
 
 ```bash
-python -m pip install ./packaging/sdk . ./packaging/terminal ./packaging/gui
+python -m pip install -r requirements/gui.lock -r requirements/terminal.lock ./packaging/sdk . ./packaging/terminal ./packaging/gui
 python -m pip check
 ```
 
@@ -186,16 +211,25 @@ The lock files pin the full tested dependency set so normal resolver drift does 
 
 Unlike the release bundle installer, this path installs into whichever Python environment you chose before running `python -m pip`.
 
-On Linux the source install path selects the prebuilt `sqlcipher3-binary` wheel. On Windows it selects `sqlcipher3`, which builds the bundled SQLCipher sources locally. If you maintain your own SQLCipher toolchain, Metor also accepts `pysqlcipher3` as a manual fallback backend.
+On Linux the source install path selects the prebuilt `sqlcipher3-binary` wheel.
+On supported Windows combinations it selects the `sqlcipher3` wheel. A platform
+without a matching wheel needs a separate SQLCipher build toolchain and is
+outside the tested installation matrix. Metor also accepts `pysqlcipher3` as a
+manually provisioned fallback backend.
 
 ## 💻 Usage & Commands
 
-All data (databases, keys, configurations) are safely stored in your `~/.metor/` directory.
+Local profiles, keys and configuration use `~/.metor/` by default.
 _Tip: Append `-p <profile_name>` to any command to use an isolated identity._
+
+For a new GUI installation, run `metor chat --ui gui --start-daemon` and use
+the graphical profile creation flow. For Terminal or CLI use, create your first
+encrypted profile with `metor profiles add personal` before starting a daemon;
+the first created profile becomes the default.
 
 ### 1. Start the Daemon
 
-Before chatting, the background daemon must be started:
+To run a daemon independently of any frontend, start it in its own terminal:
 
 ```bash
 metor daemon
@@ -307,11 +341,17 @@ Inside the running Terminal UI, you have access to the following slash commands:
 | `/contacts rename <old> <new>`  | Renames a saved or discovered peer.                                   |
 | `/exit`                         | Closes the UI and releases its daemon participation.                  |
 
-Enter sends the current input. Ctrl-N inserts a newline, and arrow keys edit the
-draft. POSIX terminals also support Alt-Enter for a newline, Home, End and Delete,
-and bracketed paste with embedded newlines without sending. Ctrl-C exits, and
+Enter sends the current input. Ctrl-N inserts a newline; arrows, Home, End and
+Delete edit the draft. POSIX terminals also support Alt-Enter for a newline and
+bracketed paste with embedded newlines without sending. Ctrl-C exits, and
 Ctrl-D exits an empty prompt. Incoming messages and contact changes preserve the
-current draft.
+current draft. Long drafts scroll within the available terminal viewport while
+keeping the cursor visible, including after a resize.
+
+Quote aliases containing spaces in slash commands, for example
+`/switch "Alice Smith"` or `/contacts rename "Alice Smith" "Mc Alice"`. Commands
+use shell-style quoting; malformed quotes or unexpected extra arguments produce
+usage guidance without executing a command.
 
 ### 3. One-shot CLI Commands
 
@@ -331,6 +371,24 @@ Authentication and transport failures, rejected arguments and failed profile
 password creation return a nonzero exit status. Unexpected extra arguments are rejected
 before mutation. If the daemon disconnects before confirming a command, the CLI
 reports an unknown outcome; check its status before retrying.
+
+For scripts, use the exit status to distinguish confirmed success (`0`) from
+failure (nonzero). Command failures use `1`; launcher/parser failures may use
+`2`, and an interruption handled at the launcher may use `130`. Cancelling a
+profile migration returns failure without changing the profile. Output is
+human-readable text and may contain ANSI formatting. Redirected stdout and stderr
+use UTF-8 on every supported platform; terminal streams retain their native encoding.
+There is no JSON output mode. Use the typed SDK or documented IPC for structured
+results and stable field names. Put `--` before literal option-looking operands,
+for example `metor send alice -- "--help"` sends the text `--help` instead of
+requesting command help.
+
+Password prompts hide terminal input. Redirected stdin must use UTF-8; each password
+prompt reads one line without echo, including on Windows. Confirmation prompts need a second
+line. Spaces are preserved and the line ending is removed. Each redirected secret
+is limited to 4,096 bytes when encoded as UTF-8. EOF, invalid text or an oversized secret
+aborts the operation with a nonzero status, without using a truncated credential.
+Scripts should supply credentials through stdin rather than command arguments.
 
 ### 4. Profile Management & Remote Setup
 
@@ -408,7 +466,7 @@ When interacting with a remote daemon over SSH, Metor's CLI acts as a smart rout
 - `daemon.allow_drops` (bool): Globally allows or blocks the reception of asynchronous offline messages.
 - `daemon.max_unseen_live_msgs` (int): Caps unread crash-safe live backlog per peer. `0` disables headless live backlog, `-1` removes the limit.
 - `daemon.reuse_live_for_drops` (bool): Routes queued drop messages over an existing live session channel when available, avoiding a second circuit. Paired with `daemon.allow_drop_standby_on_live` as one drop-delivery policy.
-- `daemon.notification_sink` (str): Optional JSON sink config (`file` or `webhook`) for structured notifications when no UI is connected, e.g. `{"type": "file", "path": "/tmp/metor-notify.jsonl"}`.
+- `daemon.notification_sink` (str): Optional JSON sink config (`file` or `webhook`) for structured notifications when no UI is connected. File exports contain plaintext peer metadata; webhooks use direct host networking, not Tor, and disclose host/network and peer metadata to the configured service. See the [notification sink contract](docs/ARCHITECTURE.md#notification-sinks) before enabling an export.
 - `ui.terminal.inbox_notification_delay` (float): Delays and aggregates unread-message notifications for unfocused peers on this local UI.
 - `ui.terminal.chat_limit` (int): Maximum number of messages kept in the UI's volatile RAM display buffer.
 

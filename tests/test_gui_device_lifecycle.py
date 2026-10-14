@@ -367,6 +367,110 @@ touch = true
         self.assertIsInstance(command, RestrictClientCommand)
         self.assertTrue(command.device_lifecycle)
 
+    def test_power_retry_rechecks_competing_runtime_before_actuation(self) -> None:
+        """A failed shutdown cannot retain authority over a later local runtime."""
+        self.shutdown.request_shutdown.return_value = PlatformActionResult.FAILED
+        self.assertTrue(self.gui.device.open_power_menu())
+        self.assertTrue(self.gui.device.request_poweroff())
+        self.settle()
+        self.assertEqual(self.gui.device.phase, DevicePhase.POWER_FAILED)
+        self.shutdown.request_shutdown.reset_mock()
+        self.host.list_profiles.return_value = (
+            FrontendProfileState('other', True, False, True),
+        )
+        self.assertTrue(self.gui.device.request_poweroff())
+        self.settle()
+        self.shutdown.request_shutdown.assert_not_called()
+
+    def test_screen_lock_preempts_reversible_device_cover(self) -> None:
+        """A menu or armed chord must not suppress actual session restriction."""
+        for power_menu in (True, False):
+            with self.subTest(power_menu=power_menu):
+                self.gui.security.pending = False
+                self.gui.state.covered = False
+                self.gui.state.route = Route('V06')
+                if power_menu:
+                    self.assertTrue(self.gui.device.open_power_menu())
+                else:
+                    self.gui.device._arm_purge()
+                self.gui.screen_lock()
+                self.assertTrue(self.gui.security.pending)
+                self.assertEqual(self.gui.state.route, Route('V05'))
+                self.assertEqual(self.gui.device.phase, DevicePhase.IDLE)
+                self.gui.device.cancel()
+                self.assertTrue(self.gui.state.covered)
+                self.assertEqual(self.gui.state.route, Route('V05'))
+
+    def test_device_cancel_cannot_restore_a_disconnected_profile(self) -> None:
+        """A device return route belongs only to the generation that opened it."""
+        self.assertTrue(self.gui.device.open_power_menu())
+        self.gui.close()
+        route = self.gui.state.route
+        self.gui.device.cancel()
+        self.assertTrue(self.gui.state.covered)
+        self.assertEqual(self.gui.state.route, route)
+
+    def test_screen_lock_restricts_while_power_preparation_is_pending(self) -> None:
+        """An unfinished device operation keeps its cover and cannot bypass lock."""
+        self.assertTrue(self.gui.device.open_power_menu())
+        self.gui.device.phase = DevicePhase.POWER_PREPARING
+        self.gui.screen_lock()
+        self.assertTrue(self.gui.security.pending)
+        self.assertEqual(self.gui.security.return_route, Route('V06'))
+        self.assertEqual(self.gui.device.phase, DevicePhase.POWER_PREPARING)
+        self.gui.device.cancel()
+        self.assertTrue(self.gui.state.covered)
+        self.assertEqual(self.gui.state.route, Route('V05'))
+
+    def test_device_menu_does_not_disable_idle_restriction(self) -> None:
+        """Temporary device presentation cannot indefinitely suspend the idle timer."""
+        self.assertTrue(self.gui.device.open_power_menu())
+        self.gui.security._last_input = 0.0
+        with (
+            patch(
+                'metor.ui.gui.runtime.security.controller.time.monotonic',
+                return_value=self.gui.security._policy.idle_seconds + 1,
+            ),
+            patch.object(self.gui, 'submit', return_value=False),
+        ):
+            self.gui.security.poll()
+        self.assertTrue(self.gui.security.pending)
+        self.assertEqual(self.gui.device.phase, DevicePhase.IDLE)
+        self.assertEqual(self.gui.state.route, Route('V05'))
+
+    def test_focus_loss_cancels_chord_until_a_fresh_physical_release(self) -> None:
+        """Suspend or lost native focus cannot advance a formerly held chord."""
+        self.sample(0, 0)
+        self.sample(1, 1, ptt=True, power=True)
+        self.gui.native_departure()
+        self.sample(2, 1 + GuiLimits.PURGE_SECONDS, ptt=True, power=True)
+        self.client.request.assert_not_called()
+        self.sample(3, 2 + GuiLimits.PURGE_SECONDS)
+        self.assertEqual(self.gui.device.phase, DevicePhase.IDLE)
+
+    def test_cancelled_chord_releases_input_owner_after_physical_release(self) -> None:
+        """Consumed chord releases cannot permanently strand the PTT owner."""
+        voice = Mock()
+        voice.down.return_value = True
+        self.gui.voice = voice
+        self.sample(0, 0)
+        self.sample(1, 1, ptt=True)
+        self.sample(2, 2, ptt=True, power=True)
+        self.sample(3, 3)
+        self.sample(4, 4, ptt=True)
+        self.assertEqual(voice.down.call_count, 2)
+
+    def test_chord_preempts_menu_without_losing_original_return_route(self) -> None:
+        """Adding PTT after a long Power press must return to the original page."""
+        self.sample(0, 0)
+        self.sample(1, 1, power=True)
+        self.sample(2, 1 + GuiLimits.POWER_SECONDS, power=True)
+        self.sample(3, 2 + GuiLimits.POWER_SECONDS, power=True, ptt=True)
+        self.sample(4, 3 + GuiLimits.POWER_SECONDS)
+        self.assertEqual(self.gui.device.phase, DevicePhase.IDLE)
+        self.assertEqual(self.gui.state.route, Route('V06'))
+        self.assertFalse(self.gui.state.covered)
+
     def test_purge_shutdown_waits_for_combined_safe_and_terminal_result(self) -> None:
         """Initiated, EOF and Safe alone cannot invoke the shutdown actuator.
 
@@ -427,6 +531,27 @@ touch = true
         self.gui.purge.poll(now=20.0)
         self.shutdown.request_shutdown.assert_called_once_with()
         self.assertIn('Powering off', self.gui.purge.detail)
+
+    def test_purge_safety_cannot_power_off_another_running_profile(self) -> None:
+        """Confirmed destruction of one profile grants no shutdown of another."""
+        operation = 'd' * (2 * GuiLimits.MESSAGE_ID_BYTES)
+        self.host.list_profiles.return_value = (
+            FrontendProfileState('other', True, False, True),
+        )
+        self.host.profile_state.return_value = FrontendProfileState(
+            'local', False, False, False
+        )
+        for event in (
+            SelfDestructInitiatedEvent(profile='local', operation_id=operation),
+            SelfDestructSafeEvent(profile='local', operation_id=operation),
+            SelfDestructCompletedEvent(profile='local', operation_id=operation),
+        ):
+            self.gui.purge.observe(0, event)
+        self.gui.purge.poll()
+        self.settle_purge_shutdown()
+        self.gui.purge.poll()
+        self.shutdown.request_shutdown.assert_not_called()
+        self.assertIn('Keep the device powered', self.gui.purge.detail)
 
     def test_transport_loss_before_queued_safe_still_waits_cleanup_bound(self) -> None:
         """A later Safe event cannot inherit an earlier EOF as terminal cleanup.

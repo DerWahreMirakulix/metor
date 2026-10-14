@@ -25,10 +25,10 @@ jobs:
       - name: Check formatting, boundaries, and Linux/Python 3.11 types
         uses: ./.github/actions/python-quality
         with:
-          python-version: '3.11'
-          ruff-check-paths: 'src/metor/ scripts/ tests/'
-          ruff-format-paths: 'src/metor/ scripts/ tests/'
-          mypy-paths: 'src/metor/ scripts/'
+          python-version: "3.11"
+          ruff-check-paths: "src/metor/ scripts/ tests/"
+          ruff-format-paths: "src/metor/ scripts/ tests/"
+          mypy-paths: "src/metor/ scripts/"
       - name: Check Windows/Python 3.13 type branches
         run: mypy --python-version 3.13 --platform win32 src/metor/ scripts/
       - name: Check generated references and central version
@@ -46,7 +46,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
-        python-version: ['3.11', '3.13']
+        python-version: ["3.11", "3.13"]
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
@@ -56,7 +56,7 @@ jobs:
       - name: Install the checkout
         shell: bash
         run: |
-          python -m pip install --upgrade pip==26.0.1
+          python -m pip install --upgrade pip==26.2.1
           python -m pip install -r requirements/dev.txt
           python -m pip check
       - name: Run complete unittest suite
@@ -84,12 +84,12 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
-          python-version: '3.11'
+          python-version: "3.11"
           cache: pip
       - name: Install build and acceptance dependencies
         shell: bash
         run: |
-          python -m pip install --upgrade pip==26.0.1
+          python -m pip install --upgrade pip==26.2.1
           python -m pip install -r requirements/dev.txt
           python -m pip check
       - name: Build native offline packages
@@ -109,7 +109,7 @@ jobs:
         shell: bash
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends xvfb xauth libxtst6 libegl1 libegl-mesa0 libgl1-mesa-dri
+          sudo apt-get install --no-install-recommends xvfb xauth libxtst6 libegl1 libegl-mesa0 libgl1-mesa-dri dbus-daemon dbus-x11 at-spi2-core python3-gi
           python -c "import ctypes; ctypes.CDLL('libEGL.so.1')"
       - name: Validate installed consumers and native GUI on Linux
         if: runner.os == 'Linux'
@@ -117,53 +117,21 @@ jobs:
         env:
           KIVY_WINDOW: sdl2
           KIVY_CLIPBOARD: dummy
-          LIBGL_ALWAYS_SOFTWARE: '1'
+          LIBGL_ALWAYS_SOFTWARE: "1"
           SDL_VIDEODRIVER: x11
         run: xvfb-run -a --server-args='-screen 0 1280x1024x24' python scripts/validate_installed_artifacts.py closure-bundles --gui-smoke
       - name: Validate installed consumers and native GUI on Windows
         if: runner.os == 'Windows'
         shell: bash
-        run: python scripts/validate_installed_artifacts.py closure-bundles --gui-smoke --windows-launch
-      - name: Run Linux GUI rendering and bounded stream fixtures
-        if: runner.os == 'Linux'
-        shell: bash
         env:
-          KIVY_WINDOW: sdl2
-          KIVY_CLIPBOARD: dummy
-          LIBGL_ALWAYS_SOFTWARE: '1'
-          SDL_VIDEODRIVER: x11
-        run: |
-          set -euo pipefail
-          xvfb-run -a --server-args='-screen 0 1280x1024x24' python tests/gui_native_capture.py --view root_refresh --width 360 --height 640 --font-scale 1.5 --output "${RUNNER_TEMP}/root-refresh.png" > "${RUNNER_TEMP}/root-refresh.log" 2>&1
-          xvfb-run -a --server-args='-screen 0 1280x1024x24' python tests/gui_native_capture.py --view setting_keyboard --width 360 --height 640 --font-scale 1.5 --output "${RUNNER_TEMP}/setting-keyboard.png" > "${RUNNER_TEMP}/setting-keyboard.log" 2>&1
-          xvfb-run -a --server-args='-screen 0 1280x1024x24' python tests/gui_native_capture.py --view qr --width 1180 --height 760 --font-scale 1.5 --output "${RUNNER_TEMP}/qr-wide.png" > "${RUNNER_TEMP}/qr-wide.log" 2>&1
-          xvfb-run -a --server-args='-screen 0 1280x1024x24' python tests/gui_native_dpi.py --output "${RUNNER_TEMP}/dpi-reflow.png" > "${RUNNER_TEMP}/dpi-reflow.log" 2>&1
-          xvfb-run -a --server-args='-screen 0 1280x1024x24' python tests/gui_native_presentation.py --output "${RUNNER_TEMP}/gui-presentation.png" > "${RUNNER_TEMP}/gui-presentation.log" 2>&1
-          xvfb-run -a --server-args='-screen 0 1280x1024x24' python tests/gui_native_core.py --width 360 --height 640 --font-scale 1.5 --revision "$GITHUB_SHA" --result "${RUNNER_TEMP}/gui-core-compact.json" --images "${RUNNER_TEMP}/gui-core-compact-images" > "${RUNNER_TEMP}/gui-core-compact.log" 2>&1
-          xvfb-run -a --server-args='-screen 0 1280x1024x24' python tests/gui_native_core.py --width 1180 --height 760 --font-scale 1.5 --revision "$GITHUB_SHA" --result "${RUNNER_TEMP}/gui-core-wide.json" --images "${RUNNER_TEMP}/gui-core-wide-images" > "${RUNNER_TEMP}/gui-core-wide.log" 2>&1
-          python tests/gui_stream_pressure.py --result "${RUNNER_TEMP}/stream-pressure.json" > "${RUNNER_TEMP}/stream-pressure.log" 2>&1
-      - name: Upload bounded GUI and stream evidence
-        if: always() && runner.os == 'Linux'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+          KIVY_GL_BACKEND: angle_sdl2
+        run: python scripts/validate_installed_artifacts.py closure-bundles --gui-smoke --windows-launch
+      - name: Accept native GUI behavior
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/gui-acceptance
         with:
-          name: gui-native-evidence-linux-py311
-          path: |
-            ${{ runner.temp }}/root-refresh.png
-            ${{ runner.temp }}/setting-keyboard.png
-            ${{ runner.temp }}/qr-wide.png
-            ${{ runner.temp }}/dpi-reflow.png
-            ${{ runner.temp }}/root-refresh.log
-            ${{ runner.temp }}/setting-keyboard.log
-            ${{ runner.temp }}/qr-wide.log
-            ${{ runner.temp }}/dpi-reflow.log
-            ${{ runner.temp }}/gui-presentation.png
-            ${{ runner.temp }}/gui-presentation.log
-            ${{ runner.temp }}/gui-core-compact*
-            ${{ runner.temp }}/gui-core-wide*
-            ${{ runner.temp }}/stream-pressure.json
-            ${{ runner.temp }}/stream-pressure.log
-          if-no-files-found: warn
-          retention-days: 14
+          revision: ${{ github.sha }}
+          artifact-name: gui-native-evidence-linux-py311
 
   acceptance:
     name: Required CI result

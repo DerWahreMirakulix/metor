@@ -170,7 +170,7 @@ class SwitchCommand(IpcCommand):
 
 
 @register_command(CommandType.UNLOCK)
-@dataclass
+@dataclass(repr=False)
 class UnlockCommand(IpcCommand):
     """Unlocks a daemon that was started in locked mode."""
 
@@ -200,7 +200,7 @@ class ChangePasswordCommand(IpcCommand):
 
 
 @register_command(CommandType.AUTHENTICATE_SESSION)
-@dataclass
+@dataclass(repr=False)
 class AuthenticateSessionCommand(IpcCommand):
     """Authenticates the current IPC session using one daemon-issued proof challenge."""
 

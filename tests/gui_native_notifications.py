@@ -9,6 +9,7 @@ from kivy.clock import Clock
 from kivy.core.window import Window
 from kivy.input.providers.mouse import MouseMotionEvent
 from kivy.metrics import dp
+from kivy.uix.widget import Widget
 
 from metor.core.api import (
     ContactEntry,
@@ -20,13 +21,50 @@ from metor.core.api import (
 )
 from metor.ui.gui.app import MetorApp
 from metor.ui.gui.state import Route
-from metor.ui.gui.widgets import Action
+from metor.ui.gui.widgets import Action, Label
 from metor.ui.gui.widgets.context import ContextAction
 from metor.ui.gui.widgets.sheet import ActionSheet
 from metor.ui.gui.widgets.symbol import IconAction
 
 
 PEER = 'a4dqobyha4dqobyha4dqobyha4dqobyha4dqobyha4dqobyha4dwc6ad'
+
+
+def notification_geometry(root: Widget) -> list[dict[str, object]]:
+    """Checks contained readable notification text and its centered explicit More target."""
+    evidence: list[dict[str, object]] = []
+    for row in root.walk(restrict=True):
+        if not isinstance(row, ContextAction) or row.focus_key[:1] != ('notice',):
+            continue
+        more = next(
+            widget
+            for widget in row.walk(restrict=True)
+            if isinstance(widget, IconAction)
+            and widget.focus_key == ('notice_more', *row.focus_key[1:])
+        )
+        assert more.x >= row.x and more.right <= row.right
+        assert more.y >= row.y and more.top <= row.top
+        assert abs(more.center_y - row.center_y) <= dp(1)
+        labels: list[dict[str, object]] = []
+        for label in row.walk(restrict=True):
+            if not isinstance(label, Label):
+                continue
+            assert label.x >= row.x and label.right <= more.x
+            assert label.y >= row.y and label.top <= row.top
+            assert label.texture_size[1] <= label.height + dp(1)
+            labels.append(
+                {'text': label.text, 'bounds': list(label.pos) + list(label.size)}
+            )
+        assert labels
+        evidence.append(
+            {
+                'row': list(row.pos) + list(row.size),
+                'labels': labels,
+                'more_bounds': list(more.pos) + list(more.size),
+            }
+        )
+    assert evidence
+    return evidence
 
 
 def exercise_notification_actions(

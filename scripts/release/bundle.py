@@ -15,7 +15,7 @@ from typing import Iterable, Sequence
 from scripts.release.paths import PROJECT_ROOT
 
 
-PIP_VERSION: str = '26.0.1'
+PIP_VERSION: str = '26.2.1'
 DEFAULT_OUTPUT_DIR: Path = Path('dist') / 'release'
 WHEELHOUSE_DIRNAME: str = 'wheelhouse'
 INSTALL_GUIDE_NAME: str = 'INSTALL.txt'
@@ -33,6 +33,29 @@ LOCAL_WHEEL_SOURCES: tuple[tuple[str, str], ...] = (
 )
 
 
+def packaging_build_roots(repo_root: Path) -> tuple[Path, ...]:
+    """Returns setuptools output roots for the four local distributions."""
+    return tuple(repo_root / source / 'build' for source, _ in LOCAL_WHEEL_SOURCES)
+
+
+def is_packaging_build_directory(name: str) -> bool:
+    """Identifies setuptools-owned children without claiming other build output."""
+    return name == 'lib' or name.startswith(('lib.', 'bdist.', 'temp.'))
+
+
+def validate_output_directory(output_dir: Path, repo_root: Path) -> Path:
+    """Rejects bundle destinations that subsequent packaging cleanup would erase."""
+    destination = output_dir.resolve()
+    for build_root in packaging_build_roots(repo_root):
+        try:
+            relative = destination.relative_to(build_root.resolve())
+        except ValueError:
+            continue
+        if relative.parts and is_packaging_build_directory(relative.parts[0]):
+            raise ValueError('Release output cannot use a setuptools build directory.')
+    return destination
+
+
 def clean_packaging_artifacts(repo_root: Path) -> None:
     """Removes stale local packaging outputs before building release wheels.
 
@@ -42,13 +65,16 @@ def clean_packaging_artifacts(repo_root: Path) -> None:
     Returns:
         None
     """
-    shutil.rmtree(repo_root / 'build', ignore_errors=True)
+    # Build also holds test reports and user-selected release output. Only
+    # setuptools owns these specific children; never delete the entire root.
+    for build_root in packaging_build_roots(repo_root):
+        if build_root.is_dir():
+            for child in build_root.iterdir():
+                if is_packaging_build_directory(child.name):
+                    shutil.rmtree(child, ignore_errors=True)
     shutil.rmtree(repo_root / 'src' / 'metor.egg-info', ignore_errors=True)
-    shutil.rmtree(repo_root / 'packaging' / 'sdk' / 'build', ignore_errors=True)
-    shutil.rmtree(repo_root / 'packaging' / 'terminal' / 'build', ignore_errors=True)
     shutil.rmtree(repo_root / 'src' / 'metor_sdk.egg-info', ignore_errors=True)
     shutil.rmtree(repo_root / 'src' / 'metor_ui_terminal.egg-info', ignore_errors=True)
-    shutil.rmtree(repo_root / 'packaging' / 'gui' / 'build', ignore_errors=True)
     shutil.rmtree(repo_root / 'src' / 'metor_ui_gui.egg-info', ignore_errors=True)
 
 
@@ -151,6 +177,7 @@ def build_install_guide(bundle_name: str, package_name: str = 'metor') -> str:
         On Windows PowerShell, use:
 
           python {BUNDLE_VERIFIER_NAME} .
+          python -m venv .venv
           .venv\\Scripts\\python.exe -m pip install --no-index --find-links wheelhouse --upgrade pip=={PIP_VERSION}
           .venv\\Scripts\\python.exe -m pip install --no-index --find-links wheelhouse {package_name}
 
@@ -451,6 +478,7 @@ def build_release_wheelhouse(
     if variant not in RELEASE_VARIANTS:
         raise ValueError(f'Unsupported release variant: {variant}.')
     repo_root: Path = PROJECT_ROOT
+    output_dir = validate_output_directory(output_dir, repo_root)
     bundle_name: str = build_bundle_name(
         platform.system(),
         platform.machine(),
@@ -492,7 +520,7 @@ def build_release_wheelhouse(
         package_name = 'metor-sdk'
         wheel_sources = ('packaging/sdk',)
     elif variant == 'terminal':
-        req_lock = 'requirements/base.lock'
+        req_lock = 'requirements/terminal.lock'
         package_name = 'metor-ui-terminal'
         wheel_sources = ('packaging/sdk', '.', 'packaging/terminal')
     elif variant == 'gui':
@@ -603,6 +631,7 @@ def main() -> None:
         None
     """
     args = parse_args()
+    args.output_dir = validate_output_directory(args.output_dir, PROJECT_ROOT)
     if args.variant == 'all':
         with tempfile.TemporaryDirectory(prefix='metor-local-wheels-') as directory:
             wheel_dir = Path(directory)

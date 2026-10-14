@@ -15,6 +15,7 @@ import sys
 import tempfile
 import threading
 import time
+from types import FrameType
 from unittest.mock import patch
 
 
@@ -33,6 +34,188 @@ _FATAL_STAGES = frozenset(
 _SOURCE_NAME = re.compile(
     r'(?:kivy|metor)/[A-Za-z0-9_./-]+\.py|tests/gui_installed_launcher\.py'
 )
+_WORKER_MARKER = 'INSTALLED_GUI_WORKER_OBSERVATION '
+_WORKER_RECORD_LIMIT = 20
+_WORKER_RECORD_MAX_CHARS = 4096
+_WORKER_STAGES = frozenset(
+    {
+        'worker-start',
+        'runtime-import',
+        'profile-setup',
+        'launcher-import',
+        'cli-launch',
+        'observer-armed',
+        'first-callback',
+        'first-view-ready',
+        'close-requested',
+        'launcher-returned',
+        'cleanup-check',
+        'worker-complete',
+    }
+)
+_WORKER_CASES = frozenset({'empty', 'picker', 'callback', 'autostart'})
+
+
+def _source_name(filename: str, installed_root: Path) -> str:
+    """Map verified installed code to a public source name, never a host path."""
+    path = Path(filename).resolve()
+    if path == Path(__file__).resolve():
+        return 'tests/gui_installed_launcher.py'
+    if path.is_file() and path.is_relative_to(installed_root):
+        relative = path.relative_to(installed_root).parts
+        if 'site-packages' in relative:
+            source = '/'.join(relative[relative.index('site-packages') + 1 :])
+            if _SOURCE_NAME.fullmatch(source):
+                return source
+    return ''
+
+
+def _live_locations(
+    frame: FrameType | None, installed_root: Path
+) -> list[dict[str, object]]:
+    """Read bounded source positions without locals, arguments, or source text."""
+    sites: list[dict[str, object]] = []
+    while frame is not None and len(sites) < _OBSERVATION_LIMIT:
+        source = _source_name(frame.f_code.co_filename, installed_root)
+        if source and 0 < frame.f_lineno < 100000:
+            sites.append({'source': source, 'line': frame.f_lineno})
+        frame = frame.f_back
+    return sites
+
+
+class _WorkerProgress:
+    """Flush fixed milestones and two bounded snapshots before the worker deadline."""
+
+    def __init__(self, case: str) -> None:
+        """Retain only the fixture case and original output stream."""
+        self.case = case
+        self.stream = sys.stdout
+        self.stage = 'worker-start'
+        self.stopped = threading.Event()
+        self.lock = threading.Lock()
+        self.installed_root = Path(sys.prefix).resolve()
+        self.thread = threading.Thread(target=self._watch, daemon=True)
+
+    def _write(self, record: dict[str, object]) -> None:
+        """Write one bounded observation independently of toolkit logging."""
+        payload = json.dumps(record, sort_keys=True)
+        if len(payload) > _WORKER_RECORD_MAX_CHARS:
+            return
+        try:
+            self.stream.write(_WORKER_MARKER + payload + '\n')
+            self.stream.flush()
+        except OSError:
+            pass
+
+    def mark(self, stage: str) -> None:
+        """Publish one fixed milestone independently of toolkit logging."""
+        if stage not in _WORKER_STAGES:
+            raise ValueError('Unknown installed GUI worker stage.')
+        with self.lock:
+            self.stage = stage
+            self._write({'case': self.case, 'kind': 'stage', 'stage': stage})
+
+    def _watch(self) -> None:
+        """Sample Python positions even when the native event loop never starts."""
+        for _ in range(2):
+            if self.stopped.wait(_WORKER_SECONDS / 3):
+                return
+            frames = sys._current_frames()
+            threads: list[dict[str, object]] = []
+            for thread in sorted(
+                threading.enumerate(),
+                key=lambda thread: thread is not threading.main_thread(),
+            ):
+                if thread is self.thread or thread.ident is None:
+                    continue
+                sites = _live_locations(frames.get(thread.ident), self.installed_root)
+                if sites:
+                    role = (
+                        'main'
+                        if thread is threading.main_thread()
+                        else 'observer'
+                        if thread.name == 'gui-smoke-observer'
+                        else 'other'
+                    )
+                    threads.append({'role': role, 'locations': sites})
+                if len(threads) >= _OBSERVATION_LIMIT:
+                    break
+            del frames
+            with self.lock:
+                self._write(
+                    {
+                        'case': self.case,
+                        'kind': 'watchdog',
+                        'stage': self.stage,
+                        'threads': threads,
+                    }
+                )
+
+
+def _read_worker_observations(
+    output: str | bytes | None, case: str
+) -> list[dict[str, object]]:
+    """Allow only bounded known milestones and relative source sites into CI output."""
+    if isinstance(output, bytes):
+        output = output.decode('utf-8', errors='replace')
+    records: list[dict[str, object]] = []
+    for line in (output or '').splitlines():
+        if not line.startswith(_WORKER_MARKER):
+            continue
+        payload = line[len(_WORKER_MARKER) :]
+        if (
+            len(payload) > _WORKER_RECORD_MAX_CHARS
+            or len(records) >= _WORKER_RECORD_LIMIT
+        ):
+            return []
+        try:
+            value = json.loads(payload)
+        except (ValueError, TypeError, RecursionError):
+            return []
+        if (
+            type(value) is not dict
+            or value.get('case') != case
+            or case not in _WORKER_CASES
+            or type(value.get('stage')) is not str
+            or value.get('stage') not in _WORKER_STAGES
+            or type(value.get('kind')) is not str
+            or value.get('kind') not in {'stage', 'watchdog'}
+            or set(value)
+            != (
+                {'case', 'kind', 'stage'}
+                if value['kind'] == 'stage'
+                else {'case', 'kind', 'stage', 'threads'}
+            )
+        ):
+            return []
+        threads = value.get('threads', [])
+        if type(threads) is not list or len(threads) > _OBSERVATION_LIMIT:
+            return []
+        for thread in threads:
+            if (
+                type(thread) is not dict
+                or set(thread) != {'role', 'locations'}
+                or type(thread['role']) is not str
+                or thread['role'] not in {'main', 'observer', 'other'}
+                or type(thread['locations']) is not list
+                or len(thread['locations']) > _OBSERVATION_LIMIT
+            ):
+                return []
+            for site in thread['locations']:
+                if (
+                    type(site) is not dict
+                    or set(site) != {'source', 'line'}
+                    or type(site['source']) is not str
+                    or not _SOURCE_NAME.fullmatch(site['source'])
+                    or any(
+                        part in {'', '.', '..'} for part in site['source'].split('/')
+                    )
+                    or type(site['line']) is not int
+                    or not 0 < site['line'] < 100000
+                ):
+                    return []
+        records.append(value)
+    return records
 
 
 def _windows_console_handles() -> set[int]:
@@ -96,20 +279,8 @@ def _source_locations(
     """
     sites: list[dict[str, object]] = []
     frame = error.__traceback__
-    fixture = Path(__file__).resolve()
     while frame is not None:
-        path = Path(frame.tb_frame.f_code.co_filename).resolve()
-        if path == fixture:
-            source = 'tests/gui_installed_launcher.py'
-        elif path.is_file() and path.is_relative_to(installed_root):
-            relative = path.relative_to(installed_root).parts
-            source = (
-                '/'.join(relative[relative.index('site-packages') + 1 :])
-                if 'site-packages' in relative
-                else ''
-            )
-        else:
-            source = ''
+        source = _source_name(frame.tb_frame.f_code.co_filename, installed_root)
         if _SOURCE_NAME.fullmatch(source) and type(frame.tb_lineno) is int:
             sites.append({'origin': origin, 'source': source, 'line': frame.tb_lineno})
         frame = frame.tb_next
@@ -249,6 +420,18 @@ def _verify_callback_result(
 
 
 def _worker(case: str) -> None:
+    """Keep diagnostics alive around imports, native startup and final cleanup."""
+    progress = _WorkerProgress(case)
+    progress.mark('worker-start')
+    progress.thread.start()
+    try:
+        _worker_case(case, progress)
+    finally:
+        progress.stopped.set()
+        progress.thread.join(2)
+
+
+def _worker_case(case: str, progress: _WorkerProgress) -> None:
     """Run one isolated actual toolkit event loop after its data root is fixed.
 
     Args:
@@ -265,6 +448,7 @@ def _worker(case: str) -> None:
         raise RuntimeError(
             'Installed GUI smoke requires its fresh temporary data root.'
         )
+    progress.mark('runtime-import')
     from metor.application import initialize_runtime_environment
     from metor.cli.entry import run_cli
     from metor.data import ProfileManager, ProfileSecurityMode
@@ -273,6 +457,7 @@ def _worker(case: str) -> None:
     installed_root = Path(sys.prefix).resolve()
     cli_source = Path(sys.modules[run_cli.__module__].__file__).resolve()
     assert cli_source.is_relative_to(installed_root), cli_source
+    progress.mark('profile-setup')
     if case == 'picker':
         initialize_runtime_environment()
         ProfileManager('available').initialize()
@@ -291,7 +476,9 @@ def _worker(case: str) -> None:
     started = time.monotonic()
     opened_profile = False
     cancelled_profile = False
+    callback_started = False
 
+    progress.mark('launcher-import')
     from metor.ui.gui.launcher import GuiEntry
 
     original_report = GuiEntry._report_fatal
@@ -376,7 +563,10 @@ def _worker(case: str) -> None:
         Returns:
             None
         """
-        nonlocal observed_app, opened_profile, cancelled_profile
+        nonlocal observed_app, opened_profile, cancelled_profile, callback_started
+        if not callback_started:
+            callback_started = True
+            progress.mark('first-callback')
         from kivy.app import App
         from kivy.clock import Clock
         from kivy.metrics import dp
@@ -443,6 +633,7 @@ def _worker(case: str) -> None:
             assert app.controller.client is None
             observed.append(case)
             observed_app = app
+            progress.mark('close-requested')
             assert app._close()
             return
         expected_size = tuple(dp(value) for value in app.configuration.logical_size)
@@ -476,6 +667,7 @@ def _worker(case: str) -> None:
             Clock.schedule_once(observe, _POLL_SECONDS)
             return
 
+        progress.mark('first-view-ready')
         assert app.configuration.mode == 'desktop'
         assert app.configuration.source is None
         assert app.controller.client is None
@@ -500,6 +692,7 @@ def _worker(case: str) -> None:
         if case == 'callback':
             print('INSTALLED_GUI_CALLBACK_INJECTED', flush=True)
             raise RuntimeError(_CALLBACK_SECRET)
+        progress.mark('close-requested')
         assert app._close()
 
     arming_done = threading.Event()
@@ -517,6 +710,7 @@ def _worker(case: str) -> None:
             if gui_module is not None and getattr(gui_module, 'MetorApp', None):
                 from kivy.clock import Clock
 
+                progress.mark('observer-armed')
                 Clock.schedule_once(observe, 0)
                 return
 
@@ -535,7 +729,9 @@ def _worker(case: str) -> None:
             ) as lifecycle_port,
             patch.object(GuiEntry, '_report_fatal', staticmethod(observe_fatal)),
         ):
+            progress.mark('cli-launch')
             status = run_cli(arguments)
+            progress.mark('launcher-returned')
         lifecycle_port.assert_called_once()
     finally:
         arming_done.set()
@@ -544,6 +740,7 @@ def _worker(case: str) -> None:
     if case != 'callback':
         assert status == 0, f'GUI launcher returned {status} before a clean close'
     assert observed == [case], observed
+    progress.mark('cleanup-check')
     from metor.ui.gui.app import MetorApp
 
     assert isinstance(observed_app, MetorApp)
@@ -591,6 +788,37 @@ def _worker(case: str) -> None:
         assert status == 0, status
         assert observed_app.controller.lifecycle.exit_ready
         print('INSTALLED_GUI_CLOSE_OK', case)
+    progress.mark('worker-complete')
+
+
+def _run_worker_process(
+    case: str, data_parent: Path, environment: dict[str, str]
+) -> subprocess.CompletedProcess[str]:
+    """Retain only typed observations after subprocess.run kills a timed-out child."""
+    try:
+        return subprocess.run(
+            [sys.executable, '-I', str(Path(__file__).resolve()), '--worker', case],
+            cwd=data_parent,
+            env=environment,
+            capture_output=True,
+            text=True,
+            timeout=_WORKER_SECONDS,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as error:
+        print(
+            'INSTALLED_GUI_WORKER_TIMEOUT '
+            + json.dumps(
+                {
+                    'case': case,
+                    'timeout_seconds': _WORKER_SECONDS,
+                    'observations': _read_worker_observations(error.stdout, case),
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+        raise SystemExit(1) from None
 
 
 def _cleanup_autostart_daemon(data_parent: Path, started_at: float) -> int:
@@ -748,21 +976,7 @@ def main() -> None:
             cleaned_autostart_daemons = 0
             worker_started_at = time.time()
             try:
-                result = subprocess.run(
-                    [
-                        sys.executable,
-                        '-I',
-                        str(Path(__file__).resolve()),
-                        '--worker',
-                        case,
-                    ],
-                    cwd=data_parent,
-                    env=environment,
-                    capture_output=True,
-                    text=True,
-                    timeout=_WORKER_SECONDS,
-                    check=False,
-                )
+                result = _run_worker_process(case, data_parent, environment)
             finally:
                 if console_thread is not None:
                     console_stop.set()
@@ -791,6 +1005,10 @@ def main() -> None:
                 _verify_callback_result(result) if case == 'callback' else None
             )
             if result.returncode != 0 or marker not in result.stdout.splitlines():
+                for record in _read_worker_observations(result.stdout, case):
+                    print(
+                        _WORKER_MARKER + json.dumps(record, sort_keys=True), flush=True
+                    )
                 raise RuntimeError(
                     f'Installed GUI {case} smoke failed: status={result.returncode}; '
                     f'launcher_diagnostic={"Metor GUI could not start" in result.stderr}'

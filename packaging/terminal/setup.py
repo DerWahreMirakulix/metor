@@ -16,5 +16,6 @@ setup(
     install_requires=[
         f'metor=={APP_VERSION}',
         f'metor-sdk=={APP_VERSION}',
+        'wcwidth==0.9.2',
     ]
 )

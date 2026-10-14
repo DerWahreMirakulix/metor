@@ -39,6 +39,7 @@ from gui_native_contacts import configure_contact_pages, exercise_contact_pages
 from gui_native_history import configure_history, exercise_history
 from gui_native_live_controls import exercise_live_controls
 from gui_native_load import exercise_native_load
+from gui_native_notifications import notification_geometry
 from gui_native_profiles import (
     configure_profiles,
     exercise_profile_address,
@@ -1298,23 +1299,9 @@ def main() -> None:
                 and (canvas := widget.canvas) is not None
                 and (before_canvas := canvas.before) is not None
             ],
-            'notification_summary_geometry': [
-                {
-                    'label': widget.text,
-                    'row': list(widget.parent.pos) + list(widget.parent.size),
-                    'label_bounds': list(widget.pos) + list(widget.size),
-                    'symbol_bounds': list(widget.parent.children[0].pos)
-                    + list(widget.parent.children[0].size),
-                    'translate': [
-                        widget.parent.children[0]._translate.x,
-                        widget.parent.children[0]._translate.y,
-                    ],
-                }
-                for widget in app.shell.walk()
-                if args.view == 'notifications'
-                and getattr(widget, 'text', '')
-                in {'Lyra', 'Orion · 2', 'Rhea · 3', 'Rhea · 2'}
-            ],
+            'notification_summary_geometry': notification_geometry(app.shell)
+            if args.view == 'notifications'
+            else [],
             'peer_control_geometry': [
                 {
                     'label': widget.accessible_name,

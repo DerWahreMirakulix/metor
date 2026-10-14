@@ -3,16 +3,16 @@ Module managing the terminal display buffer and repainting logic.
 """
 
 import os
+import shutil
 import sys
-import re
 import threading
-from typing import Callable, List, Optional
+from typing import List
 
 from metor.shared import escape_terminal_text
+from metor.ui.terminal.cells import cell_rows, cell_width, line_end
 
 # Local Package Imports
 from metor.ui.terminal.chat.models import ChatLine
-from metor.ui.terminal.chat.presenter import ChatPresenter
 
 
 class Display:
@@ -25,60 +25,37 @@ class Display:
     _CLEAR_INPUT_AREA: str = '\r\033[J'
     _CLEAR_SCREEN: str = '\033[2J\033[H'
 
-    def __init__(
-        self,
-        initial_prompt: str,
-        alias_resolver: Callable[[ChatLine], Optional[str]],
-    ) -> None:
-        """
-        Initializes the display manager.
-
-        Args:
-            initial_prompt (str): The base prompt string (e.g., '$ ').
-            alias_resolver (Callable[[ChatLine], Optional[str]]): Resolves the active alias for one line.
-
-        Returns:
-            None
-        """
-        self._initial_prompt: str = initial_prompt
-        self._alias_resolver: Callable[[ChatLine], Optional[str]] = alias_resolver
+    def __init__(self) -> None:
+        """Initialize the owned display buffer and atomic rendering lock."""
         self.all_msgs: List[ChatLine] = []
         self.print_lock: threading.Lock = threading.Lock()
         self._paste_enabled = False
+        self._input_cursor_row = 0
 
-        self._ansi_escape: re.Pattern[str] = re.compile(
-            r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])'
+    @staticmethod
+    def _input_layout(
+        current_input: str, prompt: str, cols: int
+    ) -> tuple[str, int, int]:
+        """Lay out the escaped draft with a stable cursor even at the right margin."""
+        padding = ' ' * cell_width(prompt)
+        rendered = prompt + escape_terminal_text(current_input).replace(
+            '\n', '\n' + padding
         )
-
-    def get_visual_lines(self, msg: ChatLine, cols: int) -> int:
-        """
-        Calculates how many terminal lines a message will occupy considering word wrap.
-
-        Args:
-            msg (ChatLine): The message metadata.
-            cols (int): The current column width of the terminal.
-
-        Returns:
-            int: The number of lines the formatted message consumes.
-        """
-        resolved_alias: Optional[str] = self._alias_resolver(msg)
-        text: str = ChatPresenter.render_line_text(msg, resolved_alias)
-
-        clean_text: str = self._ansi_escape.sub('', text)
-        prefix_len: int = ChatPresenter.get_visible_prefix_len(
-            msg.msg_type,
-            msg.tone,
-            resolved_alias,
-            msg.is_drop,
-            len(self._initial_prompt),
-            msg.timestamp,
-        )
-
-        lines: List[str] = clean_text.split('\n')
-        count: int = 0
-        for line in lines:
-            count += max(1, (prefix_len + len(line) + cols - 1) // cols)
-        return count
+        row = 0
+        column = 0
+        lines = rendered.split('\n')
+        for index, line in enumerate(lines):
+            wrapped_row, column = line_end(line, cols)
+            row += wrapped_row
+            if index < len(lines) - 1:
+                row += 1
+        if column == max(1, cols):
+            # Materialize pending autowrap before a cursor-positioning sequence
+            # cancels it and incorrectly puts the cursor at this row's start.
+            rendered += '\n'
+            row += 1
+            column = 0
+        return rendered, row, column
 
     def get_input_visual_lines(self, current_input: str, prompt: str, cols: int) -> int:
         """
@@ -92,17 +69,11 @@ class Display:
         Returns:
             int: The number of vertical lines used.
         """
-        lines: List[str] = escape_terminal_text(current_input).split('\n')
-        count: int = 0
-        for line in lines:
-            offset: int = len(prompt)
-            count += max(1, (offset + len(line) + cols - 1) // cols)
-        return count
+        return self._input_layout(current_input, prompt, cols)[1] + 1
 
     def _append_input_area_clear(
         self,
         buffer: List[str],
-        last_visual_lines: int,
         hide_cursor: bool = False,
     ) -> None:
         """
@@ -110,7 +81,6 @@ class Display:
 
         Args:
             buffer (List[str]): Aggregated terminal frame buffer.
-            last_visual_lines (int): The number of lines the input previously occupied.
             hide_cursor (bool): Whether to hide the cursor before clearing.
 
         Returns:
@@ -118,9 +88,10 @@ class Display:
         """
         if hide_cursor:
             buffer.append(self._CURSOR_HIDE)
-        if last_visual_lines > 1:
-            buffer.append(f'\033[{last_visual_lines - 1}A')
+        if self._input_cursor_row:
+            buffer.append(f'\033[{self._input_cursor_row}A')
         buffer.append(self._CLEAR_INPUT_AREA)
+        self._input_cursor_row = 0
 
     def enable_bracketed_paste(self) -> None:
         """Enable clipboard delimiters only for the POSIX streaming input decoder."""
@@ -145,31 +116,28 @@ class Display:
         sys.stdout.write(self._CURSOR_SHOW)
         sys.stdout.flush()
 
-    def render_prompt(self, prompt: str) -> None:
+    def render_prompt(self, prompt: str, cols: int) -> None:
         """
         Writes the prompt and guarantees that the cursor is visible.
 
         Args:
             prompt (str): The prompt string to render.
+            cols (int): The terminal width used to place a wrapped prompt.
 
         Returns:
             None
         """
-        sys.stdout.write(prompt + self._CURSOR_SHOW)
-        sys.stdout.flush()
+        self.redraw_input_area(prompt, '', [], 0, cols)
 
-    def clear_input_area(self, last_visual_lines: int) -> None:
+    def clear_input_area(self) -> None:
         """
         Wipes the bottom input area dynamically to prepare for a redraw.
-
-        Args:
-            last_visual_lines (int): The number of lines the input previously occupied.
 
         Returns:
             None
         """
         buffer: List[str] = []
-        self._append_input_area_clear(buffer, last_visual_lines)
+        self._append_input_area_clear(buffer)
         sys.stdout.write(''.join(buffer))
 
     def redraw_input_area(
@@ -178,10 +146,10 @@ class Display:
         current_input: str,
         line_chars: List[str],
         cursor_index: int,
-        input_lines: int,
         cols: int,
-        last_visual_lines: int = 1,
         clear_first: bool = False,
+        *,
+        rows: int | None = None,
     ) -> None:
         """
         Prints the prompt and restores the cursor to the exact typed position.
@@ -193,10 +161,9 @@ class Display:
             current_input (str): The full input buffer string.
             line_chars (List[str]): List of individual characters representing the input.
             cursor_index (int): The current cursor position in the array.
-            input_lines (int): Total visual lines the input occupies.
             cols (int): Terminal width.
-            last_visual_lines (int): The number of lines the input previously occupied.
             clear_first (bool): Perform an atomic clear operation before redrawing.
+            rows (int | None): Visible terminal height, or the current native height.
 
         Returns:
             None
@@ -206,27 +173,30 @@ class Display:
         if clear_first:
             self._append_input_area_clear(
                 buffer,
-                last_visual_lines,
                 hide_cursor=True,
             )
 
-        buffer.append(prompt)
-        padding: str = ' ' * len(prompt)
-        display_input: str = escape_terminal_text(current_input).replace(
-            '\n', '\n' + padding
+        display_input, final_row, _ = self._input_layout(current_input, prompt, cols)
+        _, cursor_row, col_pos = self._input_layout(
+            ''.join(line_chars[:cursor_index]), prompt, cols
         )
+        available_rows = max(
+            1, rows if rows is not None else shutil.get_terminal_size().lines
+        )
+        if final_row >= available_rows:
+            # A terminal cannot move the cursor back into scrolled-off content.
+            # Paint only the physical rows surrounding the logical edit position.
+            input_rows = cell_rows(display_input, cols)
+            first_row = max(
+                0,
+                min(cursor_row - available_rows // 2, len(input_rows) - available_rows),
+            )
+            visible_rows = input_rows[first_row : first_row + available_rows]
+            display_input = '\n'.join(visible_rows)
+            final_row = len(visible_rows) - 1
+            cursor_row -= first_row
         buffer.append(display_input)
-
-        text_to_cursor: str = escape_terminal_text(''.join(line_chars[:cursor_index]))
-        cursor_lines: int = 0
-        lines: List[str] = text_to_cursor.split('\n')
-
-        for line in lines:
-            offset: int = len(prompt)
-            cursor_lines += max(1, (offset + len(line) + cols - 1) // cols)
-
-        lines_up: int = input_lines - cursor_lines
-        col_pos: int = (len(prompt) + len(lines[-1])) % cols
+        lines_up: int = final_row - cursor_row
 
         if lines_up > 0:
             buffer.append(f'\033[{lines_up}A')
@@ -236,6 +206,12 @@ class Display:
 
         sys.stdout.write(''.join(buffer))
         sys.stdout.flush()
+        self._input_cursor_row = cursor_row
+
+    def reset_viewport(self) -> None:
+        """Start a full repaint from a known origin without discarding the buffer."""
+        sys.stdout.write(f'{self._CURSOR_SHOW}{self._CLEAR_SCREEN}')
+        self._input_cursor_row = 0
 
     def clear_screen(self) -> None:
         """
@@ -247,6 +223,6 @@ class Display:
         Returns:
             None
         """
-        sys.stdout.write(f'{self._CURSOR_SHOW}{self._CLEAR_SCREEN}')
+        self.reset_viewport()
         sys.stdout.flush()
         self.all_msgs.clear()

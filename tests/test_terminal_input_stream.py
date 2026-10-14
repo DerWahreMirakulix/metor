@@ -1,9 +1,9 @@
 """Regression checks for terminal byte boundaries and finite parser state."""
 
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
-from metor.ui.terminal.chat.renderer.input import InputHandler
+from metor.ui.terminal.chat.renderer.input import InputHandler, InputLimitExceededError
 from metor.ui.terminal.chat.renderer.keys import KeyStream
 from metor.ui.terminal.constants import Constants
 
@@ -88,6 +88,71 @@ class TerminalInputStreamTests(unittest.TestCase):
         self.feed(b'\x7f\x7f')
         with self.assertRaises(EOFError):
             self.feed(b'\x04')
+
+    def test_unicode_editing_keeps_combining_and_joined_characters_whole(self) -> None:
+        """Movement and deletion act on displayed characters instead of code points."""
+        self.feed('界e\u0301👩\u200d💻z'.encode('utf-8'))
+        self.feed(b'\x1b[D\x1b[D')
+        self.assertEqual(self.input.cursor_index, len('界e\u0301'))
+        self.feed(b'\x1b[C\x7f')
+        self.assertEqual(self.input.current_input, '界e\u0301z')
+        self.feed(b'\x7f')
+        self.assertEqual(self.input.current_input, '界z')
+        self.feed(b'\x1b[H\x1b[3~')
+        self.assertEqual(self.feed(b'\r'), ['z'])
+
+    def test_oversized_paste_discards_the_whole_draft_until_explicit_enter(
+        self,
+    ) -> None:
+        """A rejected paste never sends a prefix or executes its command-looking tail."""
+        with patch.object(Constants, 'INPUT_MAX_CHARACTERS', 8):
+            self.feed(b'prior')
+            with self.assertRaises(InputLimitExceededError):
+                self.feed(b'\x1b[200~abcdefghij')
+            self.assertEqual(self.input.current_input, '')
+            self.assertEqual(self.feed(b'\n/exit\n\x1b[201~'), [])
+            self.assertEqual(self.feed(b'\r'), [''])
+            self.assertEqual(self.input.history, [])
+            self.assertEqual(self.feed(b'next\r'), ['next'])
+
+    def test_history_retains_only_a_bounded_tail_by_size_and_entry_count(self) -> None:
+        """Repeated sent content cannot accumulate without limit in terminal memory."""
+        with (
+            patch.object(Constants, 'INPUT_HISTORY_ENTRIES', 2),
+            patch.object(Constants, 'INPUT_HISTORY_CHARACTERS', 8),
+        ):
+            self.assertEqual(
+                self.feed(b'a\rbb\rccc\rdddd\r'), ['a', 'bb', 'ccc', 'dddd']
+            )
+            self.assertEqual(self.input.history, ['ccc', 'dddd'])
+            self.assertEqual(self.feed(b'123456789\r'), ['123456789'])
+            self.assertEqual(self.input.history, ['ccc', 'dddd'])
+            self.assertEqual(self.feed(b'55555\r'), ['55555'])
+            self.assertEqual(self.input.history, ['55555'])
+
+    def test_windows_utf16_input_never_emits_an_unpaired_surrogate(self) -> None:
+        """Windows getwch code units form one Unicode character across input polls."""
+        for code_units, expected in (
+            (['\ud83d', '\ude00', '\r'], '😀'),
+            (['\ud83d', 'x', '\r'], '\ufffdx'),
+            (['\ude00', '\r'], '\ufffd'),
+            (['\ud83d', '\ud83d', '\ude00', '\r'], '\ufffd😀'),
+        ):
+            with self.subTest(code_units=code_units):
+                console = Mock()
+                console.kbhit.return_value = True
+                console.getwch.side_effect = code_units
+                completed = None
+                with (
+                    patch('metor.ui.terminal.chat.renderer.input.os.name', 'nt'),
+                    patch('metor.ui.terminal.chat.renderer.input.msvcrt', console),
+                ):
+                    while completed is None:
+                        token = self.input.get_char()
+                        if token is not None:
+                            completed = self.input.process_key(token)
+                self.assertEqual(completed, expected)
+                self.assertEqual(completed.encode('utf-8').decode('utf-8'), expected)
 
 
 if __name__ == '__main__':

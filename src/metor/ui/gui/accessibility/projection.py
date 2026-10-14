@@ -58,8 +58,10 @@ class Projection:
                 role = (
                     AccessibleRole.PASSWORD if widget.password else AccessibleRole.TEXT
                 )
-                name = widget.hint_text or (
-                    'Password' if widget.password else 'Text input'
+                name = (
+                    getattr(widget, 'accessible_name', '')
+                    or widget.hint_text
+                    or ('Password' if widget.password else 'Text input')
                 )
                 value = None if widget.password else widget.text
             elif isinstance(widget, ButtonBehavior):

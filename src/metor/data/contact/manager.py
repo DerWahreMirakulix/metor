@@ -16,6 +16,9 @@ from metor.data.contact.models import (
 from metor.data.profile import ProfileManager
 from metor.data.sql import PeerRepository, SqlManager
 
+# Local Package Imports
+from .validation import is_valid_contact_alias
+
 
 class ContactManager:
     """Manages the database mapping between aliases and .onion addresses."""
@@ -76,6 +79,11 @@ class ContactManager:
         """
         alias = alias.strip()
         onion = clean_onion(onion)
+
+        if not is_valid_contact_alias(alias):
+            return ContactOperationResult(
+                False, ContactOperationType.INVALID_ALIAS, {'target': alias}
+            )
 
         try:
             decode_tor_v3_onion_public_key(onion)
@@ -166,6 +174,10 @@ class ContactManager:
         """
         old_alias = old_alias.strip()
         new_alias = new_alias.strip()
+        if not is_valid_contact_alias(new_alias):
+            return ContactOperationResult(
+                False, ContactOperationType.INVALID_ALIAS, {'target': new_alias}
+            )
         with self._peers.alias_mutation() as peers:
             peer = peers.get_by_alias(old_alias)
             if peer is None or (

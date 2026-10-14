@@ -121,7 +121,9 @@ checkout, offline wheel resolution, positive and intentionally negative strict
 SDK typechecks, dynamic IPC through a non-shipped frontend, and uninstall/reinstall
 checks. The installer gate executes each actual ZIP installer on its native host.
 Do not run concurrent source-wheel builds in one checkout: setuptools shares its
-build directory. Generated-reference validation checks the original bytes as well
+build directory. Packaging cleanup preserves unrelated `build/` reports and
+release output; bundle destinations inside setuptools-owned `build/lib`,
+`build/bdist.*` or `build/temp.*` directories are rejected before mutation. Generated-reference validation checks the original bytes as well
 as repeated generation; an initially stale file fails even if generation is stable.
 
 ## Automated release process
@@ -134,6 +136,23 @@ Start **Release Metor** manually in GitHub Actions and select:
 Peer-wire and cryptographic derivation changes remain fail-closed under the
 compatibility checker defaults. They require an explicit future release design
 before they can be published.
+
+CI and release validation share the `gui-acceptance` composite action for Linux
+rendering, text scaling, keyboard interaction, compact and desktop Core-backed
+windows, and bounded stream-pressure fixtures. Those checks run on the release
+candidate before its archives become publishable. Both native installer variants
+are exercised through `validate_release_installers.py`, whose checked subprocess
+results fail the job; there is no second shell-only installer inventory to drift
+or mask failures. GUI screenshots and structured results are retained as workflow
+artifacts, including when a fixture fails.
+
+The shared Linux action also queries the actual AT-SPI accessibility tree from a
+separate process on a private D-Bus session. It verifies native action/focus
+dispatch, password nondisclosure and revocation of a retained private node before
+repaint. Its temporary XDG directories are private and writable, its execution
+has an external deadline, and the retained log is capped at 64 KiB. This is a
+native accessibility contract check, not certification of every screen reader
+or evidence for Windows UIA.
 
 The workflow discovers every non-draft GitHub Release and selects the highest
 valid stable `vMAJOR.MINOR.PATCH` tag through parsed SemVer ordering. Prerelease
@@ -174,7 +193,11 @@ generations are metadata in each product release, not separate tags.
 
 The four package builds are `metor-sdk`, the headless/base `metor`,
 `metor-ui-terminal`, and `metor-ui-gui`. Their wheels must have no overlapping files and must use
-the same application version. The release builder accepts `sdk`, `base`,
+the same application version. Each distribution includes the GPL license text.
+The three subproject-local `LICENSE` copies are packaging inputs from the root
+license, necessary for independent wheel roots and Windows checkouts without
+symlink support. Installed-artifact acceptance checks each wheel's license bytes
+against the root document. The release builder accepts `sdk`, `base`,
 `terminal`, `gui`, or `all`; UI variants create base-plus-UI wheelhouses. The
 obsolete separate daemon distribution and `daemon` bundle variant do not
 exist. The base package exposes daemon startup through the canonical `metor`

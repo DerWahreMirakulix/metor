@@ -335,20 +335,22 @@ class StateTrackerMessagesMixin:
 
     def get_tracked_live_socket_count(self) -> int:
         """
-        Returns the total number of live sockets currently tracked by the daemon.
+        Returns the number of distinct peer sockets owned by the daemon.
 
         Args:
             None
 
         Returns:
-            int: Active, pending, outbound, and unauthenticated live sockets.
+            int: Active, pending, outbound, unauthenticated, and dedicated
+                DROP/CALL sockets, counted once across ownership transitions.
         """
         with self._lock:
-            return (
-                len(self._connections)
-                + len(self._pending_connections)
-                + len(self._outbound_sockets)
-                + len(self._unauthenticated_connections)
+            return len(
+                set(self._connections.values())
+                | set(self._pending_connections.values())
+                | set(self._outbound_sockets.values())
+                | self._unauthenticated_connections
+                | set(self._socket_writers)
             )
 
     def abort_all_sockets(self) -> None:

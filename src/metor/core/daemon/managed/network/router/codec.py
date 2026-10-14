@@ -108,10 +108,13 @@ def decode_drop_payload(
         return None
 
     try:
-        envelope: Dict[str, JsonValue] = json.loads(raw_text)
+        decoded: JsonValue = json.loads(raw_text)
     except json.JSONDecodeError:
         return payload_id, raw_text, None
 
+    if not isinstance(decoded, dict):
+        return None
+    envelope: Dict[str, JsonValue] = decoded
     timestamp_value: JsonValue = envelope.get('timestamp')
     timestamp: Optional[str] = (
         str(timestamp_value) if timestamp_value is not None else None

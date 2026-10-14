@@ -196,7 +196,7 @@ class NativeCoreApp(MetorApp):
         self.last_tick = now
 
     def _arm(self, _elapsed: float) -> None:
-        """Waits for the first native draw to flush SDL's initial X11 window requests."""
+        """Arms OS input; the first step separately waits for a completed native draw."""
         self.native.activate()
         self._scenario()
         Clock.schedule_interval(self._step, POLL_SECONDS)
@@ -308,9 +308,10 @@ class NativeCoreApp(MetorApp):
                             is not None,
                             'live_connect_disabled': peer.connect.disabled,
                             'live_connect_in_slot': peer.connect.parent
-                            is peer.live_slot,
+                            is peer.header.live_slot,
                             'live_slot_actions': [
-                                item.accessible_name for item in peer.live_slot.children
+                                item.accessible_name
+                                for item in peer.header.live_slot.children
                             ],
                             'archive_count': len(self.controller.messages.messages)
                             if self.controller.messages
@@ -422,6 +423,14 @@ class NativeCoreApp(MetorApp):
             )
         )
 
+    def sent_text_visible(self, text: str, delivery: Delivery) -> bool:
+        """Waits for Core confirmation as well as the immediately drawn send intent."""
+        return (
+            self.entry().text == ''
+            and self.text_visible(text)
+            and not self.controller.text.pending(self.target, delivery)
+        )
+
     def archive(self, client: MetorClient, target: str) -> MessagesDataEvent:
         """Reads confirmed durable rows using a separate public SDK connection."""
         result = client.request(GetMessagesCommand(target), MessagesDataEvent)
@@ -466,10 +475,15 @@ class NativeCoreApp(MetorApp):
     def _scenario(self) -> None:
         """Exercises actual startup, repeated sends, background events, navigation and audio help."""
         gui = self.controller
+        # Core setup can consume the Clock delay before the GUI's first frame.
+        # Native clicks must observe the drawn viewport, not its old startup size.
         self.add(
             'native_open',
             lambda: (
-                Window.width == self.args.width
+                self.last_frame > 0
+                and self.root is not None
+                and tuple(self.root.size) == tuple(Window.size)
+                and Window.width == self.args.width
                 and Window.height == self.args.height
                 and self.native.size() == tuple(Window.system_size)
                 and not gui.state.busy
@@ -580,7 +594,7 @@ class NativeCoreApp(MetorApp):
         )
         self.add(
             'drop_rejection_retry_accepted_once',
-            lambda: self.entry().text == '' and self.text_visible(REJECTED_DROP),
+            lambda: self.sent_text_visible(REJECTED_DROP, Delivery.DROP),
             self._verify_retried_drop,
         )
         for index, text in enumerate(DROP_TEXTS):
@@ -605,7 +619,7 @@ class NativeCoreApp(MetorApp):
             )
             self.add(
                 f'drop_{index + 1}_visible_without_reentry',
-                lambda value=text: self.entry().text == '' and self.text_visible(value),
+                lambda value=text: self.sent_text_visible(value, Delivery.DROP),
                 lambda current=index: self._verify_drop(current),
             )
         self.add(
@@ -630,7 +644,7 @@ class NativeCoreApp(MetorApp):
         )
         self.add(
             'gui_to_terminal_drop_visible',
-            lambda: self.entry().text == '' and self.text_visible(GUI_TERMINAL_DROP),
+            lambda: self.sent_text_visible(GUI_TERMINAL_DROP, Delivery.DROP),
             self._finish_terminal_peer,
         )
         self.add(
@@ -718,7 +732,11 @@ class NativeCoreApp(MetorApp):
         )
         self.add(
             'live_cancel_counterpart_pending',
-            self._peer_pending,
+            lambda: (
+                self._peer_pending()
+                and (cancel := self.action('Cancel Live', self.peer())) is not None
+                and not cancel.disabled
+            ),
             self.live_stop_probe.cancel,
         )
         self.add(
@@ -748,8 +766,7 @@ class NativeCoreApp(MetorApp):
         self.add(
             'live_text_visible',
             lambda: (
-                self.entry().text == ''
-                and self.text_visible(LIVE_TEXT)
+                self.sent_text_visible(LIVE_TEXT, Delivery.LIVE)
                 and len(self.args.peer_events) == 1
             ),
             self._verify_live,
@@ -785,20 +802,15 @@ class NativeCoreApp(MetorApp):
             self._live_failure_visible,
             self._verify_failed_live,
         )
-        if self.args.width < Geometry.BREAKPOINT:
-            self.add(
-                'live_leave_to_drop_picker',
-                lambda: not self.peer().connect.disabled,
-                lambda: self.click('Back', self.peer()),
-            )
         self.add(
-            'open_drop_from_master_or_picker',
-            lambda: (
-                not self.peer().connect.disabled
-                if self.args.width >= Geometry.BREAKPOINT
-                else self.route('V11') and self.contact_list() is not None
-            ),
-            self._open_return_drop,
+            'live_failure_open_conversation_actions',
+            lambda: not self.peer().connect.disabled,
+            lambda: self.click('Conversation actions', self.peer()),
+        )
+        self.add(
+            'live_failure_open_drop_without_resend',
+            lambda: self.action('Open Drop') is not None,
+            self._open_peer_drop,
         )
         self.add(
             'missing_audio_call_action',
@@ -843,18 +855,11 @@ class NativeCoreApp(MetorApp):
         self.add(
             'peer_back_leaves_conversation',
             lambda: (
-                self.route('V06' if self.args.width >= Geometry.BREAKPOINT else 'V11')
+                self.route('V11')
                 and self.peer() is None
-                and (
-                    self.args.width >= Geometry.BREAKPOINT
-                    or self.contact_list() is not None
-                )
+                and self.contact_list() is not None
             ),
-            lambda: (
-                self.ux.departed()
-                if self.args.width >= Geometry.BREAKPOINT
-                else self._leave_peer_picker()
-            ),
+            self._leave_peer_picker,
         )
         self.add(
             'picker_back_root',
@@ -1322,8 +1327,8 @@ class NativeCoreApp(MetorApp):
         assert peer.subtitle.text == message
         retry = self.action('Retry Live', peer)
         assert retry is not None and not retry.disabled
-        drop = self.action('DROP', peer)
-        assert drop is not None and not drop.disabled
+        more = self.action('Conversation actions', peer)
+        assert more is not None and not more.disabled
         assert not self.controller.state.feedback.visible()
         self.ux.peer_header()
         self.checks['live_failure_has_visible_recovery'] = True
@@ -1342,15 +1347,10 @@ class NativeCoreApp(MetorApp):
             and not retry.disabled
         )
 
-    def _open_return_drop(self) -> None:
-        """Opens DROP from its desktop master row or the originating contact picker."""
-        scope = (
-            self.shell._master
-            if self.args.width >= Geometry.BREAKPOINT
-            else self.contact_list()
-        )
-        action = self.action(self.controller.contacts.alias(self.target), scope)
-        assert action is not None
+    def _open_peer_drop(self) -> None:
+        """Opens the same peer's archive through deliberate native failure recovery."""
+        action = self.action('Open Drop')
+        assert action is not None and not action.disabled
         self.ux.arm_drop(action)
         self.native.click(action)
 
@@ -1570,8 +1570,13 @@ class NativeCoreApp(MetorApp):
             bottom >= lower - GEOMETRY_TOLERANCE
             and bottom + height <= lower + viewport_height + GEOMETRY_TOLERANCE
         )
+        effect = scroll.effect_y
+        settled = effect is None or (effect.velocity == 0 and effect.overscroll == 0)
+        # A returning overscroll briefly crosses below the viewport edge. More
+        # wheel input then restarts the bounce and prevents the footer settling.
         if (
             not visible
+            and settled
             and not self.native._wheel
             and time.monotonic() - self.last_settings_scroll > 0.4
         ):
@@ -1586,6 +1591,7 @@ class NativeCoreApp(MetorApp):
             return False
         ready = (
             visible
+            and settled
             and not self.native._wheel
             and time.monotonic() - self.exit_geometry_since > INPUT_SETTLE_SECONDS
         )
@@ -1594,6 +1600,7 @@ class NativeCoreApp(MetorApp):
                 'action': current,
                 'viewport': rectangle(scroll),
                 'native_wheel_queue_empty': True,
+                'native_scroll_effect_settled': True,
                 'stability_tolerance_pixels': GEOMETRY_TOLERANCE,
             }
         return ready

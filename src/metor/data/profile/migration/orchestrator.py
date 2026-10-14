@@ -1,8 +1,7 @@
 """State-machine orchestration for offline profile storage security migration."""
 
-import shutil
 from pathlib import Path
-from typing import Optional
+from typing import TYPE_CHECKING, Optional
 
 from metor.core.daemon import InvalidMasterPasswordError, verify_master_password
 from metor.core.key import KeyManager
@@ -22,9 +21,11 @@ from metor.data.profile.migration.journal import (
     close_generation_database,
     fsync_tree,
     migration_paths,
+    migration_lock,
     recover_staged_profile_migration,
     write_migration_journal,
 )
+from metor.data.profile.migration.staging import copy_private_profile_tree
 from metor.data.profile.models import (
     ProfileConfigKey,
     ProfileOperationResult,
@@ -32,6 +33,10 @@ from metor.data.profile.models import (
     ProfileSecurityMode,
 )
 from metor.data.profile.support import normalize_profile_name
+from metor.data.profile.locking import offline_profile_guard
+
+if TYPE_CHECKING:
+    from metor.data.profile.manager import ProfileManager
 
 
 def _migration_checkpoint(_stage: str) -> None:
@@ -75,6 +80,29 @@ def migrate_profile_security(
         return ProfileOperationResult(
             False, ProfileOperationType.PROFILE_NOT_FOUND, {'profile': safe_name}
         )
+    with offline_profile_guard(pm.paths) as offline:
+        if not offline:
+            return ProfileOperationResult(
+                False,
+                ProfileOperationType.CANNOT_MIGRATE_RUNNING,
+                {'profile': safe_name},
+            )
+        with migration_lock(safe_name):
+            return _migrate_existing_profile(
+                pm, target_mode, current_password, new_password
+            )
+
+
+def _migrate_existing_profile(
+    pm: 'ProfileManager',
+    target_mode: ProfileSecurityMode,
+    current_password: Optional[str],
+    new_password: Optional[str],
+) -> ProfileOperationResult:
+    """Migrates one profile while startup, catalog mutation and recovery are fenced."""
+    from metor.data.profile.manager import ProfileManager
+
+    safe_name = pm.profile_name
     if pm.is_remote():
         return ProfileOperationResult(
             False,
@@ -139,7 +167,7 @@ def migrate_profile_security(
         close_generation_database(backup_path)
         secure_remove_path(staged_path)
         secure_remove_path(backup_path)
-        shutil.copytree(pm.paths.get_config_dir(), staged_path, symlinks=True)
+        copy_private_profile_tree(pm.paths.get_config_dir(), staged_path)
 
         staged_pm = ProfileManager.for_migration_staging(safe_name, staged_path)
         staged_db_path = staged_pm.paths.get_db_file()

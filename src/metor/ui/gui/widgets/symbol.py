@@ -108,6 +108,7 @@ class IconAction(ContextAction):
             width='48dp',
             **kwargs,
         )
+        self.accessible_name = label
         self.remove_widget(self.label)
         self.label.text = ''
         self.symbol = Symbol(symbol, tone=tone)

@@ -26,7 +26,12 @@ def entry_view(controller: GuiController, refresh: Callable[[], None]) -> Anchor
         AnchorLayout: Centered scrollable authentication composition.
     """
     outer = AnchorLayout(padding='24dp')
-    scroll = ScrollView(size_hint=(None, None), width='400dp', do_scroll_x=False)
+    scroll = ScrollView(
+        size_hint=(None, None),
+        width='400dp',
+        do_scroll_x=False,
+        always_overscroll=False,
+    )
 
     def fit_width(*_args: object) -> None:
         """Keep the form inside its live, density-scaled horizontal padding.
@@ -90,7 +95,19 @@ def entry_view(controller: GuiController, refresh: Callable[[], None]) -> Anchor
         controller.open_profile()
         refresh()
 
-    if prompt is not None:
+    if controller.native_lifecycle_failed:
+        column.add_widget(Label('Restart Metor', role='peer'))
+        column.add_widget(
+            Label(
+                'Desktop security monitoring stopped. Close and restart Metor to continue safely.',
+                role='support',
+            )
+        )
+        if controller.purge.active:
+            column.add_widget(Label(controller.purge.title, role='support'))
+            column.add_widget(Label(controller.purge.detail, role='support'))
+        column.add_widget(Action('Close Metor', controller.lifecycle.start))
+    elif prompt is not None:
 
         def respond(value: str | bool | None) -> None:
             """Replace an answered prompt with the pending startup state.
@@ -120,7 +137,7 @@ def entry_view(controller: GuiController, refresh: Callable[[], None]) -> Anchor
         else:
             column.add_widget(Label('Open profile', role='peer'))
             column.add_widget(Label('Profile password', role='support'))
-            secret = SecretInput()
+            secret = SecretInput(accessible_name='Profile password')
             column.add_widget(secret)
 
             def answer() -> None:
@@ -158,6 +175,7 @@ def entry_view(controller: GuiController, refresh: Callable[[], None]) -> Anchor
         column.add_widget(Label('New profile', role='peer'))
         column.add_widget(Label('Name', role='support'))
         name = TextField(
+            accessible_name='Profile name',
             multiline=False,
             font_name=font_path(),
             size_hint_y=None,
@@ -168,10 +186,10 @@ def entry_view(controller: GuiController, refresh: Callable[[], None]) -> Anchor
         name.text = controller.initial_missing_profile or ''
         column.add_widget(name)
         column.add_widget(Label('Password', role='support'))
-        password = SecretInput()
+        password = SecretInput(accessible_name='Password')
         column.add_widget(password)
         column.add_widget(Label('Confirm password', role='support'))
-        confirmation = SecretInput()
+        confirmation = SecretInput(accessible_name='Confirm password')
         column.add_widget(confirmation)
         error = Label('', role='support', tone='danger')
         column.add_widget(error)
@@ -230,8 +248,10 @@ def entry_view(controller: GuiController, refresh: Callable[[], None]) -> Anchor
         column.add_widget(
             Action('New profile', lambda: navigate('V03'), disabled=state.busy)
         )
-    if state.status and not (
-        state.busy and state.route.view == 'V01' and prompt is None
+    if (
+        state.status
+        and not controller.native_lifecycle_failed
+        and not (state.busy and state.route.view == 'V01' and prompt is None)
     ):
         column.add_widget(Label(state.status, role='support', tone='info'))
     fit_cover()

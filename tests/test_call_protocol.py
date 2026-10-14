@@ -189,10 +189,16 @@ class CallProtocolTests(unittest.TestCase):
         )
         session = self.calls.sessions[self.call_id]
         frame = session.frames.pop()[1]
-        session.frames.append(
-            (time.monotonic() - Constants.CALL_AUDIO_EXPIRY_SEC, frame)
-        )
-        self.assertEqual(self.calls.read_audio(self.call_id, self.client, 1).frames, [])
+        session.frames.append((0.0, frame))
+        # Model the exact boundary without subtracting a fractional duration
+        # from a large, potentially unchanged Windows monotonic clock tick.
+        with patch(
+            'metor.core.daemon.managed.network.calls.media.time',
+            Mock(monotonic=Mock(return_value=Constants.CALL_AUDIO_EXPIRY_SEC)),
+        ):
+            self.assertEqual(
+                self.calls.read_audio(self.call_id, self.client, 1).frames, []
+            )
 
     def test_mute_revokes_capture_and_preserves_receive_side(self) -> None:
         """Mute is maintained by Core, so a frontend cannot bypass it by sending PCM."""

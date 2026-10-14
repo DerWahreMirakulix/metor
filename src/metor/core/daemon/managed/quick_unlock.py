@@ -1,15 +1,13 @@
 """Salted memory-hard PIN verifier persistence and challenge proof checking."""
 
 import hashlib
-import base64
 import hmac
 import json
 import os
 import stat
-import subprocess
-import tempfile
+import secrets
 from pathlib import Path
-from typing import Optional
+from typing import BinaryIO, Optional
 
 from metor.core.auth import (
     PIN_SALT_BYTES,
@@ -18,7 +16,12 @@ from metor.core.auth import (
     create_pin_verifier,
     derive_pin_verifier,
 )
-from metor.utils import Constants, create_private_directory_tree
+from metor.utils import (
+    Constants,
+    create_private_directory_tree,
+    open_private_binary_file,
+    validate_private_windows_path,
+)
 
 __all__ = [
     'PIN_SALT_BYTES',
@@ -69,38 +72,29 @@ class QuickUnlockStore:
         if len(salt) != PIN_SALT_BYTES or len(verifier) != PIN_VERIFIER_BYTES:
             raise QuickUnlockStorageError('Invalid quick-unlock verifier material.')
         self._prepare_private_parent()
-        descriptor, temp_name = tempfile.mkstemp(
-            prefix=f'.{self._path.name}.',
-            suffix='.tmp',
-            dir=self._path.parent,
-            text=True,
+        temp_path = self._path.parent / (
+            f'.{self._path.name}.{secrets.token_hex(Constants.PRIVATE_TEMP_TOKEN_BYTES)}.tmp'
         )
-        temp_path = Path(temp_name)
+        payload = json.dumps(
+            {'version': 1, 'salt': salt_hex, 'verifier': verifier_hex},
+            separators=(',', ':'),
+        ).encode('utf-8')
+        temp_created = False
         try:
-            if os.name == 'nt':
-                self._protect_windows_path(temp_path, directory=False)
-            else:
-                self._fchmod(descriptor, stat.S_IRUSR | stat.S_IWUSR)
-            with os.fdopen(descriptor, 'w', encoding='utf-8') as handle:
-                descriptor = -1
-                json.dump(
-                    {'version': 1, 'salt': salt_hex, 'verifier': verifier_hex},
-                    handle,
-                    separators=(',', ':'),
-                )
-                handle.flush()
-                os.fsync(handle.fileno())
+            with open_private_binary_file(temp_path, exclusive=True) as handle:
+                temp_created = True
+                handle.write(payload)
+            self._validate_protection(temp_path, directory=False)
             temp_path.replace(self._path)
             self._validate_protection(self._path, directory=False)
             self._sync_parent()
-        except (OSError, subprocess.SubprocessError) as exc:
+        except OSError as exc:
             raise QuickUnlockStorageError(
                 'Could not persist a protected quick-unlock credential.'
             ) from exc
         finally:
-            if descriptor >= 0:
-                os.close(descriptor)
-            temp_path.unlink(missing_ok=True)
+            if temp_created:
+                temp_path.unlink(missing_ok=True)
 
     def remove(self) -> None:
         """Removes configured quick-unlock verifier material.
@@ -133,11 +127,14 @@ class QuickUnlockStore:
         self._validate_protection(self._path.parent, directory=True)
         self._validate_protection(self._path, directory=False)
         try:
-            if self._path.stat().st_size > Constants.QUICK_UNLOCK_METADATA_MAX_BYTES:
-                raise QuickUnlockStorageError(
-                    'Quick-unlock credential metadata exceeds its size limit.'
-                )
-            with self._path.open('rb') as handle:
+            with self._open_metadata() as handle:
+                if (
+                    os.fstat(handle.fileno()).st_size
+                    > Constants.QUICK_UNLOCK_METADATA_MAX_BYTES
+                ):
+                    raise QuickUnlockStorageError(
+                        'Quick-unlock credential metadata exceeds its size limit.'
+                    )
                 payload = handle.read(Constants.QUICK_UNLOCK_METADATA_MAX_BYTES + 1)
             if len(payload) > Constants.QUICK_UNLOCK_METADATA_MAX_BYTES:
                 raise QuickUnlockStorageError(
@@ -172,6 +169,30 @@ class QuickUnlockStore:
             ) from exc
         return salt, verifier
 
+    def _open_metadata(self) -> BinaryIO:
+        """Opens the bounded credential read without blocking on a replaced POSIX leaf.
+
+        The opened POSIX descriptor is checked again because the entry can change
+        after path validation. No-follow and nonblocking open reject links and
+        allow special-file refusal before any read occurs.
+        """
+        if os.name == 'nt':
+            return self._path.open('rb')
+        no_follow = getattr(os, 'O_NOFOLLOW', None)
+        nonblock = getattr(os, 'O_NONBLOCK', None)
+        if no_follow is None or nonblock is None:
+            raise OSError('Safe credential read flags are unavailable.')
+        descriptor = os.open(
+            self._path,
+            os.O_RDONLY | no_follow | nonblock | getattr(os, 'O_CLOEXEC', 0),
+        )
+        try:
+            self._validate_posix_status(os.fstat(descriptor), directory=False)
+            return os.fdopen(descriptor, 'rb')
+        except BaseException:
+            os.close(descriptor)
+            raise
+
     def verify(self, challenge_hex: str, proof: str) -> bool:
         """Verifies a one-use PIN HMAC proof in constant time.
 
@@ -182,6 +203,8 @@ class QuickUnlockStore:
         Returns:
             bool: True only for configured matching verifier material.
         """
+        if not proof.isascii():
+            return False
         try:
             metadata = self.metadata()
         except QuickUnlockStorageError:
@@ -214,61 +237,15 @@ class QuickUnlockStore:
                 info, 'st_file_attributes', 0
             ) & getattr(stat, 'FILE_ATTRIBUTE_REPARSE_POINT', 0):
                 raise QuickUnlockStorageError('Credential directory cannot be a link.')
-            if os.name == 'nt' and not credential_exists:
-                self._protect_windows_path(self._path.parent, directory=True)
             self._validate_protection(self._path.parent, directory=True)
-        except (OSError, subprocess.SubprocessError) as exc:
+        except OSError as exc:
             raise QuickUnlockStorageError(
                 'Quick-unlock credential directory is not private.'
             ) from exc
 
     @staticmethod
-    def _protect_windows_path(path: Path, *, directory: bool) -> None:
-        """Replaces Windows ACLs with exact current-user and SYSTEM access.
-
-        Args:
-            path (Path): File or directory to protect.
-            directory (bool): Whether child inheritance is required.
-
-        Returns:
-            None
-        """
-        inheritance = (
-            '[System.Security.AccessControl.InheritanceFlags]::ContainerInherit '
-            '-bor [System.Security.AccessControl.InheritanceFlags]::ObjectInherit'
-            if directory
-            else '[System.Security.AccessControl.InheritanceFlags]::None'
-        )
-        script = (
-            ''
-            '$sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User; '
-            '$system=New-Object System.Security.Principal.SecurityIdentifier('
-            "'S-1-5-18'); "
-            + (
-                '$acl=New-Object System.Security.AccessControl.DirectorySecurity; '
-                if directory
-                else '$acl=New-Object System.Security.AccessControl.FileSecurity; '
-            )
-            + '$acl.SetOwner($sid); $acl.SetAccessRuleProtection($true,$false); '
-            f'$inherit={inheritance}; '
-            '$prop=[System.Security.AccessControl.PropagationFlags]::None; '
-            '$rights=[System.Security.AccessControl.FileSystemRights]::FullControl; '
-            '$allow=[System.Security.AccessControl.AccessControlType]::Allow; '
-            '$acl.AddAccessRule((New-Object System.Security.AccessControl.'
-            'FileSystemAccessRule($sid,$rights,$inherit,$prop,$allow))); '
-            '$acl.AddAccessRule((New-Object System.Security.AccessControl.'
-            'FileSystemAccessRule($system,$rights,$inherit,$prop,$allow))); '
-            + (
-                '[System.IO.Directory]::SetAccessControl($Target,$acl)'
-                if directory
-                else '[System.IO.File]::SetAccessControl($Target,$acl)'
-            )
-        )
-        QuickUnlockStore._run_acl_helper(path, script, 'protect')
-
-    @staticmethod
     def _validate_windows_acl(path: Path) -> None:
-        """Verifies effective trustees after the ACL replacement.
+        """Verifies exact credential trustees through native read-only handles.
 
         Args:
             path (Path): Credential file whose effective trustees must be private.
@@ -276,99 +253,12 @@ class QuickUnlockStore:
         Returns:
             None
         """
-        script = (
-            ''
-            '$current=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value; '
-            '$acl=Get-Acl -LiteralPath $Target -ErrorAction Stop; '
-            '$rules=@($acl.Access | ForEach-Object { [pscustomobject]@{ '
-            'Sid=$_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value; '
-            'Inherited=$_.IsInherited; Type=$_.AccessControlType.ToString(); '
-            'Rights=$_.FileSystemRights.ToString() } }); '
-            '[pscustomobject]@{ Protected=$acl.AreAccessRulesProtected; '
-            'Current=$current; Owner=$acl.GetOwner([System.Security.Principal.SecurityIdentifier]).Value; Rules=$rules } | ConvertTo-Json -Compress -Depth 4'
-        )
-        completed = QuickUnlockStore._run_acl_helper(path, script, 'validate')
         try:
-            result = json.loads(completed.stdout)
-            current = result['Current']
-            rules = result['Rules']
-            if isinstance(rules, dict):
-                rules = [rules]
-            if (
-                result.get('Protected') is not True
-                or result.get('Owner') != current
-                or not isinstance(current, str)
-                or not isinstance(rules, list)
-                or len(rules) != 2
-            ):
-                raise ValueError
-            expected = {current, 'S-1-5-18'}
-            actual = {rule.get('Sid') for rule in rules if isinstance(rule, dict)}
-            if actual != expected or any(
-                not isinstance(rule, dict)
-                or rule.get('Inherited') is not False
-                or rule.get('Type') != 'Allow'
-                or 'FullControl' not in str(rule.get('Rights'))
-                for rule in rules
-            ):
-                raise ValueError
-        except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+            validate_private_windows_path(path, directory=path.is_dir())
+        except OSError as exc:
             raise QuickUnlockStorageError(
                 'Windows ACL protection is not private.'
             ) from exc
-
-    @staticmethod
-    def _run_acl_helper(
-        path: Path, script: str, phase: str
-    ) -> subprocess.CompletedProcess[str]:
-        """Runs constant PowerShell code without a console window.
-
-        Path data is delivered on standard input, never inside executable code.
-
-        Args:
-            path (Path): Target path, never interpolated into executable code.
-            script (str): Constant ACL operation.
-            phase (str): Non-secret diagnostic phase.
-
-        Returns:
-            subprocess.CompletedProcess[str]: Successful bounded helper result.
-        """
-        preamble = (
-            "$ErrorActionPreference='Stop'; "
-            '$utf8=New-Object System.Text.UTF8Encoding($false); '
-            '[Console]::InputEncoding=$utf8; [Console]::OutputEncoding=$utf8; '
-            '$Target=[Console]::In.ReadToEnd(); '
-        )
-        encoded = base64.b64encode((preamble + script).encode('utf-16-le')).decode(
-            'ascii'
-        )
-        try:
-            completed = subprocess.run(
-                [
-                    'powershell.exe',
-                    '-NoProfile',
-                    '-NonInteractive',
-                    '-EncodedCommand',
-                    encoded,
-                ],
-                input=str(path),
-                capture_output=True,
-                text=True,
-                encoding='utf-8',
-                errors='replace',
-                check=False,
-                timeout=Constants.QUICK_UNLOCK_HELPER_TIMEOUT_SEC,
-                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
-            )
-        except (OSError, subprocess.SubprocessError):
-            raise QuickUnlockStorageError(
-                f'Windows ACL {phase}: helper unavailable or timed out.'
-            ) from None
-        if completed.returncode != 0:
-            raise QuickUnlockStorageError(
-                f'Windows ACL {phase}: helper exited {completed.returncode}.'
-            )
-        return completed
 
     @staticmethod
     def _validate_protection(path: Path, *, directory: bool) -> None:
@@ -388,7 +278,21 @@ class QuickUnlockStore:
         if os.name == 'nt':
             QuickUnlockStore._validate_windows_acl(path)
             return
-        status = path.stat(follow_symlinks=False)
+        QuickUnlockStore._validate_posix_status(
+            path.stat(follow_symlinks=False), directory=directory
+        )
+
+    @staticmethod
+    def _validate_posix_status(status: os.stat_result, *, directory: bool) -> None:
+        """Requires private ownership and a directory or uniquely linked regular file."""
+        if directory:
+            valid_type = stat.S_ISDIR(status.st_mode)
+        else:
+            valid_type = stat.S_ISREG(status.st_mode) and status.st_nlink == 1
+        if not valid_type:
+            raise QuickUnlockStorageError(
+                'Credential path type or link count is invalid.'
+            )
         if status.st_uid != QuickUnlockStore._getuid():
             raise QuickUnlockStorageError('Credential path has an unsafe owner.')
         forbidden = stat.S_IRWXG | stat.S_IRWXO
@@ -413,22 +317,6 @@ class QuickUnlockStore:
             os.fsync(directory_fd)
         finally:
             os.close(directory_fd)
-
-    @staticmethod
-    def _fchmod(descriptor: int, mode: int) -> None:
-        """Invokes the POSIX-only descriptor permission primitive safely.
-
-        Args:
-            descriptor (int): Already-open credential-file descriptor.
-            mode (int): Exact restrictive POSIX permission mask.
-
-        Returns:
-            None
-        """
-        fchmod = getattr(os, 'fchmod', None)
-        if not callable(fchmod):
-            raise OSError('Descriptor permissions are unavailable on this platform.')
-        fchmod(descriptor, mode)
 
     @staticmethod
     def _getuid() -> int:

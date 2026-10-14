@@ -9,11 +9,13 @@ import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import cast
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import nacl.pwhash
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
+
+from private_fixtures import PrivateTemporaryDirectory
 
 from metor.core.api import (
     AcceptCommand,
@@ -47,6 +49,7 @@ from metor.core.api import (
 from metor.core.daemon.managed.engine.session_access import SessionAccessController
 from metor.core.daemon.managed.local_auth import (
     LocalAuthTracker,
+    SessionAuthContext,
     create_session_auth_context,
 )
 from metor.core.daemon.managed.quick_unlock import (
@@ -62,6 +65,33 @@ class SessionAuthContractTests(unittest.TestCase):
     """
     Covers session auth contract regression scenarios.
     """
+
+    def test_non_ascii_password_proofs_count_toward_lockout(self) -> None:
+        """Malformed Unicode cannot bypass failure accounting by raising."""
+        tracker = LocalAuthTracker()
+        tracker.install_context(
+            SessionAuthContext(salt_hex='11' * 16, proof_key=bytearray(b'k' * 32))
+        )
+        conn = cast(socket.socket, object())
+        try:
+            for _ in range(3):
+                self.assertIsNotNone(tracker.issue_session_challenge(conn))
+                result = tracker.verify_session_proof(
+                    conn, '\u2603' * 64, lockout_seconds=30.0, failure_limit=3
+                )
+                self.assertFalse(result.authenticated)
+            self.assertTrue(result.should_disconnect)
+            self.assertIsNotNone(tracker.get_retry_after_seconds())
+        finally:
+            tracker.install_context(None)
+
+    def test_non_ascii_pin_proof_is_rejected(self) -> None:
+        """PIN verification rejects arbitrary protocol strings without exceptions."""
+        with PrivateTemporaryDirectory() as temp_dir:
+            store = QuickUnlockStore(Path(temp_dir) / 'protected' / 'pin.json')
+            salt, verifier = create_pin_verifier('1234')
+            store.configure(salt, verifier)
+            self.assertFalse(store.verify('11' * 32, '\u2603' * 64))
 
     def test_quick_unlock_configuration_requires_full_password_proof(self) -> None:
         """Keeps PIN mutation gated when ordinary session auth is optional."""
@@ -101,7 +131,7 @@ class SessionAuthContractTests(unittest.TestCase):
 
     def test_quick_unlock_verifier_has_owner_only_permissions(self) -> None:
         """Treats the persisted PIN verifier as protected credential material."""
-        with TemporaryDirectory() as temp_dir:
+        with PrivateTemporaryDirectory() as temp_dir:
             path = Path(temp_dir) / 'protected' / 'quick-unlock.json'
             store = QuickUnlockStore(path)
             salt, verifier = create_pin_verifier('1234')
@@ -135,29 +165,25 @@ class SessionAuthContractTests(unittest.TestCase):
             with self.assertRaises(QuickUnlockStorageError):
                 store.metadata()
 
-    def test_windows_acl_validation_rejects_extra_trustee(self) -> None:
-        """R2-T02: effective ACL validation rejects inherited or extra access."""
-        result = Mock()
-        result.returncode = 0
-        result.stdout = (
-            '{"Protected":true,"Current":"S-1-5-21-1","Owner":"S-1-5-21-1","Rules":['
-            '{"Sid":"S-1-5-21-1","Inherited":false,"Type":"Allow",'
-            '"Rights":"FullControl"},'
-            '{"Sid":"S-1-5-18","Inherited":false,"Type":"Allow",'
-            '"Rights":"FullControl"},'
-            '{"Sid":"S-1-1-0","Inherited":false,"Type":"Allow",'
-            '"Rights":"Read"}]}'
-        )
-        with patch(
-            'metor.core.daemon.managed.quick_unlock.subprocess.run',
-            return_value=result,
+    def test_windows_acl_validation_failure_is_typed_without_external_helper(
+        self,
+    ) -> None:
+        """Native policy refusal stays fail-closed without exposing its path or SID."""
+        with (
+            patch(
+                'metor.core.daemon.managed.quick_unlock.validate_private_windows_path',
+                side_effect=PermissionError('private-path-or-trustee'),
+            ) as validate,
+            patch('subprocess.run') as external,
         ):
             with self.assertRaises(QuickUnlockStorageError):
                 QuickUnlockStore._validate_windows_acl(Path('credential'))
+        validate.assert_called_once_with(Path('credential'), directory=False)
+        external.assert_not_called()
 
     def test_restricted_client_enforces_scope_and_pin_password_escalation(self) -> None:
         """Blocks normal access and requires password after three failed PIN proofs."""
-        with TemporaryDirectory() as temp_dir:
+        with PrivateTemporaryDirectory() as temp_dir:
             store = QuickUnlockStore(Path(temp_dir) / 'quick-unlock.json')
             salt, verifier = create_pin_verifier('1234')
             store.configure(salt, verifier)
@@ -267,7 +293,7 @@ class SessionAuthContractTests(unittest.TestCase):
 
     def test_forgot_pin_issues_password_challenge_without_failed_attempt(self) -> None:
         """Switches proof methods explicitly and accepts the resulting challenge."""
-        with TemporaryDirectory() as temp_dir:
+        with PrivateTemporaryDirectory() as temp_dir:
             store = QuickUnlockStore(Path(temp_dir) / 'quick-unlock.json')
             pin_salt, verifier = create_pin_verifier('1234')
             store.configure(pin_salt, verifier)

@@ -252,6 +252,12 @@ class PurgeMonitor:
         return changed
 
     @property
+    def profile(self) -> str | None:
+        """Return only the observed operation's validated profile identity."""
+        with self._lock:
+            return self._facts.profile if self._facts is not None else None
+
+    @property
     def shutdown_ready(self) -> bool:
         """Reports exact-operation safety plus terminal cleanup knowledge or bounded loss.
 

@@ -12,7 +12,7 @@ delivery, transport, persistence, or profile truth.
 and `metor-sdk` packages from the same release wheelhouse. The common launcher
 selects a frontend using explicit `--ui`, then `METOR_UI`, then
 `client.default_ui`, then Terminal. Installing the GUI does not select it by
-default. A normal desktop start needs an SDL2/OpenGL display:
+default. A normal desktop start needs an SDL2 display and OpenGL 2.0 or newer:
 
 ```sh
 metor chat --ui gui
@@ -20,13 +20,28 @@ metor chat --ui gui --simulator
 metor chat --ui gui --simulator --device-config docs/examples/gui-simulator.toml
 ```
 
+On Linux, both desktop and simulator startup also require access to the system
+D-Bus and `org.freedesktop.login1` (logind). The GUI process must belong to a
+registered login session that logind can resolve through `GetSessionByPID`.
+Supported desktop screen-lock services on the session bus supplement this
+binding; they do not replace it. Startup fails if the required lifecycle source
+cannot be established, and no device configuration option disables this check.
+A graphical display alone is insufficient: Xvfb, containers, SSH or WSL sessions
+without that logind binding cannot run the ordinary GUI or simulator. The
+deterministic acceptance fixtures replace this source explicitly for testing.
+
 On Windows, launch the installed `metor-gui.exe` from the environment's
 `Scripts` directory for a graphical start without a console window. The
 release GUI bundle places it in `.venv\Scripts`. `metor chat --ui gui` remains
 available from PowerShell for diagnostics; that original terminal remains open.
-Neither start path creates a console for GUI child processes (daemon, Tor or the
-Windows ACL helper). A failure before the graphical shell
-opens produces a generic Windows dialog that points to that diagnostic command.
+Neither start path creates a console for GUI child processes (daemon or Tor).
+PIN credentials use the same native owner-only Windows protection as profile keys,
+without launching a helper process. A failure before the graphical shell opens
+produces a generic Windows dialog that points to that diagnostic command.
+Windows VMs or Remote Desktop sessions with insufficient OpenGL driver support
+can select Kivy's ANGLE backend by setting `$env:KIVY_GL_BACKEND='angle_sdl2'` in
+PowerShell before launching Metor. If graphics startup still fails, install a
+compatible graphics driver and use the diagnostic command above.
 
 The GUI opens its graphical shell before profile authentication, including when
 started from a terminal. With no profiles it opens Create profile and says
@@ -205,6 +220,15 @@ usable display must be at least **360 × 640 logical units**. Desktop defaults
 to 1180 × 760 logical units. A 480 × 800 native display at scale 1 and a
 960 × 1600 display at scale 2 describe the same logical size. Unsupported
 geometry fails instead of clipping essential controls.
+
+The configured scale sets Kivy density and the mounted native window size;
+rotation is applied to the native dimensions first. The simulator's status
+banner is added outside the configured usable display rather than subtracting
+from it. `gui_native_device_configuration.py` checks a parsed scale-2, rotated
+simulator configuration through the real native event loop and touch keyboard.
+Device-mode `[audio]` omission or `adapter = "none"` prevents PortAudio device
+scanning and selection. Native audio selection is available in desktop mode;
+configured devices require a supported audio adapter before it can be enabled.
 
 The file is bounded to 64 KiB and must be a trusted regular file. The parser
 does not follow symlinks or accept multiply linked files. On POSIX it requires
@@ -551,6 +575,21 @@ Hard profile lock, profile switch, client loss and purge end the call. System
 suspend ends real-time audio rather than replaying a backlog after resume.
 The Linux logind/screen-lock and Windows session/power adapters distinguish
 screen lock from suspend; physical continuation requires a named native run.
+If native security monitoring is lost, this GUI cancels its pending entry and
+media work, detaches its own client, and shows a permanent **Restart Metor**
+cover with **Close Metor**. Unlock, reconnect and profile changes cannot reopen
+that process; close it and launch Metor again to establish a fresh native source.
+Other clients and an independent daemon continue. An already accepted profile
+destruction retains its read-only progress observation until this GUI closes;
+the restart cover shows only its nonsecret progress and safety instructions.
+
+Temporary Power menus and purge-arming covers do not replace session
+restriction. Native screen lock and application idle timeout still restrict the
+client and cancel reversible overlays. Returning from a device cover is valid
+only for the GUI generation that opened it; a disconnected or changed profile
+cannot reopen old content. Native focus loss, suspend and input loss cancel a
+held purge chord and require an explicit physical release before a fresh PTT
+press or destructive arming sequence.
 
 Profile switch is a public lifecycle transaction: stop local producers,
 preserve accepted Core work, clear old presentation, and attach the new profile
@@ -592,8 +631,12 @@ The software keyboard is local and offers QWERTY and QWERTZ without cloud
 suggestions or a learned persistent dictionary. Desktop typing uses the
 physical keyboard by default. It opens on field focus only when the device
 configuration declares touch input; no keyboard button occupies the field.
-Focus order follows visible reading order;
-selection alone does not start communication. A focused PTT control may own
+Focus order follows visible reading order. Text fields expose their purpose
+independently of placeholder text or entered values. Password/PIN confirmation
+fields have distinct accessible names.
+Ordinary action names follow their visible labels as state changes; icon actions
+retain their explicit purpose.
+Selection alone does not start communication. A focused PTT control may own
 Space down/up, but text fields and global shortcuts cannot capture that press.
 The text composer uses Enter for explicit Send and Shift+Enter for a newline.
 Incoming call UI does not steal an active typing or PTT owner. Modal focus
@@ -629,6 +672,8 @@ Entry, lock, and profile management content stays fixed when it fits the
 viewport. Scrolling is enabled only for actual overflow, including locked
 activity or accepted-call controls. Pending profile activation shows covered
 progress until a graphical prompt or the complete profile becomes available.
+All viewports clamp mouse-wheel movement at their content edges so footer
+actions remain fully reachable; touch dragging remains available for overflow.
 
 DROP and LIVE require distinct labels as well as color. Status, disabled state,
 focus, recording, errors, and destructive consequences cannot rely on color,
@@ -650,7 +695,10 @@ foreground detail pane; root selection alone cannot promote a background peer
 into a media owner. For a peer opened from the master list, compact Back returns
 to the originating root tab and wide Back clears the detail to a neutral
 conversation prompt. A peer opened from a contact picker returns to that picker;
-switching DROP/LIVE within the peer does not add a navigation step. Contacts,
+switching DROP/LIVE within the peer does not add a navigation step. The LIVE
+conversation menu offers **Open Drop** for the same peer, including after a
+connection failure. Opening its archive neither sends pending messages nor ends
+the LIVE context, and preserves the original Back destination. Contacts,
 Notifications, and Settings replace the foreground detail,
 while authentication, restriction, profile transition, and purge cover the whole
 application. Desktop master tabs stay available on secondary pages; selecting a

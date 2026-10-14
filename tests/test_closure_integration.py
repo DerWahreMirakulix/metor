@@ -186,14 +186,17 @@ class ClosureStreamTests(unittest.TestCase):
             threading.Event(),
             threading.Event(),
         )
+        self.addCleanup(release.set)
 
         def claim() -> bool:
             entered.set()
-            return release.wait(2)
+            release.wait()
+            return True
 
         writer = BoundedSocketWriter(
             left, capacity=8, byte_capacity=1024, on_exit=lambda writer: exited.set()
         )
+        self.addCleanup(writer.close)
         writer.enqueue(b'first\n', claim=claim)
         self.assertTrue(entered.wait(1))
         writer.finish(b'DISCONNECT\n', timeout=1)
@@ -950,10 +953,12 @@ class ClosureDaemonTests(unittest.TestCase):
         onion = self.fixture.receiver_onion
         state.add_active_connection(onion, local)
         entered, release = threading.Event(), threading.Event()
+        self.addCleanup(release.set)
 
         def claimed() -> bool:
             entered.set()
-            return release.wait(2)
+            release.wait()
+            return True
 
         state.send_frame(local, b'prior\n', claimed)
         self.assertTrue(entered.wait(1))
@@ -991,24 +996,34 @@ class ClosureCredentialTests(unittest.TestCase):
             if os.name == 'nt':
                 store._validate_windows_acl(path)
                 store._validate_windows_acl(path.parent)
-                store._run_acl_helper(
-                    path,
-                    '$acl=[System.IO.File]::GetAccessControl($Target); '
-                    '$sid=New-Object System.Security.Principal.SecurityIdentifier("S-1-1-0"); '
-                    '$rule=New-Object System.Security.AccessControl.FileSystemAccessRule($sid,"Read","Allow"); '
-                    '$acl.AddAccessRule($rule); [System.IO.File]::SetAccessControl($Target,$acl)',
-                    'test-unsafe-trustee',
+                import win32security
+
+                security = win32security.GetNamedSecurityInfo(
+                    str(path),
+                    win32security.SE_FILE_OBJECT,
+                    win32security.DACL_SECURITY_INFORMATION,
+                )
+                acl = security.GetSecurityDescriptorDacl()
+                acl.AddAccessAllowedAce(
+                    win32security.ACL_REVISION,
+                    0x00120089,
+                    win32security.ConvertStringSidToSid('S-1-1-0'),
+                )
+                win32security.SetNamedSecurityInfo(
+                    str(path),
+                    win32security.SE_FILE_OBJECT,
+                    win32security.DACL_SECURITY_INFORMATION,
+                    None,
+                    None,
+                    acl,
+                    None,
                 )
                 with self.assertRaises(QuickUnlockStorageError):
                     store.metadata()
-                store._protect_windows_path(path, directory=False)
-                with patch.object(
-                    QuickUnlockStore,
-                    '_protect_windows_path',
-                    side_effect=QuickUnlockStorageError('test protection failure'),
-                ):
-                    with self.assertRaises(QuickUnlockStorageError):
-                        store.configure('06' * 16, '07' * 32)
+                from metor.utils import open_private_binary_file
+
+                with open_private_binary_file(path, append=True):
+                    pass
                 self.assertEqual(
                     store.metadata(), ('04' * 16, bytes.fromhex('05' * 32))
                 )

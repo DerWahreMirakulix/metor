@@ -51,6 +51,7 @@ class Composer(BoxLayout):
             height=dp(64),
         )
         self.entry = TextField(
+            accessible_name='Message',
             font_name=font_path(),
             font_size=sp(15),
             multiline=True,

@@ -1,6 +1,7 @@
 """Native Windows acceptance for installed GUI entry points and console windows.
 
 Run only from an isolated wheel installation with an interactive desktop. The
+installed-artifact validator gives this harness its own visible console. The
 harness creates disposable profile data, opens each real entry point, observes
 its window, and closes it through the window manager.
 """
@@ -131,13 +132,39 @@ def _powershell() -> Path:
     return executable
 
 
+def _console_handle() -> int:
+    """Normalize the nullable HWND returned by the typed Win32 console API."""
+    query = ctypes.windll.kernel32.GetConsoleWindow
+    query.argtypes = []
+    query.restype = wintypes.HWND
+    return int(query() or 0)
+
+
+def _require_original_console() -> int:
+    """Require the visible console allocated at this fixture's process boundary."""
+    handle = _console_handle()
+    if not handle:
+        # Keep diagnostics numeric and bounded: no window titles, process
+        # arguments, environment, or credentials belong in acceptance logs.
+        query = ctypes.WinDLL('kernel32', use_last_error=True).GetConsoleProcessList
+        query.argtypes = [ctypes.POINTER(wintypes.DWORD), wintypes.DWORD]
+        query.restype = wintypes.DWORD
+        process_ids = (wintypes.DWORD * 1)()
+        attached = query(process_ids, len(process_ids))
+        error = ctypes.get_last_error() if not attached else 0
+        raise RuntimeError(
+            'The fixture requires a visible console at process creation '
+            f'(attached_processes={attached}, winerror={error}).'
+        )
+    return handle
+
+
 def _assert_original_console(hwnd: int) -> None:
     """Require the original test terminal to remain attached and visible."""
-    kernel32 = ctypes.windll.kernel32
     user32 = ctypes.windll.user32
     user32.IsWindowVisible.argtypes = [wintypes.HWND]
     user32.IsWindowVisible.restype = wintypes.BOOL
-    if kernel32.GetConsoleWindow() != hwnd or not user32.IsWindowVisible(hwnd):
+    if _console_handle() != hwnd or not user32.IsWindowVisible(hwnd):
         raise AssertionError('The original console was closed or hidden.')
 
 
@@ -180,14 +207,28 @@ def _watch_consoles(
             return
 
 
+def _owned_process_ids(process: subprocess.Popen[bytes]) -> set[int]:
+    """Include interpreter children of the exact installed executable launcher."""
+    if process.poll() is not None:
+        return set()
+    try:
+        # Wheel entry-point .exe stubs spawn Python and wait for it. The Kivy
+        # window therefore belongs to that child, not necessarily the stub.
+        children = psutil.Process(process.pid).children(recursive=True)
+    except psutil.NoSuchProcess:
+        return set()
+    return {process.pid, *(child.pid for child in children)}
+
+
 def _wait_owned_window(
     process: subprocess.Popen[bytes], *, class_name: str | None = None
 ) -> int:
-    """Wait for an exact process-owned native window with a bounded deadline."""
+    """Wait for a native window owned by this launcher's bounded process tree."""
     deadline = time.monotonic() + WINDOW_READY_SECONDS
     while time.monotonic() < deadline:
+        owned = _owned_process_ids(process)
         for hwnd, owner, name in _windows():
-            if owner == process.pid and (
+            if owner in owned and (
                 name == class_name
                 if class_name is not None
                 else name != 'ConsoleWindowClass'
@@ -489,8 +530,9 @@ def _exercise(command: list[str], root: Path) -> None:
         while time.monotonic() < deadline:
             if _console_windows() - baseline:
                 raise AssertionError('An additional Windows console appeared.')
+            owned = _owned_process_ids(process)
             for hwnd, owner, name in _windows():
-                if owner == process.pid and name != 'ConsoleWindowClass':
+                if owner in owned and name != 'ConsoleWindowClass':
                     gui_window = hwnd
                     break
             if gui_window is not None:
@@ -533,7 +575,7 @@ def _exercise(command: list[str], root: Path) -> None:
 
 
 def _exercise_quick_unlock(root: Path) -> None:
-    """Observe the installed ACL helper while it protects disposable data."""
+    """Observe installed native credential protection of disposable data."""
     from metor.core.daemon.managed.quick_unlock import (
         PIN_SALT_BYTES,
         PIN_VERIFIER_BYTES,
@@ -546,7 +588,7 @@ def _exercise_quick_unlock(root: Path) -> None:
     observation_failed = threading.Event()
 
     def observe() -> None:
-        """Record a short-lived helper console during the blocking ACL call."""
+        """Record any console appearing during credential operations."""
         while not stopped.wait(0.05):
             try:
                 appeared.update(_console_windows() - baseline)
@@ -567,7 +609,9 @@ def _exercise_quick_unlock(root: Path) -> None:
     if observation_failed.is_set():
         raise AssertionError('Native console observation failed.')
     if appeared or _console_windows() - baseline:
-        raise AssertionError('Quick-unlock ACL helper opened another console.')
+        raise AssertionError(
+            'Quick-unlock credential operations opened another console.'
+        )
 
 
 def _console_fixture(root: Path) -> Path:
@@ -651,7 +695,7 @@ def _tor_child_worker(executable: Path, root: Path) -> int:
     """Spawn the fixture from a process with no inherited Windows console."""
     from metor.core.tor_windows import launch_tor_without_console
 
-    if ctypes.windll.kernel32.GetConsoleWindow() != 0:
+    if _console_handle():
         return 2
     config = {
         'SocksPort': '10241',
@@ -744,13 +788,7 @@ def main() -> None:
     gui = scripts / 'metor-gui.exe'
     if not cli.is_file() or not gui.is_file():
         raise RuntimeError('The isolated installation lacks a GUI or CLI entry point.')
-    kernel32 = ctypes.windll.kernel32
-    kernel32.GetConsoleWindow.restype = wintypes.HWND
-    kernel32.AllocConsole.restype = wintypes.BOOL
-    if kernel32.GetConsoleWindow() == 0:
-        if not kernel32.AllocConsole():
-            raise RuntimeError('Could not establish the original test console.')
-    original_console = int(kernel32.GetConsoleWindow())
+    original_console = _require_original_console()
     _assert_original_console(original_console)
     with tempfile.TemporaryDirectory(prefix='metor-win-gui-') as directory:
         root = Path(directory)
@@ -762,14 +800,19 @@ def main() -> None:
             case_root.mkdir()
             _exercise(command, case_root)
             _assert_original_console(original_console)
+            print(f'WINDOWS_INSTALLED_GUI_ENTRYPOINT_OK {name}', flush=True)
         no_stream_root = root / 'no-stream-error'
         no_stream_root.mkdir()
         _exercise_no_stream_failure(gui, no_stream_root, original_console)
+        print('WINDOWS_INSTALLED_GUI_NO_STREAM_ERROR_OK', flush=True)
         autostart_root = root / 'windowed-autostart'
         autostart_root.mkdir()
         _exercise_windowed_autostart(gui, autostart_root, original_console)
+        print('WINDOWS_INSTALLED_GUI_WINDOWED_AUTOSTART_OK', flush=True)
         _exercise_quick_unlock(root)
+        print('WINDOWS_INSTALLED_GUI_QUICK_UNLOCK_OK', flush=True)
         _exercise_tor_child(root)
+        print('WINDOWS_INSTALLED_GUI_TOR_CHILD_OK', flush=True)
     _assert_original_console(original_console)
     print('WINDOWS_INSTALLED_GUI_ENTRYPOINTS_OK')
 

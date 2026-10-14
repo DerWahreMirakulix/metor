@@ -13,6 +13,7 @@ if TYPE_CHECKING:
         open_private_binary_file,
         secure_remove_path,
         secure_shred_file,
+        validate_private_windows_path,
     )
     from metor.utils.validators import validate_json_file  # noqa: F401
 
@@ -33,6 +34,10 @@ _LAZY_EXPORTS: dict[str, tuple[str, str]] = {
     ),
     'secure_remove_path': ('metor.utils.security', 'secure_remove_path'),
     'secure_shred_file': ('metor.utils.security', 'secure_shred_file'),
+    'validate_private_windows_path': (
+        'metor.utils.security',
+        'validate_private_windows_path',
+    ),
 }
 
 
@@ -82,4 +87,5 @@ __all__ = [
     'validate_json_file',
     'secure_remove_path',
     'secure_shred_file',
+    'validate_private_windows_path',
 ]

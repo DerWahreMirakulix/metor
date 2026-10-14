@@ -53,6 +53,7 @@ class PeerView(BoxLayout):
         )
         self.header_viewport = ScrollView(
             do_scroll_x=False,
+            always_overscroll=False,
             do_scroll_y=False,
             size_hint_y=None,
             height=dp(Geometry.TARGET),
@@ -261,6 +262,14 @@ class PeerView(BoxLayout):
                     )
                 )
             if self.route.delivery is Delivery.LIVE:
+
+                def open_drop() -> None:
+                    """Opens this peer's archive without sending or ending its LIVE context."""
+                    sheet.dismiss(animation=False)
+                    controller.navigate(Route('V08', peer, Delivery.DROP))
+                    self.refresh()
+
+                body.add_widget(Action('Open Drop', open_drop))
                 live_context_actions(
                     controller,
                     peer,

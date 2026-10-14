@@ -177,7 +177,7 @@ class Action(FocusBehavior, ButtonBehavior, Panel):  # pyright: ignore[reportInc
             padding=('12dp', '8dp'),
             **kwargs,
         )
-        self.accessible_name: str = text
+        self._accessible_name: str | None = None
         self._tone = tone
         self._hovered = False
         self._keyboard_armed = False
@@ -206,6 +206,18 @@ class Action(FocusBehavior, ButtonBehavior, Panel):  # pyright: ignore[reportInc
         )
         self._feedback()
         Window.bind(mouse_pos=self._pointer)
+
+    @property
+    def accessible_name(self) -> str:
+        """Follows visible action text unless a control supplies a richer purpose."""
+        return (
+            self.label.text if self._accessible_name is None else self._accessible_name
+        )
+
+    @accessible_name.setter
+    def accessible_name(self, value: str) -> None:
+        """Preserves explicit icon, state and privacy-revocation descriptions."""
+        self._accessible_name = value
 
     def _measure(self, *_args: object) -> None:
         """Grows the control to contain its complete label at the current text scale."""
@@ -442,13 +454,15 @@ class KeyboardOwner(Protocol):
 class TextField(TextInput):
     """Native text editing with clipboard export disabled for selected text."""
 
+    height: float
     keyboard_owner: ClassVar[KeyboardOwner | None] = None
     submit_on_enter = BooleanProperty(False)
 
-    def __init__(self, **kwargs: object) -> None:
+    def __init__(self, *, accessible_name: str = '', **kwargs: object) -> None:
         """Builds an editable field whose device keyboard follows focus.
 
         Args:
+            accessible_name: Persistent field purpose independent of placeholder or value.
             kwargs: Native text-input properties.
         Returns:
             None
@@ -460,12 +474,21 @@ class TextField(TextInput):
         kwargs.setdefault('cursor_color', color('focus'))
         kwargs.setdefault('padding', ('16dp', '14dp'))
         super().__init__(**kwargs)
+        self.accessible_name = accessible_name
+        self._minimum_field_height = self.height / dp(1)
+        self.bind(minimum_height=self._fit_single_line)
+        self._fit_single_line()
         self.bind(text=self._font_coverage)
         self._font_coverage()
         self.local_keyboard_visible = False
         self.input_purpose = 'password' if self.password else 'text'
         self._enter_down = False
         self.bind(focus=self._keyboard_focus)
+
+    def _fit_single_line(self, *_args: object) -> None:
+        """Keeps scaled text and its padding inside fixed-height form fields."""
+        if not self.multiline and self.size_hint_y is None:
+            self.height = max(dp(self._minimum_field_height), self.minimum_height)
 
     def enter(self, *, shift: bool = False) -> None:
         """Applies the field's explicit Enter policy for physical and local input.
@@ -572,15 +595,17 @@ class TextField(TextInput):
 class SecretInput(TextField):
     """Masked local credential input with clipboard export disabled."""
 
-    def __init__(self, **kwargs: object) -> None:
+    def __init__(self, *, accessible_name: str = '', **kwargs: object) -> None:
         """Builds a password field with the bundled font.
 
         Args:
+            accessible_name: Credential purpose without its value or length.
             kwargs: Native input properties.
         Returns:
             None
         """
         super().__init__(
+            accessible_name=accessible_name,
             password=True,
             multiline=False,
             font_name=font_path(),

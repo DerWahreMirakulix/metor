@@ -5,11 +5,12 @@ import unittest
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from typing import cast
 from unittest.mock import Mock, patch
 
 from link_fixtures import create_directory_alias
+from private_fixtures import PrivateTemporaryDirectory
+
 from metor.application import create_local_frontend_host
 from metor.application.frontend.host import LocalFrontendHost
 from metor.client import (
@@ -38,7 +39,7 @@ class StartupSelectionTests(unittest.TestCase):
         Returns:
             None
         """
-        temporary = TemporaryDirectory()
+        temporary = PrivateTemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         data_patch = patch.object(Constants, 'DATA', self.root)

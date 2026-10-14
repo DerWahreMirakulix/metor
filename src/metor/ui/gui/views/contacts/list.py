@@ -60,7 +60,7 @@ class ContactListView(BoxLayout):
         )
         self.search.bind(text=self.filter)
         self.add_widget(self.search)
-        self.scroll = ScrollView(do_scroll_x=False)
+        self.scroll = ScrollView(do_scroll_x=False, always_overscroll=False)
         self.rows = BoxLayout(orientation='vertical', spacing=dp(12), size_hint_y=None)
         self.rows.bind(minimum_height=self.rows.setter('height'))
         self.scroll.add_widget(self.rows)

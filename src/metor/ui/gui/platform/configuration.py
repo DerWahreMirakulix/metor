@@ -136,6 +136,13 @@ class DeviceConfiguration:
     source: str | None = None
 
     @property
+    def native_size(self) -> tuple[int, int]:
+        """Return exact mounted pixel dimensions without density rounding."""
+        if self.rotation_deg in (90, 270):
+            return self.height_px, self.width_px
+        return self.width_px, self.height_px
+
+    @property
     def logical_size(self) -> tuple[float, float]:
         """Returns geometry after mounting rotation and declared density.
 
@@ -144,9 +151,7 @@ class DeviceConfiguration:
         Returns:
             tuple[float, float]: Usable logical width and height.
         """
-        width, height = self.width_px, self.height_px
-        if self.rotation_deg in (90, 270):
-            width, height = height, width
+        width, height = self.native_size
         return width / self.scale, height / self.scale
 
     def activate_platform(

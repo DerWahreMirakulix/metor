@@ -4,6 +4,7 @@
 
 import argparse
 import importlib
+import io
 import json
 import shutil
 import subprocess
@@ -27,6 +28,7 @@ from scripts.release.bundle import (
     build_bundle_name,
     build_sha256_manifest,
     clean_packaging_artifacts,
+    validate_output_directory,
     build_install_guide,
     build_release_wheelhouse,
     build_install_shell_script,
@@ -329,7 +331,8 @@ class ReleaseContractTests(unittest.TestCase):
                 return_value='ok',
             ) as add_profile,
             patch('builtins.print'),
-            patch('getpass.getpass', side_effect=['test-pw-123', 'test-pw-123']),
+            patch('sys.stdin', io.StringIO('test-pw-123\ntest-pw-123\n')),
+            patch('sys.stderr', io.StringIO()),
         ):
             dispatcher.dispatch()
 
@@ -674,7 +677,7 @@ class ReleaseContractTests(unittest.TestCase):
         self.assertIn('sh install.sh', guide)
         self.assertIn('install.cmd', guide)
         self.assertIn(
-            '--no-index --find-links wheelhouse --upgrade pip==26.0.1',
+            '--no-index --find-links wheelhouse --upgrade pip==26.2.1',
             guide,
         )
         self.assertIn('requires no package index access', guide)
@@ -708,7 +711,7 @@ class ReleaseContractTests(unittest.TestCase):
         self.assertNotIn('sys.version_info >=', script)
         self.assertNotIn('rm -', script)
         self.assertIn(
-            '--no-index --find-links "$script_dir/wheelhouse" --upgrade pip==26.0.1',
+            '--no-index --find-links "$script_dir/wheelhouse" --upgrade pip==26.2.1',
             script,
         )
         self.assertIn('--no-index --find-links "$script_dir/wheelhouse" metor', script)
@@ -742,7 +745,7 @@ class ReleaseContractTests(unittest.TestCase):
         self.assertNotIn('sys.version_info >=', script)
         self.assertNotIn('rd /s /q', script)
         self.assertIn(
-            '--no-index --find-links "%BUNDLE_DIR%\\wheelhouse" --upgrade pip==26.0.1',
+            '--no-index --find-links "%BUNDLE_DIR%\\wheelhouse" --upgrade pip==26.2.1',
             script,
         )
         self.assertIn(
@@ -767,7 +770,7 @@ class ReleaseContractTests(unittest.TestCase):
         """
         with TemporaryDirectory() as directory:
             bundle = Path(directory)
-            wheel = bundle / 'wheelhouse' / 'pip-26.0.1-py3-none-any.whl'
+            wheel = bundle / 'wheelhouse' / 'pip-26.2.1-py3-none-any.whl'
             wheel.parent.mkdir()
             wheel.write_bytes(b'pip wheel')
             (bundle / BUNDLE_METADATA_NAME).write_text(
@@ -904,6 +907,45 @@ class ReleaseContractTests(unittest.TestCase):
             )
         )
 
+    def test_packaging_cleanup_preserves_reports_and_release_outputs(self) -> None:
+        """Building another variant must not erase prior archives or test evidence."""
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            report = root / 'build/test-report.txt'
+            archive = root / 'build/audit/bundles/sdk.zip'
+            stale_module = root / 'build/lib/metor/obsolete.py'
+            stale_frontend = root / 'packaging/gui/build/lib/metor/obsolete.py'
+            for path in (report, archive, stale_module, stale_frontend):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text('retain-or-clean', encoding='utf-8')
+            clean_packaging_artifacts(root)
+            clean_packaging_artifacts(root)
+            self.assertEqual(report.read_text(encoding='utf-8'), 'retain-or-clean')
+            self.assertEqual(archive.read_text(encoding='utf-8'), 'retain-or-clean')
+            self.assertFalse(stale_module.exists())
+            self.assertFalse(stale_frontend.exists())
+            self.assertEqual(
+                validate_output_directory(archive.parent, root),
+                archive.parent.resolve(),
+            )
+
+    def test_release_output_rejects_setuptools_owned_directory_before_build(
+        self,
+    ) -> None:
+        """An unsafe destination is rejected before cleanup or package commands."""
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            for relative in ('build/lib/releases', 'packaging/sdk/build/bdist.any'):
+                output = root / relative
+                with (
+                    patch('scripts.release.bundle.PROJECT_ROOT', root),
+                    patch('scripts.release.bundle.run_command') as command,
+                    self.assertRaises(ValueError),
+                ):
+                    build_release_wheelhouse(output, skip_pip_upgrade=True)
+                command.assert_not_called()
+                self.assertFalse(output.exists())
+
     def test_release_builder_supports_sdk_and_terminal_variants(self) -> None:
         """
         Verifies that release builder targets variant-specific lockfiles and packages.
@@ -989,7 +1031,7 @@ class ReleaseContractTests(unittest.TestCase):
         )
         self.assertTrue(
             any(
-                'requirements/base.lock' in command and 'wheel' in command
+                'requirements/terminal.lock' in command and 'wheel' in command
                 for command in commands_terminal
             )
         )

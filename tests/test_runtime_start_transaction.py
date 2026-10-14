@@ -8,10 +8,11 @@ from io import StringIO
 from pathlib import Path
 import signal
 import socket
-from tempfile import TemporaryDirectory
 import threading
 import unittest
 from unittest.mock import Mock, patch
+
+from private_fixtures import PrivateTemporaryDirectory
 
 from metor.client import MetorClient, MetorRequestRejectedError
 from metor.core.api import EventType, JsonValue
@@ -48,7 +49,7 @@ class RuntimeStartTransactionTests(unittest.TestCase):
         Returns:
             None
         """
-        temporary = TemporaryDirectory()
+        temporary = PrivateTemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         data_patch = patch.object(Constants, 'DATA', Path(temporary.name))
         data_patch.start()
@@ -675,7 +676,7 @@ class ResourceConstructionTests(unittest.TestCase):
         Returns:
             None
         """
-        temporary = TemporaryDirectory()
+        temporary = PrivateTemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         data_patch = patch.object(Constants, 'DATA', Path(temporary.name))
         data_patch.start()

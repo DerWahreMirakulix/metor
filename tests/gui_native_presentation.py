@@ -23,6 +23,7 @@ from kivy.metrics import Metrics, dp
 from kivy.uix.boxlayout import BoxLayout
 from gui_native_notifications import exercise_notification_actions
 from gui_native_projections import exercise_projection_reuse
+from gui_native_lifecycle_failure import exercise_lifecycle_failure
 
 from metor.client import FrontendHost, FrontendLaunchContext
 from metor.core.api import (
@@ -328,6 +329,7 @@ def main() -> None:
     """
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--output', type=Path, required=True)
+    parser.add_argument('--monitor-purge', action='store_true')
     args = parser.parse_args()
     Metrics.fontscale = 1.5
     app = MetorApp(
@@ -335,6 +337,18 @@ def main() -> None:
         DeviceConfiguration(mode='simulator', width_px=360, height_px=640),
     )
     controller = app.controller
+    lifecycle_checked = False
+
+    def lifecycle_complete() -> None:
+        """Record acceptance before the normal GUI-only exit poll stops the app."""
+        nonlocal lifecycle_checked
+        lifecycle_checked = True
+
+    def timed_out(_elapsed: float) -> None:
+        """Fail a native callback chain that did not reach its final exit action."""
+        raise AssertionError('Native presentation acceptance did not complete')
+
+    deadline = Clock.schedule_once(timed_out, 60)
     controller.open_profile()
     alias = 'שלום · العربية · 漢字'
     controller.state.snapshot = RuntimeSnapshotEvent(
@@ -422,7 +436,15 @@ def main() -> None:
                     lambda: exercise_notification_actions(
                         app,
                         args.output,
-                        lambda: exercise_sheet_refresh(app, app.stop),
+                        lambda: exercise_sheet_refresh(
+                            app,
+                            lambda: exercise_lifecycle_failure(
+                                app,
+                                args.output,
+                                lifecycle_complete,
+                                purging=args.monitor_purge,
+                            ),
+                        ),
                     ),
                 ),
             )
@@ -432,6 +454,8 @@ def main() -> None:
     Clock.schedule_once(lambda _elapsed: Clock.schedule_once(inspect, 0), 1.0)
     with patch('metor.ui.gui.app.create_desktop_lifecycle_source', return_value=None):
         app.run()
+    deadline.cancel()
+    assert lifecycle_checked and app.exit_status == 1
 
 
 if __name__ == '__main__':

@@ -16,7 +16,7 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
 from link_fixtures import create_directory_alias, create_native_symlink_or_skip
-from metor.utils import Constants
+from metor.utils import Constants, create_private_directory_tree
 from metor.shared.security import secure_clear_buffer
 from metor.utils.security import secure_remove_path, secure_shred_file
 
@@ -306,7 +306,7 @@ class SecurityContractTests(unittest.TestCase):
         with TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir) / 'profile'
             nested = root / 'hidden_service'
-            nested.mkdir(parents=True)
+            create_private_directory_tree(root, ((nested.name,),))
             (root / 'storage.db').write_bytes(b'db')
             (nested / 'metor_secret.key').write_bytes(b'key')
 

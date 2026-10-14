@@ -180,8 +180,16 @@ def _validate_value(expected_type: object, value: object, path: str) -> object:
         if type(value) is bool:
             return value
     elif expected_type is float:
-        if type(value) is float and math.isfinite(value):
-            return value
+        # JSON has one number type; other language encoders may spell 1.0 as 1.
+        # Booleans remain distinct, and conversion must not admit infinity.
+        if type(value) in (int, float):
+            try:
+                number = float(cast(int | float, value))
+            except OverflowError:
+                pass
+            else:
+                if math.isfinite(number):
+                    return number
     elif expected_type is str:
         if type(value) is str:
             return value

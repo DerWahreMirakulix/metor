@@ -108,7 +108,7 @@ class TextInputHarness(App):
         EventLoop.post_dispatch_input('end', touch)
 
     def exercise(self, _elapsed: float) -> None:
-        """Check Enter, held repeats, Shift+Enter and confirmed-only draft clearing."""
+        """Check Enter, held repeats, Shift+Enter and recoverable pending submission."""
         field = self.composer.entry
         field.text = 'physical message'
         field.focus = True
@@ -116,7 +116,10 @@ class TextInputHarness(App):
         Window.dispatch('on_key_down', 13, 40, '\r', [])
         Window.dispatch('on_key_up', 13, 40)
         assert self.controller.command.call_count == 1
-        assert field.text == 'physical message' and field.focus
+        assert field.text == '' and field.focus and field.readonly
+        assert self.controller.state.reserved_drafts['peer', Delivery.DROP] == (
+            'physical message'
+        )
         self.accept()
         assert field.text == '' and field.focus
         field.text = 'line one'
@@ -151,7 +154,11 @@ class TextInputHarness(App):
         field = self.composer.entry
         self.touch_key('↵')
         assert self.controller.command.call_count == 3
-        assert field.text and field.focus
+        assert field.text == '' and field.focus and field.readonly
+        assert (
+            'local message'
+            in self.controller.state.reserved_drafts['peer', Delivery.DROP]
+        )
         self.accept()
         assert field.text == '' and field.focus
         secret = SecretInput()
@@ -168,7 +175,7 @@ class TextInputHarness(App):
                     'physical_enter_sends_once_until_release': 'pass',
                     'physical_shift_enter_newline': 'pass',
                     'local_shift_enter_newline_then_enter_sends': 'pass',
-                    'draft_clears_only_after_confirmed_acceptance': 'pass',
+                    'pending_submission_preserves_exact_recoverable_text': 'pass',
                     'composer_focus_survives_send_and_acceptance': 'pass',
                     'credential_and_generic_multiline_policy_preserved': 'pass',
                     'input': 'synthetic native callbacks and pointer input',

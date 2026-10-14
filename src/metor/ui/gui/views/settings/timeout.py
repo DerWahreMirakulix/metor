@@ -30,6 +30,7 @@ class TimeoutEditor(ActionSheet):
         )
         self.revision = current.preferences_revision
         self.field = TextField(
+            accessible_name='Application timeout in seconds',
             text=str(self.preferences.idle_seconds),
             multiline=False,
             size_hint_y=None,

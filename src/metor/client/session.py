@@ -91,7 +91,7 @@ def parse_endpoint(endpoint: str | int) -> tuple[str, int]:
     Parses an endpoint definition into host and port.
 
     Args:
-        endpoint (str | int): Formatted as "host:port", "port", or integer port.
+        endpoint (str | int): IPv4/DNS "host:port", "port", or integer port.
 
     Raises:
         ValueError: If endpoint format is invalid or port is out of range.
@@ -99,16 +99,26 @@ def parse_endpoint(endpoint: str | int) -> tuple[str, int]:
     Returns:
         tuple[str, int]: Resolved host and integer port.
     """
-    if isinstance(endpoint, int):
-        return Constants.LOCALHOST, endpoint
-
-    endpoint_str: str = endpoint.strip()
-    if ':' in endpoint_str:
-        host, _, port_str = endpoint_str.rpartition(':')
-        resolved_host: str = host or Constants.LOCALHOST
-        return resolved_host, int(port_str)
-
-    return Constants.LOCALHOST, int(endpoint_str)
+    resolved_host = Constants.LOCALHOST
+    if type(endpoint) is int:
+        port = endpoint
+    else:
+        if not isinstance(endpoint, str):
+            raise ValueError('IPC endpoint must be a host/port string or integer port.')
+        endpoint_str = endpoint.strip()
+        host, separator, port_str = endpoint_str.rpartition(':')
+        if separator:
+            if ':' in host or any(character.isspace() for character in host):
+                raise ValueError('IPC endpoint requires an IPv4 address or DNS host.')
+            resolved_host = host or Constants.LOCALHOST
+        else:
+            port_str = endpoint_str
+        if not port_str.isascii() or not port_str.isdecimal():
+            raise ValueError('IPC endpoint requires a decimal TCP port.')
+        port = int(port_str)
+    if not 0 < port <= Constants.TCP_PORT_MAX:
+        raise ValueError('IPC endpoint port is outside the TCP range.')
+    return resolved_host, port
 
 
 class MetorClient(CallClientMixin):
@@ -203,7 +213,11 @@ class MetorClient(CallClientMixin):
         Returns:
             bool: True if connection succeeded, False otherwise.
         """
-        return self._ipc.connect(start_listener=False)
+        connected = self._ipc.connect(start_listener=False)
+        if connected or not self.is_connected:
+            self._init_event = None
+            self._lease_joined = False
+        return connected
 
     def disconnect(self) -> None:
         """
@@ -227,6 +241,7 @@ class MetorClient(CallClientMixin):
             except (OSError, ValueError):
                 pass
         self._lease_joined = False
+        self._init_event = None
         self._ipc.stop()
 
     def send_command(self, cmd: IpcCommand) -> None:
@@ -519,7 +534,14 @@ class MetorClient(CallClientMixin):
             expected_type (Type[T]): Expected response event DTO class.
 
         Returns:
-            Optional[T]: Decoded response event, or None if the request failed or was rejected.
+            Optional[T]: Decoded response event, or None for an incomplete auth gate
+                or unavailable protocol/runtime snapshot.
+
+        Raises:
+            IpcClientError: If transport loss, send failure, saturation, or timeout
+                prevents completion. A sent mutation may already have succeeded.
+            MetorRequestRejectedError: If Core returns a typed rejection outcome.
+            MetorProtocolError: If an unexpected correlated event ends the request.
         """
         return cast(Optional[T], self._request_types(cmd, (expected_type,)))
 
@@ -575,6 +597,7 @@ class MetorClient(CallClientMixin):
                     if (
                         auth_result.auth_incomplete
                         or auth_result.error_event is not None
+                        or auth_result.error_message is not None
                     ):
                         return None
 
@@ -742,4 +765,5 @@ class MetorClient(CallClientMixin):
             None
         """
         self._lease_joined = False
+        self._init_event = None
         self._on_disconnect()

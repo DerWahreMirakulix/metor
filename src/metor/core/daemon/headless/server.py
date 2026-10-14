@@ -11,32 +11,6 @@ from metor.utils import Constants
 from metor.core.daemon.headless.protocols import HeadlessDaemonProtocol
 
 
-def run_acceptor(daemon: HeadlessDaemonProtocol) -> None:
-    """
-    Waits for a single local client and delegates socket processing.
-
-    Args:
-        daemon (HeadlessDaemonProtocol): The owning headless daemon instance.
-
-    Returns:
-        None
-    """
-    if not daemon._server:
-        return
-
-    daemon._server.settimeout(Constants.THREAD_POLL_TIMEOUT)
-    while not daemon._stop_event.is_set():
-        try:
-            conn, _ = daemon._server.accept()
-        except socket.timeout:
-            continue
-        except OSError:
-            break
-
-        daemon._handle_client(conn)
-        break
-
-
 def handle_client(daemon: HeadlessDaemonProtocol, conn: socket.socket) -> None:
     """
     Reads one newline-delimited IPC frame and routes the parsed command.
@@ -56,7 +30,7 @@ def handle_client(daemon: HeadlessDaemonProtocol, conn: socket.socket) -> None:
             try:
                 data: bytes = conn.recv(Constants.TCP_BUFFER_SIZE)
             except socket.timeout:
-                continue
+                break
             except OSError:
                 break
 

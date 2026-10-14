@@ -7,21 +7,59 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 
 ## Protocol Notes
 
-- Commands sent from the UI to the daemon must include a top-level `command_type` field.
-- Events sent from the daemon to the UI must include a top-level `event_type` field.
-- Every payload is a single JSON object followed by a newline (`\n`).
-- The daemon emits structured data only. Human-readable text is resolved in the UI from `event_type`.
-- `api.schema.json` is a route/definition catalog, not a root message validator; select the route reference under `commands` or `events` to validate one complete message.
+- Commands include a top-level `command_type`; events include `event_type`. Use the exact lowercase wire values listed below, not Python class names.
+- Each frame is one UTF-8 JSON object followed by a line-feed byte (`0x0a`). Buffer bytes across partial reads, split complete lines before UTF-8 decoding, and preserve coalesced frames.
+- A complete frame, including its newline, must not exceed 5242880 bytes. Apply the limit to each frame, not the sum of several bounded frames received together. Truncated EOF is not a completed response.
+- Types and unknown fields are strict at every nesting level. Numbers must be finite, booleans are distinct from numbers, and integer fields use integer JSON spelling. Floating-point fields also accept integer spelling. Omitted defaulted fields use their documented defaults; optional values may be null.
+- A malformed or unknown event ends the SDK connection. Never skip an undecodable state or authority event and keep using the old projection.
+- `api.schema.json` is a route/definition catalog, not a root message validator; select the route reference under `commands` or `events` to validate one complete message. Domain limits and command authorization still apply after schema validation.
+- IPC TCP has no transport encryption or server identity handshake. Use loopback on the trusted local host or an authenticated, encrypted SSH tunnel. Never expose or connect it directly over an untrusted network; cold unlock sends the password inside that protected transport.
+- Human-readable labels belong to the frontend. Branch on event types, enums and structured fields, never rendered error messages.
 
 ## Canonical Client Session Sequence
 
-1. **Establish TCP connection:** Connect to the daemon IPC listener at `127.0.0.1:<daemon_port>` (local or via SSH tunnel).
-2. **Protocol Generation Handshake:** Send `InitCommand(current_version=..., min_supported=...)`. Await `InitEvent(negotiated_version=...)`. If the ranges do not overlap, the daemon returns `ProtocolMismatchEvent`.
-3. **Auth & Unlock Gate:**
-   - If daemon returns `DaemonLockedEvent`, send `UnlockCommand(password=...)` and await `DaemonUnlockedEvent`.
-   - If daemon returns `AuthRequiredEvent(challenge=..., salt=...)`, derive proof using Argon2i + HMAC-SHA256 and send `AuthenticateSessionCommand(proof=...)`, then await `SessionAuthenticatedEvent`.
-4. **Register Live Consumer:** Send `RegisterLiveConsumerCommand()` to register the socket for asynchronous event streaming.
-5. **State Retrieval & Event Loop:** Retrieve initial state (e.g. `GetChatStartupStateCommand`) and process continuous newline-delimited event streams.
+The current IPC generation is **4**; the oldest supported generation is **4**. Application release versions are independent. An overlapping generation does not promise that an older schema understands every additive capability: check `InitEvent.capabilities` before optional commands and fields.
+
+1. **Connect:** Open `127.0.0.1:<daemon_port>`, locally or through an SSH tunnel. Endpoint discovery is a host responsibility, separate from the portable wire protocol.
+2. **Optional local lifetime lease:** A persistent frontend attached to an automatically managed daemon sends `FrontendLeaseCommand` using its host-issued token and a random frontend ID. Independent daemons, remote endpoints and short-lived queries do not require this. The lease grants no profile access.
+3. **Initialize and authenticate:** Send `InitCommand(current_version=..., min_supported=...)` with a fresh `request_id`. Handle the auth gates below until `InitEvent` arrives. A locked or unauthenticated daemon may require credentials before returning Init.
+   - On `DaemonLockedEvent`, obtain the profile password, send `UnlockCommand` with the same request ID, and await `DaemonUnlockedEvent`. Then resend the original Init command with that request ID.
+   - On `AuthRequiredEvent`, derive the session proof below and send `AuthenticateSessionCommand` with the same request ID. Await `SessionAuthenticatedEvent`, then resend the original Init command. Authentication does not automatically execute the gated command.
+   - A failed proof may return `InvalidPasswordEvent` with a replacement challenge and salt. Use only that fresh challenge. A rate limit is a typed terminal outcome; obey `retry_after`. Cancellation, missing challenges and unrecoverable errors end the exchange.
+4. **Validate negotiation:** Intersect both inclusive protocol ranges and require `InitEvent.negotiated_version` to equal their highest common generation. `ProtocolMismatchEvent` or an invalid selection fails bootstrap. Complete bootstrap before concurrent application requests.
+5. **Subscribe and reconcile:** Send `RegisterLiveConsumerCommand`, then `GetRuntimeSnapshotCommand` for the content-free aggregate state. The registration has no success-response DTO; ordering it before the snapshot on the same socket establishes the stream boundary. `GetChatStartupStateCommand` remains the Terminal compatibility projection.
+6. **Event loop:** Keep one socket reader. Deliver asynchronous events while matching request results by `request_id`; replies and unrelated events may be interleaved. Install the snapshot epoch/revision before applying newer projection invalidations. Request outcomes, message media and lifecycle milestones are not discarded by that projection revision filter.
+
+## Portable Authentication Derivation
+
+Use raw Argon2 output, not a password-hash string such as PHC encoding. Password/PIN inputs are encoded as UTF-8 after the exact domain prefix is prepended; do not trim, case-fold or normalize them. Salt and challenge fields contain hexadecimal strings: decode them to bytes before cryptographic use.
+
+| Parameter              | Session/password proof | Quick-unlock PIN proof    |
+| ---------------------- | ---------------------- | ------------------------- |
+| Domain prefix          | `metor-ipc-auth:`      | `metor-pin-quick-unlock:` |
+| Algorithm              | Argon2i, version 1.3   | Argon2id, version 1.3     |
+| Output bytes           | 32                     | 32                        |
+| Salt bytes             | 16                     | 16                        |
+| Time cost / iterations | 8                      | 2                         |
+| Memory bytes           | 536870912              | 67108864                  |
+| Memory KiB             | 524288                 | 65536                     |
+| Parallelism / lanes    | 1                      | 1                         |
+| Challenge bytes        | 32                     | 32                        |
+
+For either method, calculate `proof = lowercase_hex(HMAC-SHA256(key=derived_key, message=hex_decode(challenge)))`. The derived key is the raw Argon2 output. In particular, the HMAC message is the decoded challenge bytes, not its hexadecimal text. Challenges are one-use and session-bound; never reuse a previous connection or restriction cycle proof.
+
+To install quick unlock, generate the random salt with a cryptographically secure generator and send its hexadecimal encoding and the hexadecimal derived PIN verifier in `ConfigureQuickUnlockCommand(action="set", ...)`. The verifier is itself an authentication credential: do not log or persist it outside protected Core storage. Configuration requires an authorized session.
+
+A `ClientRestrictedEvent` supplies the current reauthorization challenge, method and salt. Use `ReauthorizeClientCommand` for that exact session. PIN authorizes only restricted-session recovery, never a cold or hard-locked daemon. Requesting `method="profile_password"` without a proof obtains the password challenge for Forgot PIN; derive the password proof from that new challenge/salt. Core owns escalation, cooldown and effective grants.
+
+## Correlation, Failure and Reconnection
+
+- Use an opaque unique request ID for each active exchange; the SDK generates 16 random bytes as 32 lowercase hexadecimal characters. Auth follow-ups and the gated-command resend retain that exchange ID. Do not reuse an ID for overlapping requests.
+- Request IDs correlate responses; they are not generic mutation deduplication keys. An exchange can produce progress events before its terminal outcome. Typed rejection events are terminal; unrelated asynchronous events still belong to the event loop.
+- EOF, a send failure or timeout after transmission leaves a mutation outcome uncertain. Do not resend blindly. Text reconciliation uses the original `msg_id` with `GetMessageOutcomeCommand`; other operations use their exact identity and readback contract in the [frontend contract](../contracts/FRONTENDS.md).
+- Reconnection creates a new session: repeat Init, auth, subscription and snapshot retrieval. Previous request ownership, client restrictions and call ownership do not transfer. A runtime epoch change resets projection ordering; it does not authorize replaying a mutation.
+- The Python SDK bounds pending exchanges (128), responses per exchange (32), and asynchronous queued events (256). Stream overflow disconnects rather than dropping state. Keep callbacks short and reconcile after loss.
+- `MetorClient.request` returns the expected typed event, returns `None` for an incomplete auth gate or unavailable protocol/snapshot, and raises explicit transport, typed rejection or unexpected-response exceptions otherwise. A disconnect clears the cached Init event.
 
 ## Table of Contents
 

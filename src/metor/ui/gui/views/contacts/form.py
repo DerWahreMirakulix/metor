@@ -35,6 +35,7 @@ def contact_form(
     }[form.intent]
     body.add_widget(Label('Contact address or QR data', role='support'))
     raw = TextField(
+        accessible_name='Contact address or QR data',
         text=form.raw,
         readonly=form.fixed or form.pending or form.unknown,
         size_hint_y=None,
@@ -44,6 +45,7 @@ def contact_form(
     body.add_widget(raw)
     body.add_widget(Label('Local alias', role='support'))
     alias = TextField(
+        accessible_name='Local alias',
         text=form.alias,
         readonly=form.pending or form.unknown,
         multiline=False,

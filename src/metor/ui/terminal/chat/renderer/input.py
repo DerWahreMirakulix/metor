@@ -6,6 +6,8 @@ import sys
 import os
 from typing import Optional, List
 
+from wcwidth import grapheme_boundary_before, iter_graphemes
+
 from metor.ui.terminal.constants import Constants
 
 # Local Package Imports
@@ -21,6 +23,10 @@ if os.name != 'nt':
     import termios
     import tty
     import atexit
+
+
+class InputLimitExceededError(Exception):
+    """Reject a whole draft when its bounded presentation buffer is exhausted."""
 
 
 class InputHandler:
@@ -44,6 +50,8 @@ class InputHandler:
         self.cursor_index: int = 0
         self._pending_tokens: List[str] = []
         self._key_stream = KeyStream()
+        self._discard_until_enter = False
+        self._windows_high_surrogate: str | None = None
 
         self._init_terminal()
 
@@ -133,18 +141,19 @@ class InputHandler:
                 ch = getattr(msvcrt, 'getwch')()
                 if ch in ('\x00', '\xe0'):
                     ch2 = getattr(msvcrt, 'getwch')()
-                    if ch2 == 'H':
-                        return 'SPECIAL:UP'
-                    elif ch2 == 'P':
-                        return 'SPECIAL:DOWN'
-                    elif ch2 == 'K':
-                        return 'SPECIAL:LEFT'
-                    elif ch2 == 'M':
-                        return 'SPECIAL:RIGHT'
-                    return ''
+                    ch = {
+                        'H': 'SPECIAL:UP',
+                        'P': 'SPECIAL:DOWN',
+                        'K': 'SPECIAL:LEFT',
+                        'M': 'SPECIAL:RIGHT',
+                        'G': 'SPECIAL:HOME',
+                        'O': 'SPECIAL:END',
+                        'S': 'SPECIAL:DELETE',
+                    }.get(ch2, '')
                 if ch == '\x0e':
-                    return 'SPECIAL:NEWLINE'
-                return str(ch)
+                    ch = 'SPECIAL:NEWLINE'
+                self._pending_tokens.extend(self._decode_windows_token(str(ch)))
+                return self._pending_tokens.pop(0) if self._pending_tokens else None
             return None
         else:
             ready, _, _ = select.select(
@@ -165,6 +174,26 @@ class InputHandler:
                 return self._pending_tokens.pop(0)
             return None
 
+    def _decode_windows_token(self, token: str) -> list[str]:
+        """Combine Windows UTF-16 code units before UTF-8 display and IPC encoding."""
+        tokens: list[str] = []
+        codepoint = ord(token) if len(token) == 1 else None
+        pending = self._windows_high_surrogate
+        self._windows_high_surrogate = None
+        if pending is not None:
+            if codepoint is not None and 0xDC00 <= codepoint <= 0xDFFF:
+                return [
+                    chr(0x10000 + (ord(pending) - 0xD800) * 0x400 + codepoint - 0xDC00)
+                ]
+            tokens.append('\ufffd')
+        if codepoint is not None and 0xD800 <= codepoint <= 0xDBFF:
+            self._windows_high_surrogate = token
+        elif codepoint is not None and 0xDC00 <= codepoint <= 0xDFFF:
+            tokens.append('\ufffd')
+        elif token:
+            tokens.append(token)
+        return tokens
+
     def process_key(self, ch: str) -> Optional[str]:
         """
         Processes a keyboard event, updating the input buffer and history pointers.
@@ -175,13 +204,21 @@ class InputHandler:
         Returns:
             Optional[str]: The completed input line if enter was pressed, None otherwise.
         """
+        if self._discard_until_enter:
+            if ch in ('\r', '\n'):
+                self._discard_until_enter = False
+                return ''
+            if ch == '\x03':
+                raise KeyboardInterrupt
+            if ch == '\x04':
+                raise EOFError
+            return None
+
         if ch.startswith('PASTE:'):
             pasted_text: str = (
                 ch[len('PASTE:') :].replace('\r\n', '\n').replace('\r', '\n')
             )
-            for char in pasted_text:
-                self.line_chars.insert(self.cursor_index, char)
-                self.cursor_index += 1
+            self._insert_text(pasted_text)
 
         elif ch.startswith('SPECIAL:'):
             key: str = ch.split(':')[1]
@@ -204,25 +241,31 @@ class InputHandler:
                 self.cursor_index = len(self.line_chars)
             elif key == 'LEFT':
                 if self.cursor_index > 0:
-                    self.cursor_index -= 1
+                    self.cursor_index = grapheme_boundary_before(
+                        ''.join(self.line_chars), self.cursor_index
+                    )
             elif key == 'RIGHT':
                 if self.cursor_index < len(self.line_chars):
-                    self.cursor_index += 1
+                    self.cursor_index = self._next_grapheme_end()
             elif key == 'HOME':
                 self.cursor_index = 0
             elif key == 'END':
                 self.cursor_index = len(self.line_chars)
             elif key == 'DELETE':
                 if self.cursor_index < len(self.line_chars):
-                    del self.line_chars[self.cursor_index]
+                    del self.line_chars[self.cursor_index : self._next_grapheme_end()]
             elif key == 'NEWLINE':
-                self.line_chars.insert(self.cursor_index, '\n')
-                self.cursor_index += 1
+                self._insert_text('\n')
 
         elif ch in ('\n', '\r'):
             line: str = ''.join(self.line_chars)
-            if line.strip():
+            if line.strip() and len(line) <= Constants.INPUT_HISTORY_CHARACTERS:
                 self.history.append(line)
+                while (
+                    len(self.history) > Constants.INPUT_HISTORY_ENTRIES
+                    or sum(map(len, self.history)) > Constants.INPUT_HISTORY_CHARACTERS
+                ):
+                    self.history.pop(0)
             self.history_index = -1
             self.current_input = ''
             self.line_chars = []
@@ -233,16 +276,40 @@ class InputHandler:
             if not self.line_chars:
                 raise EOFError
             if self.cursor_index < len(self.line_chars):
-                del self.line_chars[self.cursor_index]
+                del self.line_chars[self.cursor_index : self._next_grapheme_end()]
         elif ch == '\x03':
             raise KeyboardInterrupt
         elif ch in ('\b', '\x7f'):
             if self.cursor_index > 0:
-                del self.line_chars[self.cursor_index - 1]
-                self.cursor_index -= 1
+                previous = grapheme_boundary_before(
+                    ''.join(self.line_chars), self.cursor_index
+                )
+                del self.line_chars[previous : self.cursor_index]
+                self.cursor_index = previous
         else:
-            self.line_chars.insert(self.cursor_index, ch)
-            self.cursor_index += 1
+            self._insert_text(ch)
 
         self.current_input = ''.join(self.line_chars)
         return None
+
+    def _insert_text(self, text: str) -> None:
+        """Admit a complete edit or reject this draft through the next Enter.
+
+        Ignoring the remainder of an oversized paste prevents its suffix from
+        becoming a separate command or a silently truncated outgoing message.
+        """
+        if len(self.line_chars) + len(text) > Constants.INPUT_MAX_CHARACTERS:
+            self.line_chars.clear()
+            self.current_input = ''
+            self.cursor_index = 0
+            self.history_index = -1
+            self._discard_until_enter = True
+            raise InputLimitExceededError()
+        self.line_chars[self.cursor_index : self.cursor_index] = text
+        self.cursor_index += len(text)
+
+    def _next_grapheme_end(self) -> int:
+        """Return the next complete display character boundary after the cursor."""
+        text = ''.join(self.line_chars)
+        grapheme = next(iter_graphemes(text, start=self.cursor_index), '')
+        return self.cursor_index + len(grapheme)

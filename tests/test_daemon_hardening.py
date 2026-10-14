@@ -3513,6 +3513,33 @@ class DaemonHardeningTests(unittest.TestCase):
             unauth_conn.close()
             unauth_peer.close()
 
+    def test_connect_limit_counts_authenticated_dedicated_peer_transport(self) -> None:
+        """Dedicated DROP/CALL writers retain admission capacity after AUTH."""
+        state = StateTracker()
+        dedicated_conn, dedicated_peer = socket.socketpair()
+        controller = _ConnectControllerHarness(
+            state, _ConnectTestConfig(max_connections=1)
+        )
+        try:
+            state.add_unauthenticated_connection(dedicated_conn)
+            state.send_frame(dedicated_conn, b'challenge\n')
+            self.assertEqual(state.get_tracked_live_socket_count(), 1)
+            state.remove_unauthenticated_connection(dedicated_conn)
+
+            connect_to_helper(
+                cast(ConnectControllerProtocol, controller),
+                'peer',
+                origin=ConnectionOrigin.MANUAL,
+            )
+
+            controller.tor_manager_mock.connect.assert_not_called()
+            event = controller.broadcast_mock.call_args.args[0]
+            self.assertIs(event.event_type, EventType.MAX_CONNECTIONS_REACHED)
+        finally:
+            state.abort_all_sockets()
+            dedicated_conn.close()
+            dedicated_peer.close()
+
     def test_failed_connect_keeps_exception_detail_out_of_ipc_and_history(
         self,
     ) -> None:
@@ -3923,6 +3950,9 @@ class DaemonHardeningTests(unittest.TestCase):
         stream = _FakeStream(
             [
                 '/drop bad not-base64!!!',
+                '/drop array W10=',
+                '/drop null bnVsbA==',
+                '/drop scalar MQ==',
                 f'/drop transport-id {payload_b64}',
                 None,
             ]

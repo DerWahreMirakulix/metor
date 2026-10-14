@@ -106,81 +106,99 @@ class IpcRequestSession:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.settimeout(self._pm.config.get_float(SettingKey.IPC_TIMEOUT))
             sock.connect(('127.0.0.1', port))
-            reader: BufferedIpcEventReader = BufferedIpcEventReader()
-            request_id: str = ensure_request_id(cmd)
-            auth_exchange: IpcAuthExchange = self._build_auth_exchange(
-                sock,
-                request_id,
-            )
-            send_failed: bool = False
-            auth_prompt_used: bool = False
-            try:
-                self._send_socket_command(sock, cmd)
-            except OSError:
-                send_failed = True
+            return self.execute_socket_result(sock, cmd, wait_for_response)
 
-            if not wait_for_response:
-                if send_failed:
-                    return IpcRequestResult(
-                        message='Failed to communicate with the daemon.', failed=True
-                    )
-                return IpcRequestResult(message='Command executed successfully.')
+    def execute_socket_result(
+        self,
+        sock: socket.socket,
+        cmd: IpcCommand,
+        wait_for_response: bool,
+    ) -> IpcRequestResult:
+        """Executes one typed exchange on a caller-owned connected IPC socket.
 
-            while True:
-                event: Optional[IpcEvent] = reader.read_from_socket(sock)
-                if event is None:
-                    break
+        Args:
+            sock: Connected endpoint; the caller retains close ownership.
+            cmd: Outbound command.
+            wait_for_response: Whether to await the terminal result.
+        Returns:
+            IpcRequestResult: Typed response or explicit incomplete exchange.
+        """
+        sock.settimeout(self._pm.config.get_float(SettingKey.IPC_TIMEOUT))
+        reader: BufferedIpcEventReader = BufferedIpcEventReader()
+        request_id: str = ensure_request_id(cmd)
+        auth_exchange: IpcAuthExchange = self._build_auth_exchange(
+            sock,
+            request_id,
+        )
+        send_failed: bool = False
+        auth_prompt_used: bool = False
+        try:
+            self._send_socket_command(sock, cmd)
+        except OSError:
+            send_failed = True
 
-                if event.request_id is not None and event.request_id != request_id:
-                    continue
-
-                auth_result = auth_exchange.handle(event)
-                if auth_result.handled:
-                    if event.event_type in (
-                        EventType.AUTH_REQUIRED,
-                        EventType.DAEMON_LOCKED,
-                    ):
-                        auth_prompt_used = True
-                    elif (
-                        event.event_type is EventType.INVALID_PASSWORD
-                        and auth_result.terminal_message is None
-                        and auth_result.terminal_event is None
-                    ):
-                        auth_prompt_used = True
-
-                    if auth_result.terminal_message is not None:
-                        return IpcRequestResult(
-                            message=auth_result.terminal_message,
-                            insert_leading_blank_line=auth_prompt_used,
-                            auth_incomplete=auth_result.auth_incomplete,
-                            failed=True,
-                        )
-                    if auth_result.terminal_event is not None:
-                        return IpcRequestResult(
-                            event=auth_result.terminal_event,
-                            insert_leading_blank_line=auth_prompt_used,
-                            auth_incomplete=auth_result.auth_incomplete,
-                            failed=True,
-                        )
-                    if auth_result.resend_original_command:
-                        self._send_socket_command(sock, cmd)
-                    continue
-
-                if (
-                    event.event_type in self._async_event_types
-                    and event.request_id != request_id
-                ):
-                    continue
-
-                return IpcRequestResult(
-                    event=event,
-                    insert_leading_blank_line=auth_prompt_used,
-                )
-
+        if not wait_for_response:
             if send_failed:
                 return IpcRequestResult(
                     message='Failed to communicate with the daemon.', failed=True
                 )
+            return IpcRequestResult(message='Command executed successfully.')
+
+        while True:
+            event: Optional[IpcEvent] = reader.read_from_socket(sock)
+            if event is None:
+                break
+
+            if event.request_id is not None and event.request_id != request_id:
+                continue
+
+            auth_result = auth_exchange.handle(event)
+            if auth_result.handled:
+                if event.event_type in (
+                    EventType.AUTH_REQUIRED,
+                    EventType.DAEMON_LOCKED,
+                ):
+                    auth_prompt_used = True
+                elif (
+                    event.event_type is EventType.INVALID_PASSWORD
+                    and auth_result.terminal_message is None
+                    and auth_result.terminal_event is None
+                ):
+                    auth_prompt_used = True
+
+                if auth_result.terminal_message is not None:
+                    return IpcRequestResult(
+                        message=auth_result.terminal_message,
+                        insert_leading_blank_line=auth_prompt_used,
+                        auth_incomplete=auth_result.auth_incomplete,
+                        failed=True,
+                    )
+                if auth_result.terminal_event is not None:
+                    return IpcRequestResult(
+                        event=auth_result.terminal_event,
+                        insert_leading_blank_line=auth_prompt_used,
+                        auth_incomplete=auth_result.auth_incomplete,
+                        failed=True,
+                    )
+                if auth_result.resend_original_command:
+                    self._send_socket_command(sock, cmd)
+                continue
+
+            if (
+                event.event_type in self._async_event_types
+                and event.request_id != request_id
+            ):
+                continue
+
+            return IpcRequestResult(
+                event=event,
+                insert_leading_blank_line=auth_prompt_used,
+            )
+
+        if send_failed:
+            return IpcRequestResult(
+                message='Failed to communicate with the daemon.', failed=True
+            )
 
         return IpcRequestResult(
             message=(

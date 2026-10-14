@@ -18,7 +18,6 @@ class Constants(ContractConstants):
     VOICE_METADATA_MAX_BYTES: int = 2097152
 
     SERVER_BACKLOG: int = 5  # Standard socket backlog for daemon IPC and listeners
-    SERVER_BACKLOG_HEADLESS: int = 1  # Minimal socket backlog for ephemeral daemons
     PEER_WRITER_QUEUE_FRAMES: int = 256
     DROP_SESSION_MAX_TRANSFERS: int = 64
     IPC_WRITER_QUEUE_FRAMES: int = 256
@@ -61,8 +60,10 @@ class Constants(ContractConstants):
 
     # Security-Critical File Operations
     SECURE_SHRED_BLOCK_BYTES: int = 65536
+    PRIVATE_TEMP_TOKEN_BYTES: int = 8
 
     # Application & UI Constraints
+    CLI_PIPE_SECRET_MAX_BYTES: int = 4096
     UUID_MSG_BYTES: int = 8  # Byte length for persistent message UUIDs
     UUID_CHAT_BYTES: int = 4  # Byte length for ephemeral live-chat UUIDs
     LIVE_MSG_DEDUPE_CACHE_SIZE: int = (
@@ -72,8 +73,6 @@ class Constants(ContractConstants):
     SENSITIVE_AUTH_GRANT_TIMEOUT_SEC: float = 60.0
     PENDING_INVITATION_TOKEN_BYTES: int = 32
     MAX_PENDING_INVITATION_HANDLES: int = 128
-    # Bounds cold PowerShell startup and ACL work on loaded Windows hosts.
-    QUICK_UNLOCK_HELPER_TIMEOUT_SEC: float = 30.0
     TOR_HANDSHAKE_CHALLENGE_BYTES: int = (
         32  # Random challenge length for one Tor peer-auth proof round
     )
@@ -94,10 +93,12 @@ class Constants(ContractConstants):
         5.0  # Startup wait for inbound listener bind/listen readiness
     )
     IPC_ACCEPTOR_STOP_TIMEOUT_SEC: float = 3.0  # Bound listener thread shutdown
+    HEADLESS_SHUTDOWN_TIMEOUT_SEC: float = 10.0  # Bound private offline worker exit
     WORKER_SLEEP_SEC: float = 1.0  # Standard background worker tick rate
     WORKER_SLEEP_SLOW_SEC: float = 2.0  # Slower background worker tick rate
     LOCK_SLEEP_SEC: float = 0.05  # Sleep interval for FileLock spinlocks
     FILE_LOCK_TIMEOUT_SEC: float = 5.0  # Maximum wait for acquiring a file lock
+    PROFILE_MUTATION_INSTANCE_LOCK_TIMEOUT_SEC: float = 0.1
     FILE_LOCK_METADATA_MAX_BYTES: int = 128
     TCP_CLOSE_LINGER_SEC: float = 0.2  # Socket linger before shutdown
 
@@ -114,7 +115,6 @@ class Constants(ContractConstants):
     CONTACTS_FILE: str = 'contacts.json'
     DAEMON_PORT_FILE: str = 'daemon.port'
     DAEMON_PID_FILE: str = 'daemon.pid'
-    DAEMON_INSTANCE_LOCK_FILE: str = 'daemon.instance'
     FRONTEND_LIFETIME_FILE: str = 'daemon.frontend-lifetime'
     PROCESS_IDENTITY_MAX_BYTES: int = 4096
     PROCESS_CREATE_TIME_TOLERANCE_SEC: float = 0.01

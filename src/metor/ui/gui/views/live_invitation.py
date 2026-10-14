@@ -206,7 +206,7 @@ class LiveInvitationOverlay(FloatLayout):
         header.add_widget(title)
         header.add_widget(IconAction('x', 'Close invitation', self._dismiss))
         panel.add_widget(header)
-        scroll = ScrollView(do_scroll_x=False)
+        scroll = ScrollView(do_scroll_x=False, always_overscroll=False)
         body = BoxLayout(orientation='vertical', size_hint_y=None, spacing=dp(12))
         body.bind(minimum_height=body.setter('height'))
         if entry.label != 'Live chat invitation' and not compact:

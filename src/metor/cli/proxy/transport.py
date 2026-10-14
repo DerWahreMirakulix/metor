@@ -64,6 +64,11 @@ HEADLESS_CONFIG_COMMANDS: tuple[type[IpcCommand], ...] = (
     SyncConfigCommand,
 )
 
+HEADLESS_RUNTIME_FAILURE: str = (
+    'The local command did not complete safely. '
+    'Its outcome could not be confirmed; check the profile before retrying.'
+)
+
 
 class CliProxyTransport:
     """Executes IPC and local headless request flows for the CLI proxy."""
@@ -213,8 +218,8 @@ class CliProxyTransport:
                 headless_result: str | IpcRequestResult = run_with_headless_daemon(
                     self._pm,
                     password,
-                    lambda resolved_port: self.send_to_port_result(
-                        resolved_port,
+                    lambda connected: self._send_to_endpoint_result(
+                        connected,
                         cmd,
                         wait_for_response,
                     ),
@@ -245,6 +250,8 @@ class CliProxyTransport:
                 message=format_safe_local_runtime_error(exc),
                 failed=True,
             )
+        except (OSError, RuntimeError):
+            return IpcRequestResult(message=HEADLESS_RUNTIME_FAILURE, failed=True)
 
     def request_ipc_event(self, cmd: IpcCommand) -> Optional[IpcEvent]:
         """
@@ -277,10 +284,8 @@ class CliProxyTransport:
             return run_with_headless_daemon(
                 self._pm,
                 None,
-                lambda port: self.send_to_port(
-                    port,
-                    cmd,
-                    wait_for_response,
+                lambda connected: self._format_result(
+                    self._send_to_endpoint_result(connected, cmd, wait_for_response),
                     prefix_remote=False,
                 ),
             )
@@ -292,6 +297,11 @@ class CliProxyTransport:
             if self._mark_error is not None:
                 self._mark_error()
             return escape_terminal_text(str(exc))
+        except (OSError, RuntimeError):
+            return self._format_result(
+                IpcRequestResult(message=HEADLESS_RUNTIME_FAILURE, failed=True),
+                prefix_remote=False,
+            )
 
     def send_to_port(
         self,
@@ -313,9 +323,14 @@ class CliProxyTransport:
         Returns:
             str: The formatted terminal output.
         """
-        result: IpcRequestResult = self._track_result(
-            self.send_to_port_result(port, cmd, wait_for_response)
+        return self._format_result(
+            self.send_to_port_result(port, cmd, wait_for_response),
+            prefix_remote=prefix_remote,
         )
+
+    def _format_result(self, result: IpcRequestResult, *, prefix_remote: bool) -> str:
+        """Formats one confirmed port or private-channel result consistently."""
+        result = self._track_result(result)
         rendered: str
         if result.event is not None:
             rendered = self._format_event(
@@ -349,6 +364,15 @@ class CliProxyTransport:
         Returns:
             IpcRequestResult: The raw terminal response payload.
         """
+        return self._send_to_endpoint_result(port, cmd, wait_for_response)
+
+    def _send_to_endpoint_result(
+        self,
+        endpoint: int | socket.socket,
+        cmd: IpcCommand,
+        wait_for_response: bool,
+    ) -> IpcRequestResult:
+        """Uses managed TCP or a private offline channel through the same exchange."""
         try:
             session = IpcRequestSession(
                 self._pm,
@@ -361,7 +385,9 @@ class CliProxyTransport:
                 prompt_password=self._prompt_password,
                 send_socket_command=self._send_socket_command,
             )
-            return session.execute_result(port, cmd, wait_for_response)
+            if isinstance(endpoint, socket.socket):
+                return session.execute_socket_result(endpoint, cmd, wait_for_response)
+            return session.execute_result(endpoint, cmd, wait_for_response)
         except PromptAbortedError:
             return IpcRequestResult(
                 message='Aborted.', auth_incomplete=True, failed=True

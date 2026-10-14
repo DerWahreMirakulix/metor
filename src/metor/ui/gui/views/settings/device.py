@@ -53,6 +53,7 @@ class DeviceSettingEditor(ActionSheet):
             else None
         )
         self._field = TextField(
+            accessible_name=descriptor.name,
             text=str(self._selected) if self._selected is not None else '',
             multiline=False,
             size_hint_y=None,

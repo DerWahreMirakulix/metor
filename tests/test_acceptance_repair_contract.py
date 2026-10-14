@@ -9,11 +9,12 @@ import sys
 import threading
 import unittest
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from typing import cast
 from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
+
+from private_fixtures import PrivateTemporaryDirectory
 
 from metor.core.api import (
     BeginVoiceCommand,
@@ -133,7 +134,7 @@ class AcceptanceRepairContractTests(unittest.TestCase):
 
     def setUp(self) -> None:
         """Builds two isolated profiles with encrypted segmented blob stores."""
-        self._temp = TemporaryDirectory()
+        self._temp = PrivateTemporaryDirectory()
         self.addCleanup(self._temp.cleanup)
         root = Path(self._temp.name)
         self._data_patch = patch.object(Constants, 'DATA', root / Constants.DATA_DIR)

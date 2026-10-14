@@ -21,7 +21,7 @@ from metor.ui.terminal.constants import Constants
 
 # Local Package Imports
 from metor.ui.terminal.chat.renderer.display import Display
-from metor.ui.terminal.chat.renderer.input import InputHandler
+from metor.ui.terminal.chat.renderer.input import InputHandler, InputLimitExceededError
 
 if TYPE_CHECKING:
     from metor.client import FrontendSettings
@@ -56,25 +56,26 @@ class Renderer:
         """
         self._config: 'FrontendSettings' = config
         self._initial_prompt: str = (
-            f'{self._config.get_namespace_str(UI_PROMPT_SIGN_KEY)} '
+            escape_terminal_text(
+                self._config.get_namespace_str(UI_PROMPT_SIGN_KEY)
+            ).replace('\n', r'\n')
+            + ' '
         )
         self._prompt: str = self._initial_prompt
         self._alias_resolver: Callable[
             [Optional[str], Optional[str]], Optional[str]
         ] = lambda onion, fallback_alias: fallback_alias
 
-        self._display: Display = Display(
-            self._initial_prompt,
-            self._resolve_line_alias,
-        )
+        self._display: Display = Display()
         self._input: InputHandler = InputHandler()
 
         self._current_focus: Optional[str] = None
         self._focus_transport_state: ChatTransportState = ChatTransportState.DROP
 
-        self._last_visual_lines: int = 1
-        self._last_cols: int = shutil.get_terminal_size().columns
-        self._is_redrawing: bool = False
+        terminal_size = shutil.get_terminal_size()
+        self._last_cols: int = terminal_size.columns
+        self._last_rows: int = terminal_size.lines
+        self._resize_pending: bool = False
 
         if sys.platform != 'win32':
             signal.signal(signal.SIGWINCH, self._on_resize)
@@ -178,7 +179,7 @@ class Renderer:
             if msg_type is not ChatMessageType.RAW and timestamp is None:
                 timestamp = datetime.now(timezone.utc).isoformat()
 
-            self._display.clear_input_area(self._last_visual_lines)
+            self._display.clear_input_area()
             previous_count: int = len(self._display.all_msgs)
 
             chat_line: ChatLine = ChatLine(
@@ -194,37 +195,30 @@ class Renderer:
                 is_drop=is_drop,
             )
 
-            insert_index: int = self._insert_chat_line(chat_line)
+            self._insert_chat_line(chat_line)
 
             self._trim_message_buffer(self._config.get_namespace_int(UI_CHAT_LIMIT_KEY))
 
             if len(self._display.all_msgs) <= previous_count:
-                self._redraw_from_index_locked(0, cols, skip_prompt)
-                return
-
-            if insert_index < previous_count:
-                self._redraw_from_index_locked(insert_index, cols, skip_prompt)
+                self._full_redraw_locked(cols, skip_prompt)
                 return
 
             formatted: str = ChatPresenter.format_msg(
-                chat_line, self._initial_prompt, self._current_focus
+                chat_line,
+                self._initial_prompt,
+                self._current_focus,
+                self._resolve_line_alias(chat_line),
             )
             sys.stdout.write(formatted + '\n')
 
             if not skip_prompt:
-                self._last_visual_lines = self._display.get_input_visual_lines(
-                    self._input.current_input, self._prompt, cols
-                )
                 self._display.redraw_input_area(
                     self._prompt,
                     self._input.current_input,
                     self._input.line_chars,
                     self._input.cursor_index,
-                    self._last_visual_lines,
                     cols,
                 )
-            else:
-                self._last_visual_lines = 1
 
             sys.stdout.flush()
 
@@ -256,7 +250,7 @@ class Renderer:
             if cols < 1:
                 cols = Constants.DEFAULT_COLS
 
-            self._display.clear_input_area(self._last_visual_lines)
+            self._display.clear_input_area()
 
             for msg_dict in messages_data:
                 is_drop_value: object = msg_dict.get('is_drop')
@@ -288,7 +282,7 @@ class Renderer:
 
             self._full_redraw_locked(cols)
 
-    def _insert_chat_line(self, chat_line: ChatLine) -> int:
+    def _insert_chat_line(self, chat_line: ChatLine) -> None:
         """
         Inserts one chat line into the visible buffer.
 
@@ -296,10 +290,9 @@ class Renderer:
             chat_line (ChatLine): The line to insert.
 
         Returns:
-            int: The final insertion index.
+            None
         """
         self._display.all_msgs.append(chat_line)
-        return len(self._display.all_msgs) - 1
 
     def _trim_message_buffer(self, limit: int) -> None:
         """
@@ -332,19 +325,19 @@ class Renderer:
         Returns:
             None
         """
-        start_idx: int = -1
-        for i, msg in enumerate(self._display.all_msgs):
-            if (msg_id and msg.msg_id == msg_id) or (
-                text and msg.text == text and msg.is_drop and msg.is_pending
-            ):
-                msg.is_pending = False
-                if timestamp:
-                    msg.timestamp = timestamp
-                if start_idx == -1:
-                    start_idx = i
+        with self._display.print_lock:
+            changed = False
+            for msg in self._display.all_msgs:
+                if (msg_id and msg.msg_id == msg_id) or (
+                    text and msg.text == text and msg.is_drop and msg.is_pending
+                ):
+                    msg.is_pending = False
+                    if timestamp:
+                        msg.timestamp = timestamp
+                    changed = True
 
-        if start_idx != -1:
-            self._redraw_from_index(start_idx)
+            if changed:
+                self._redraw_changed_messages_locked()
 
     def mark_failed(self, msg_id: str) -> None:
         """
@@ -356,16 +349,16 @@ class Renderer:
         Returns:
             None
         """
-        start_idx: int = -1
-        for i, msg in enumerate(self._display.all_msgs):
-            if msg.msg_id == msg_id:
-                msg.is_pending = False
-                msg.is_failed = True
-                if start_idx == -1:
-                    start_idx = i
+        with self._display.print_lock:
+            changed = False
+            for msg in self._display.all_msgs:
+                if msg.msg_id == msg_id:
+                    msg.is_pending = False
+                    msg.is_failed = True
+                    changed = True
 
-        if start_idx != -1:
-            self._redraw_from_index(start_idx)
+            if changed:
+                self._redraw_changed_messages_locked()
 
     def apply_fallback_to_drop(self, msg_ids: List[str]) -> None:
         """
@@ -377,16 +370,16 @@ class Renderer:
         Returns:
             None
         """
-        start_idx: int = -1
-        for i, msg in enumerate(self._display.all_msgs):
-            if msg.msg_id in msg_ids:
-                msg.is_drop = True
-                msg.is_pending = True
-                if start_idx == -1:
-                    start_idx = i
+        with self._display.print_lock:
+            changed = False
+            for msg in self._display.all_msgs:
+                if msg.msg_id in msg_ids:
+                    msg.is_drop = True
+                    msg.is_pending = True
+                    changed = True
 
-        if start_idx != -1:
-            self._redraw_from_index(start_idx)
+            if changed:
+                self._redraw_changed_messages_locked()
 
     def refresh_alias_bindings(self) -> None:
         """
@@ -411,7 +404,9 @@ class Renderer:
             None
         """
         with self._display.print_lock:
-            self._display.render_prompt(self._prompt)
+            self._display.render_prompt(
+                self._prompt, shutil.get_terminal_size().columns
+            )
 
     def restore_cursor(self) -> None:
         """
@@ -449,7 +444,7 @@ class Renderer:
             None
         """
         with self._display.print_lock:
-            self._display.clear_input_area(self._last_visual_lines)
+            self._display.clear_input_area()
             sys.stdout.flush()
 
     def clear_screen(self) -> None:
@@ -465,89 +460,27 @@ class Renderer:
         with self._display.print_lock:
             self._display.clear_screen()
 
-    def _redraw_from_index_locked(
-        self,
-        start_idx: int,
-        cols: int,
-        skip_prompt: bool = False,
-    ) -> None:
-        """
-        Redraws the terminal tail while the print lock is already held.
+    def _redraw_changed_messages_locked(self) -> None:
+        """Redraw changed messages while their mutation still owns the print lock."""
+        cols: int = shutil.get_terminal_size().columns
+        if cols < 1:
+            cols = Constants.DEFAULT_COLS
+        # Updated timestamps, aliases and DROP labels can change wrapping. The
+        # old cursor position cannot be recovered from the new line geometry.
+        self._full_redraw_locked(cols)
 
-        Args:
-            start_idx (int): The index in the message buffer to start redrawing from.
-            cols (int): The current terminal column width.
-            skip_prompt (bool): Whether to suppress prompt redraw after the update.
-
-        Returns:
-            None
-        """
-        self._display.clear_input_area(self._last_visual_lines)
-        lines_up: int = sum(
-            self._display.get_visual_lines(self._display.all_msgs[i], cols)
-            for i in range(start_idx, len(self._display.all_msgs))
-        )
-
-        if lines_up >= shutil.get_terminal_size().lines:
-            self._full_redraw_locked(cols)
-            return
-
-        if lines_up > 0:
-            sys.stdout.write(f'\033[{lines_up}A\r\033[J')
-
-        for i in range(start_idx, len(self._display.all_msgs)):
-            formatted: str = ChatPresenter.format_msg(
-                self._display.all_msgs[i],
-                self._initial_prompt,
-                self._current_focus,
-                self._resolve_line_alias(self._display.all_msgs[i]),
-            )
-            sys.stdout.write(formatted + '\n')
-
-        if not skip_prompt:
-            self._last_visual_lines = self._display.get_input_visual_lines(
-                self._input.current_input, self._prompt, cols
-            )
-            self._display.redraw_input_area(
-                self._prompt,
-                self._input.current_input,
-                self._input.line_chars,
-                self._input.cursor_index,
-                self._last_visual_lines,
-                cols,
-            )
-        else:
-            self._last_visual_lines = 1
-
-        sys.stdout.flush()
-
-    def _redraw_from_index(self, start_idx: int) -> None:
-        """
-        Soft redraw of messages starting from a specific index.
-
-        Args:
-            start_idx (int): The index in the message buffer to start redrawing from.
-
-        Returns:
-            None
-        """
-        with self._display.print_lock:
-            cols: int = shutil.get_terminal_size().columns
-            if cols < 1:
-                cols = Constants.DEFAULT_COLS
-            self._redraw_from_index_locked(start_idx, cols)
-
-    def _full_redraw_locked(self, cols: int) -> None:
+    def _full_redraw_locked(self, cols: int, skip_prompt: bool = False) -> None:
         """
         Internal locked method executing the full terminal redraw sequence.
 
         Args:
             cols (int): The terminal column width.
+            skip_prompt (bool): Whether the caller will print the next prompt itself.
 
         Returns:
             None
         """
-        sys.stdout.write('\033[2J\033[H')
+        self._display.reset_viewport()
         for msg in self._display.all_msgs:
             formatted: str = ChatPresenter.format_msg(
                 msg,
@@ -557,17 +490,14 @@ class Renderer:
             )
             sys.stdout.write(formatted + '\n')
 
-        self._last_visual_lines = self._display.get_input_visual_lines(
-            self._input.current_input, self._prompt, cols
-        )
-        self._display.redraw_input_area(
-            self._prompt,
-            self._input.current_input,
-            self._input.line_chars,
-            self._input.cursor_index,
-            self._last_visual_lines,
-            cols,
-        )
+        if not skip_prompt:
+            self._display.redraw_input_area(
+                self._prompt,
+                self._input.current_input,
+                self._input.line_chars,
+                self._input.cursor_index,
+                cols,
+            )
         sys.stdout.flush()
 
     def full_redraw(self) -> None:
@@ -587,27 +517,23 @@ class Renderer:
             self._full_redraw_locked(cols)
 
     def _on_resize(self, _signum: int, _frame: Optional[types.FrameType]) -> None:
-        """
-        Signal handler for terminal resize events.
+        """Defer resize work so a signal cannot reenter a held rendering lock."""
+        self._resize_pending = True
 
-        Args:
-            _signum (int): The signal number.
-            _frame (Optional[types.FrameType]): The current stack frame.
-
-        Returns:
-            None
-        """
-        if self._is_redrawing:
+    def _apply_pending_resize(self) -> None:
+        """Coalesce POSIX signals and poll Windows geometry on the input loop."""
+        if not self._resize_pending and sys.platform != 'win32':
             return
-        cols: int = shutil.get_terminal_size().columns
-        if cols == self._last_cols:
+        self._resize_pending = False
+        terminal_size = shutil.get_terminal_size()
+        if (terminal_size.columns, terminal_size.lines) == (
+            self._last_cols,
+            self._last_rows,
+        ):
             return
-        self._last_cols = cols
-        self._is_redrawing = True
-        try:
-            self.full_redraw()
-        finally:
-            self._is_redrawing = False
+        self._last_cols = terminal_size.columns
+        self._last_rows = terminal_size.lines
+        self.full_redraw()
 
     def read_line(self, stop_event: Optional[threading.Event] = None) -> Optional[str]:
         """
@@ -625,11 +551,12 @@ class Renderer:
             self._input.line_chars = []
             self._input.cursor_index = 0
             self._input.current_input = ''
-            self._last_visual_lines = 1
 
         while True:
             if stop_event and stop_event.is_set():
                 return None
+
+            self._apply_pending_resize()
 
             ch: Optional[str] = self._input.get_char()
             if ch is None:
@@ -641,25 +568,32 @@ class Renderer:
                 if cols < 1:
                     cols = Constants.DEFAULT_COLS
 
-                result: Optional[str] = self._input.process_key(ch)
+                try:
+                    result: Optional[str] = self._input.process_key(ch)
+                except InputLimitExceededError:
+                    result = None
+                    rejected = True
+                else:
+                    rejected = False
 
                 if result is not None:
-                    self._display.clear_input_area(self._last_visual_lines)
-                    self._last_visual_lines = 1
+                    self._display.clear_input_area()
                     sys.stdout.flush()
                     return result
 
-                new_visual_lines: int = self._display.get_input_visual_lines(
-                    self._input.current_input, self._prompt, cols
-                )
                 self._display.redraw_input_area(
                     self._prompt,
                     self._input.current_input,
                     self._input.line_chars,
                     self._input.cursor_index,
-                    new_visual_lines,
                     cols,
-                    last_visual_lines=self._last_visual_lines,
                     clear_first=True,
                 )
-                self._last_visual_lines = new_visual_lines
+
+            if rejected:
+                self.print_message(
+                    'Input limit exceeded; the draft was discarded. '
+                    'Press Enter to start a new draft.',
+                    msg_type=ChatMessageType.STATUS,
+                    tone=StatusTone.ERROR,
+                )

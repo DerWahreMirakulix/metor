@@ -47,6 +47,7 @@ from metor.cli.prompt import (
 from metor.cli.theme import Theme
 from metor.cli.translations import Translator
 from metor.cli.errors import format_safe_local_runtime_error
+from metor.cli.models import CliCommandResult
 from metor.utils import Constants, ProcessManager
 from metor.cli.proxy import CliProxy
 
@@ -370,7 +371,7 @@ class CommandHandlers:
         proxy: CliProxy,
         name: str,
         target_mode: ProfileSecurityMode,
-    ) -> str:
+    ) -> CliCommandResult:
         """
         Interactively migrates one local profile between encrypted and plaintext storage.
 
@@ -380,15 +381,15 @@ class CommandHandlers:
             target_mode (ProfileSecurityMode): The requested storage mode.
 
         Returns:
-            str: The formatted CLI outcome.
+            CliCommandResult: Formatted output and explicit local failure status.
         """
         pm: ProfileManager = ProfileManager(name)
         if not pm.exists():
-            return proxy.migrate_profile_security(name, target_mode)
+            return CliCommandResult(proxy.migrate_profile_security(name, target_mode))
 
         current_mode: ProfileSecurityMode = pm.get_security_mode()
         if current_mode is target_mode:
-            return proxy.migrate_profile_security(name, target_mode)
+            return CliCommandResult(proxy.migrate_profile_security(name, target_mode))
 
         if target_mode is ProfileSecurityMode.PLAINTEXT:
             print(
@@ -398,9 +399,9 @@ class CommandHandlers:
             try:
                 confirm: str = prompt_text("Type 'yes' to continue: ")
             except PromptAbortedError:
-                return 'Security migration aborted.'
+                return CliCommandResult('Security migration aborted.', failed=True)
             if confirm.strip().lower() != 'yes':
-                return 'Security migration aborted.'
+                return CliCommandResult('Security migration aborted.', failed=True)
 
         current_password: Optional[str] = None
         output_spacer = PromptOutputSpacer()
@@ -411,9 +412,12 @@ class CommandHandlers:
                 )
                 output_spacer.mark_prompt()
             except PromptAbortedError:
-                return 'Security migration aborted.'
+                return CliCommandResult('Security migration aborted.', failed=True)
             if not current_password:
-                return output_spacer.format('Current master password cannot be empty.')
+                return CliCommandResult(
+                    output_spacer.format('Current master password cannot be empty.'),
+                    failed=True,
+                )
 
         new_password: Optional[str] = None
         if target_mode is ProfileSecurityMode.ENCRYPTED:
@@ -423,9 +427,12 @@ class CommandHandlers:
                 )
                 output_spacer.mark_prompt()
             except PromptAbortedError:
-                return 'Security migration aborted.'
+                return CliCommandResult('Security migration aborted.', failed=True)
             if not new_password:
-                return output_spacer.format('New master password cannot be empty.')
+                return CliCommandResult(
+                    output_spacer.format('New master password cannot be empty.'),
+                    failed=True,
+                )
 
             try:
                 confirm_password: str = prompt_hidden(
@@ -433,16 +440,21 @@ class CommandHandlers:
                 )
                 output_spacer.mark_prompt()
             except PromptAbortedError:
-                return 'Security migration aborted.'
+                return CliCommandResult('Security migration aborted.', failed=True)
             if new_password != confirm_password:
-                return output_spacer.format('New master passwords do not match.')
+                return CliCommandResult(
+                    output_spacer.format('New master passwords do not match.'),
+                    failed=True,
+                )
 
-        return output_spacer.format(
-            proxy.migrate_profile_security(
-                name,
-                target_mode,
-                current_password=current_password,
-                new_password=new_password,
+        return CliCommandResult(
+            output_spacer.format(
+                proxy.migrate_profile_security(
+                    name,
+                    target_mode,
+                    current_password=current_password,
+                    new_password=new_password,
+                )
             )
         )
 

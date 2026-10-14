@@ -15,6 +15,7 @@ from metor.ui.terminal import Theme, UIPresenter
 from metor.ui.terminal.models import StatusTone
 from metor.ui.terminal.models import AliasPolicy
 from metor.shared import escape_terminal_text
+from metor.ui.terminal.cells import cell_width
 
 # Local Package Imports
 from metor.ui.terminal.chat.models import ChatMessageType, ChatLine
@@ -168,62 +169,6 @@ class ChatPresenter:
         return '\n'.join(lines)
 
     @staticmethod
-    def get_visible_prefix_len(
-        msg_type: ChatMessageType,
-        tone: Optional[StatusTone],
-        alias: Optional[str],
-        is_drop: bool,
-        prompt_len: int,
-        timestamp: Optional[str] = None,
-    ) -> int:
-        """
-        Calculates the exact visible length of the prefix without invisible ANSI color codes.
-
-        Args:
-            msg_type (ChatMessageType): The category of the message.
-            tone (Optional[StatusTone]): The tone for status lines.
-            alias (Optional[str]): The associated remote alias.
-            is_drop (bool): True if the message has the [Drop] suffix.
-            prompt_len (int): The length of the base prompt signature.
-            timestamp (Optional[str]): Optional visible timestamp prefix.
-
-        Returns:
-            int: The visible character count of the prefix.
-        """
-        _, timestamp_visible = UIPresenter.build_timestamp_prefix(
-            timestamp,
-            is_drop=(msg_type in (ChatMessageType.SELF, ChatMessageType.REMOTE))
-            and is_drop,
-            compact=True,
-        )
-
-        safe_alias: Optional[str] = (
-            escape_terminal_text(alias) if alias is not None else None
-        )
-
-        if msg_type == ChatMessageType.STATUS:
-            if tone == StatusTone.INFO:
-                return len(timestamp_visible) + 4 + prompt_len
-            if tone == StatusTone.ERROR:
-                return len(timestamp_visible) + 5 + prompt_len
-            return len(timestamp_visible) + 6 + prompt_len
-        if msg_type == ChatMessageType.RAW:
-            return 0
-        if msg_type == ChatMessageType.SELF:
-            return (
-                len(timestamp_visible) + len(f'To {safe_alias}') + prompt_len
-                if safe_alias
-                else len(timestamp_visible) + 4 + prompt_len
-            )
-        if msg_type == ChatMessageType.REMOTE:
-            return (
-                len(timestamp_visible) + len(f'From {safe_alias}') + prompt_len
-                if safe_alias
-                else len(timestamp_visible) + 6 + prompt_len
-            )
-        return 0
-
-    @staticmethod
     def format_transport_state(event: TransportStateEvent) -> str:
         """
         Formats one transport state DTO for the chat status line.
@@ -359,7 +304,7 @@ class ChatPresenter:
         if '\n' in text and msg.msg_type != ChatMessageType.RAW:
             text = UIPresenter.indent_multiline_text(
                 text,
-                len(visible_prefix),
+                cell_width(visible_prefix),
             )
 
         return f'{prefix}{text}'

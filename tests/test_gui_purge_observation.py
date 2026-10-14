@@ -253,6 +253,7 @@ class PurgeObservationCoreTests(unittest.TestCase):
         host.profile_state.return_value = FrontendProfileState(
             'voice-owned', True, False, True
         )
+        host.list_profiles.return_value = (host.profile_state.return_value,)
         host.initial_selection.return_value = FrontendSelection(
             FrontendSelectionKind.RESOLVED, 'voice-owned', 'voice-owned', 'voice-owned'
         )
@@ -393,4 +394,5 @@ class PurgeObservationCoreTests(unittest.TestCase):
         self.assertEqual(gui.purge.detail, 'Powering off.')
         shutdown.request_shutdown.assert_called_once_with()
         self.assertIsNone(gui.client)
-        host.profile_state.assert_called_once_with()
+        self.assertEqual(host.profile_state.call_count, 2)
+        host.list_profiles.assert_called_once_with()

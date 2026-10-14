@@ -179,6 +179,7 @@ class VersionRegistryTests(unittest.TestCase):
             'pyproject.toml',
             'packaging/sdk/pyproject.toml',
             'packaging/terminal/pyproject.toml',
+            'packaging/gui/pyproject.toml',
         ):
             content: str = (root / relative_path).read_text(encoding='utf-8')
             self.assertRegex(content, r'dynamic = \[[^\]]*"version"[^\]]*\]')
@@ -949,12 +950,36 @@ class DocumentationReleaseArchitectureTests(unittest.TestCase):
         self.assertIn('dry_run:', workflow_inputs)
         self.assertNotIn('peer_compatibility:', workflow_inputs)
         self.assertNotIn('crypto_migration_reviewed:', workflow_inputs)
-        self.assertIn('Smoke-test Linux bundle installers', validation_jobs)
-        self.assertIn('Smoke-test Windows bundle installers', validation_jobs)
-        self.assertIn('install.sh', validation_jobs)
-        self.assertIn('install.cmd', validation_jobs)
+        self.assertIn('python scripts/validate_release_installers.py', validation_jobs)
+        self.assertIn('uses: ./.github/actions/gui-acceptance', validation_jobs)
+        gui_action = (
+            root / '.github' / 'actions' / 'gui-acceptance' / 'action.yml'
+        ).read_text(encoding='utf-8')
+        ci_workflow = (root / '.github' / 'workflows' / 'ci.yml').read_text(
+            encoding='utf-8'
+        )
+        self.assertIn('uses: ./.github/actions/gui-acceptance', ci_workflow)
+        for native_workflow in (ci_workflow, validation_jobs):
+            windows_step = next(
+                step
+                for step in native_workflow.split('\n      - name:')
+                if 'scripts/validate_installed_artifacts.py' in step
+                and '--windows-launch' in step
+            )
+            self.assertIn("if: runner.os == 'Windows'", windows_step)
+            self.assertIn('KIVY_GL_BACKEND: angle_sdl2', windows_step)
+        self.assertIn('tests/gui_native_core.py --width 360', gui_action)
+        self.assertIn('tests/gui_native_core.py --width 1180', gui_action)
+        self.assertIn('tests/gui_native_scrolling.py --output', gui_action)
+        self.assertIn('tests/gui_stream_pressure.py', gui_action)
+        self.assertIn(
+            'dbus-run-session -- python tests/gui_native_accessibility.py', gui_action
+        )
+        self.assertIn('timeout --kill-after=5s 90s', gui_action)
+        self.assertIn('XDG_RUNTIME_DIR=', gui_action)
+        self.assertIn('tail -c 65536', gui_action)
+        self.assertIn('set -euo pipefail', gui_action)
         self.assertIn('metor-ui-gui-wheelhouse-', validation_jobs)
-        self.assertIn('chat --ui gui --help', validation_jobs)
         self.assertNotIn('metor-daemon', validation_jobs)
         self.assertNotIn('metor.daemon_main', validation_jobs)
         self.assertIn('candidate_sha:', workflow)

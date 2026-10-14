@@ -100,10 +100,11 @@ not grant access to keys, content, or profile actions. Anonymous connections
 without that token cannot keep an automatic daemon alive. Re-registration on a
 new socket replaces only the same frontend ID. A stale socket or previous
 daemon token cannot release or join a newer instance. Frontends skip the lease
-command when a current independent daemon has no token. IPC generation 2 is
-incompatible with this release because profile-exit semantics changed; a
-generation 2 daemon must be stopped and upgraded before a generation 3 frontend
-can attach. Short-lived CLI queries do not register as frontends.
+command when a current independent daemon has no token. This release requires
+IPC generation 4. Generation 3 introduced the local profile-exit semantics;
+generation 4 adds the current telephone-call contract. Older daemons must be
+stopped and upgraded before a current frontend can attach. Short-lived CLI
+queries do not register as frontends.
 
 The first frontend has 60 seconds after IPC readiness to register. An
 unexpected disconnect reserves that frontend's slot for 45 seconds so a
@@ -117,8 +118,11 @@ Tor, IPC, and endpoint cleanup. A joining client receives a typed `stopping`
 result and can retry bootstrap against the next instance. At most 64 frontend
 IDs are retained, including disconnected clients in their grace window;
 additional IDs receive a typed `full` result. All detached and
-manual start paths share the profile start lock through IPC publication, so
-concurrent starts cannot open two writers for the same profile.
+manual start paths share the profile start lock through IPC publication. The
+managed process also holds a stable external instance lock from initialization
+through cleanup, so concurrent starts and offline profile mutations cannot open
+two writers for the same profile. The full gate order is documented in the
+[architecture guide](../ARCHITECTURE.md#profile-process-and-mutation-exclusion).
 
 Cold encrypted unlock has a bounded initialization wait distinct from the
 ordinary IPC request timeout. Frontends report failed bootstrap or lost
@@ -333,9 +337,9 @@ clients. An authorized profile purge immediately broadcasts a redacted
 initiation to other connected frontends so they cover local state. Its operation
 ID and detailed destruction milestones remain limited to the initiator.
 
-This changed profile-exit meaning requires IPC generation 3. Generation 2
-clients and daemons are rejected by the handshake instead of interpreting the
-same command with conflicting global and local effects.
+This changed profile-exit meaning was introduced in IPC generation 3. The current
+call contract raises the required generation to 4; older clients and daemons are
+rejected by the handshake instead of interpreting incompatible commands.
 
 Self-destruct is a separate emergency path. Hard-locked anonymous clients cannot
 invoke it. A restricted client can act only when it was authenticated before
@@ -391,6 +395,19 @@ schema.
 - Treat Onion identity and `msg_id` as stable keys; aliases are mutable labels.
 - Render unknown `MessageContent` variants safely. Terminal intentionally uses a
   placeholder for Voice and remains a text-oriented client.
+
+Terminal text input and command recall are bounded volatile state. An active
+draft admits at most 65,536 characters; exceeding that limit discards the whole
+draft and ignores the remaining input until explicit Enter, with an error
+instead of a truncated send. Recall retains at most 100 entries and 65,536
+characters in total. Neither buffer is persisted as command history.
+
+Editing and wrapping use terminal-cell widths and Unicode grapheme boundaries,
+including combining marks and joined emoji. A long draft has a cursor-centered
+viewport bounded by the available rows; resize updates both height and width.
+Windows input handles UTF-16 surrogate pairs and polls dimensions because the
+console does not provide POSIX `SIGWINCH`. Slash commands accept quoted aliases
+with spaces, so labels created by another frontend remain usable in Terminal.
 
 The complete wire shapes and defaults are generated in
 [API.md](../generated/API.md) and [SETTINGS.md](../generated/SETTINGS.md).

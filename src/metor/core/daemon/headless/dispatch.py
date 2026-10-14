@@ -44,6 +44,20 @@ from metor.data import DatabaseCorruptedError, SettingKey
 from metor.core.daemon.headless.protocols import HeadlessDaemonProtocol
 
 
+def is_profile_lifecycle_command(cmd: IpcCommand) -> bool:
+    """Reports commands whose catalog owner supplies its own lifecycle guards."""
+    return isinstance(
+        cmd,
+        (
+            AddProfileCommand,
+            MigrateProfileSecurityCommand,
+            RemoveProfileCommand,
+            RenameProfileCommand,
+            SetDefaultProfileCommand,
+        ),
+    )
+
+
 def _requires_headless_config_password(daemon: HeadlessDaemonProtocol) -> bool:
     """
     Reports whether daemon-scoped config commands must validate the master password.
@@ -121,16 +135,7 @@ def process_command(
         daemon._send(conn, daemon._config_handler.handle(cmd))
         return
 
-    if isinstance(
-        cmd,
-        (
-            AddProfileCommand,
-            MigrateProfileSecurityCommand,
-            RemoveProfileCommand,
-            RenameProfileCommand,
-            SetDefaultProfileCommand,
-        ),
-    ):
+    if is_profile_lifecycle_command(cmd):
         daemon._send(conn, daemon._profile_handler.handle(cmd))
         return
 

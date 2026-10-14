@@ -24,7 +24,7 @@ def device_view(controller: GuiController, refresh: Callable[[], None]) -> Ancho
     """
     device = controller.device
     wrapper = AnchorLayout(padding=f'{Geometry.EDGE}dp')
-    scroll = ScrollView(do_scroll_x=False, size_hint_x=None)
+    scroll = ScrollView(do_scroll_x=False, always_overscroll=False, size_hint_x=None)
 
     def fit_width(*_args: object) -> None:
         """Keep device controls inside the current density-scaled insets.

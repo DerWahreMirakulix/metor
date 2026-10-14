@@ -29,6 +29,10 @@ class NativeSecondaryProbe:
         self.app = app
         self.last_scroll = 0.0
         self.clicked_at = 0.0
+        self._target_geometry: tuple[str, tuple[float, float, float, float]] | None = (
+            None
+        )
+        self._geometry_since = 0.0
 
     def add_steps(self) -> None:
         """Extends the real SDK/Core journey before the ordinary settings exit."""
@@ -78,14 +82,19 @@ class NativeSecondaryProbe:
         )
         if scroll is None:
             return True
-        _, bottom, _, height = rectangle(action)
+        now = time.monotonic()
+        bounds = rectangle(action)
+        geometry = name, bounds
+        if geometry != self._target_geometry:
+            self._target_geometry = geometry
+            self._geometry_since = now
+        _, bottom, _, height = bounds
         _, lower, _, viewport = rectangle(scroll)
         if (
             bottom >= lower - GEOMETRY_TOLERANCE
             and bottom + height <= lower + viewport + GEOMETRY_TOLERANCE
         ):
-            return True
-        now = time.monotonic()
+            return now - self._geometry_since >= SCROLL_SETTLE_SECONDS
         if now - self.last_scroll >= SCROLL_SETTLE_SECONDS:
             app.native.scroll(scroll, downward=bottom < lower, steps=SCROLL_STEPS)
             self.last_scroll = now

@@ -3,7 +3,6 @@
 # ruff: noqa: E402
 
 import socket
-import subprocess
 import sys
 import threading
 import unittest
@@ -13,6 +12,8 @@ from typing import Optional, cast
 from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
+
+from private_fixtures import PrivateTemporaryDirectory
 
 from metor.cli.handlers import CommandHandlers
 from metor.client import (
@@ -63,7 +64,6 @@ from metor.data import (
     ProfileSecurityMode,
 )
 from metor.data.sql import SqlManager
-from metor.utils import Constants
 
 
 class _Interactions:
@@ -85,21 +85,22 @@ class _Interactions:
 class FinalRemediationContractTests(unittest.TestCase):
     """Exercises corrected behavior at public or enclosing production boundaries."""
 
-    def test_windows_acl_helpers_are_bounded_and_fail_safely(self) -> None:
-        """C01: a stuck credential helper becomes a sanitized bounded failure."""
-        with patch(
-            'metor.core.daemon.managed.quick_unlock.subprocess.run',
-            side_effect=subprocess.TimeoutExpired('powershell.exe', 10),
-        ) as run:
-            with self.assertRaisesRegex(
-                QuickUnlockStorageError, 'protect: helper unavailable or timed out'
+    def test_failed_credential_write_preserves_previous_verifier(self) -> None:
+        """A native private-file failure cannot replace the last usable credential."""
+        with PrivateTemporaryDirectory() as directory:
+            path = Path(directory) / 'pin.json'
+            store = QuickUnlockStore(path)
+            store.configure('01' * 16, '02' * 32)
+            with (
+                patch(
+                    'metor.core.daemon.managed.quick_unlock.open_private_binary_file',
+                    side_effect=PermissionError('private-file-denied'),
+                ),
+                self.assertRaises(QuickUnlockStorageError),
             ):
-                QuickUnlockStore._protect_windows_path(
-                    Path('path with spaces'), directory=False
-                )
-        self.assertEqual(
-            run.call_args.kwargs['timeout'], Constants.QUICK_UNLOCK_HELPER_TIMEOUT_SEC
-        )
+                store.configure('03' * 16, '04' * 32)
+            self.assertEqual(store.metadata(), ('01' * 16, bytes.fromhex('02' * 32)))
+            self.assertEqual(set(path.parent.iterdir()), {path})
 
     def test_existing_windows_quick_unlock_parent_is_validated_without_mutation(
         self,
@@ -115,20 +116,18 @@ class FinalRemediationContractTests(unittest.TestCase):
                 patch(
                     'metor.core.daemon.managed.quick_unlock.create_private_directory_tree'
                 ) as create_tree,
-                patch.object(store, '_protect_windows_path') as protect,
                 patch.object(store, '_validate_protection') as validate,
             ):
                 store._prepare_private_parent()
 
             create_tree.assert_not_called()
-            protect.assert_not_called()
             validate.assert_called_once_with(path.parent, directory=True)
 
     def test_sensitive_grant_is_verified_scoped_consumed_and_session_local(
         self,
     ) -> None:
         """C02: idempotent auth cannot upgrade PIN/NONE-strength sessions."""
-        with TemporaryDirectory() as temp_dir:
+        with PrivateTemporaryDirectory() as temp_dir:
             events: list[IpcEvent] = []
             store = QuickUnlockStore(Path(temp_dir) / 'quick-unlock.json')
             controller = SessionAccessController(

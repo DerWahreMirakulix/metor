@@ -131,7 +131,8 @@ class IpcClient:
             start_listener (bool): Whether to start asynchronous event delivery.
 
         Returns:
-            bool: Whether this call installed a complete authenticated connection.
+            bool: Whether this call installed a TCP connection. Authentication is
+                performed separately by the higher-level client bootstrap.
         """
         if not self._connect_lock.acquire(blocking=False):
             return False
@@ -175,7 +176,7 @@ class IpcClient:
         """Publishes replacement state under the exchange/loss transition lock.
 
         Args:
-            candidate (socket.socket): Fully handshaken replacement socket.
+            candidate (socket.socket): Connected replacement TCP socket.
 
         Returns:
             None
@@ -689,10 +690,10 @@ class IpcClient:
                 if effective_socket is None or effective_generation != self._generation:
                     break
 
-                try:
-                    buffered_event: Optional[IpcEvent] = effective_reader.pop_event()
-                except Exception:
-                    continue
+                # An undecodable event may revoke authority or change projection
+                # state. Losing it silently would leave the frontend out of sync.
+                # The outer failure path retires the generation and its waiters.
+                buffered_event: Optional[IpcEvent] = effective_reader.pop_event()
 
                 if buffered_event is not None:
                     self._dispatch_event(

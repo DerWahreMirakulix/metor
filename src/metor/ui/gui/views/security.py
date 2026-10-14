@@ -90,7 +90,10 @@ def security_view(
     """
     outer = AnchorLayout(padding=f'{Geometry.EDGE}dp')
     scroll = ScrollView(
-        size_hint=(None, None), width=f'{Geometry.FORM_MAX}dp', do_scroll_x=False
+        size_hint=(None, None),
+        width=f'{Geometry.FORM_MAX}dp',
+        do_scroll_x=False,
+        always_overscroll=False,
     )
 
     def fit_width(*_args: object) -> None:
@@ -141,7 +144,11 @@ def security_view(
         restriction = security.restriction
         if restriction is not None:
             method = restriction.unlock_method
-            secret = SecretInput()
+            secret = SecretInput(
+                accessible_name='PIN'
+                if method is ClientUnlockMethod.PIN
+                else 'Profile password'
+            )
             if method is ClientUnlockMethod.PIN:
                 secret.input_purpose = 'pin'
             if method is not ClientUnlockMethod.NONE:
@@ -245,7 +252,8 @@ def security_view(
                 tone='textSecondary',
             )
         )
-        pin, confirm = SecretInput(), SecretInput()
+        pin = SecretInput(accessible_name='New PIN')
+        confirm = SecretInput(accessible_name='Confirm PIN')
         pin.input_purpose = confirm.input_purpose = 'pin'
         error = Label('', role='support', tone='danger')
 

@@ -14,8 +14,9 @@ import time
 import unittest
 from dataclasses import dataclass, replace
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
+
+from private_fixtures import PrivateTemporaryDirectory
 
 from metor.client import MetorClient, build_session_auth_proof
 from metor.core.api import (
@@ -77,7 +78,7 @@ class CallIntegrationTests(unittest.TestCase):
 
     def setUp(self) -> None:
         """Start two encrypted managed runtimes and independent authenticated clients."""
-        temporary = TemporaryDirectory()
+        temporary = PrivateTemporaryDirectory()
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
         patcher = patch.object(Constants, 'DATA', self.root)

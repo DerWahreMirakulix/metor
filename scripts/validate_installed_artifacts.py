@@ -191,7 +191,8 @@ print("TERMINAL_MINIMAL_VOICE_METADATA_OK", metor.ui.terminal.__file__)
 
 
 def audit_wheel_records(wheels: tuple[Path, ...]) -> None:
-    """Checks real RECORD hashes, disjoint ownership and namespace marker placement."""
+    """Checks RECORD hashes, licensing, disjoint ownership and namespace markers."""
+    license_text = (Path(__file__).resolve().parents[1] / 'LICENSE').read_bytes()
     selected = {
         path.name: path
         for path in wheels
@@ -213,6 +214,13 @@ def audit_wheel_records(wheels: tuple[Path, ...]) -> None:
     for path in sorted(path for path in wheels if path.name in selected):
         with ZipFile(path) as archive:
             members = set(archive.namelist())
+            licenses = [
+                name for name in members if name.endswith('.dist-info/licenses/LICENSE')
+            ]
+            if len(licenses) != 1 or archive.read(licenses[0]) != license_text:
+                raise RuntimeError(
+                    f'Distribution must include the canonical GPL license: {path.name}'
+                )
             record = next(
                 name for name in members if name.endswith('.dist-info/RECORD')
             )
@@ -309,6 +317,7 @@ def run_acceptance(
             expected: int = 0,
             extra_environment: dict[str, str] | None = None,
             timeout_seconds: int = _CONSUMER_COMMAND_TIMEOUT_SEC,
+            creation_flags: int = 0,
         ) -> str:
             command_environment = dict(environment)
             if extra_environment is not None:
@@ -321,6 +330,7 @@ def run_acceptance(
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 timeout=timeout_seconds,
+                creationflags=creation_flags,
             )
             print(result.stdout, end='')
             if result.returncode != expected:
@@ -538,7 +548,13 @@ py-modules = ["closure_fake"]
                 / 'tests'
                 / 'gui_windows_process_chain.py'
             )
-            output = run([str(executable), '-I', str(entrypoint_probe)])
+            # Give this native fixture its own visible terminal. Hosted runners
+            # can inherit a console attachment with no usable window; that is
+            # not the terminal boundary the process-chain check must exercise.
+            output = run(
+                [str(executable), '-I', str(entrypoint_probe)],
+                creation_flags=int(getattr(subprocess, 'CREATE_NEW_CONSOLE')),
+            )
             if 'WINDOWS_INSTALLED_GUI_ENTRYPOINTS_OK' not in output:
                 raise RuntimeError('Windows GUI entry-point acceptance failed.')
         install('metor-ui-terminal')

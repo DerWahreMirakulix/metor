@@ -28,6 +28,12 @@ class AudioRoutes:
         self.output: int | None = None
         self.scanned = False
 
+    @property
+    def available(self) -> bool:
+        """Keep host audio disabled for simulation and unsupported device adapters."""
+        controller = self.voice.controller
+        return controller.native_audio and not controller.simulator
+
     def scan(self) -> bool:
         """Queries native endpoints off the GUI loop after explicit user intent.
 
@@ -37,7 +43,7 @@ class AudioRoutes:
             bool: Whether the bounded scan operation was admitted.
         """
         controller = self.voice.controller
-        if controller.simulator or controller.state.covered or self.blocked:
+        if not self.available or controller.state.covered or self.blocked:
             return False
         generation = controller.state.generation
 
@@ -86,7 +92,7 @@ class AudioRoutes:
             bool: Whether the idle route was installed; playback needs only output.
         """
         controller = self.voice.controller
-        if controller.state.covered or self.blocked:
+        if not self.available or controller.state.covered or self.blocked:
             return False
         valid = any(
             item.index == endpoint

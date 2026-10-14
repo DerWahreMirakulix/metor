@@ -32,11 +32,15 @@ class ProfileEditor(ActionSheet):
         page = controller.profiles.page
         self.selected = page.selected_profile if page else ''
         self.name = TextField(
-            text=profile, multiline=False, size_hint_y=None, height='52dp'
+            accessible_name='Profile name',
+            text=profile,
+            multiline=False,
+            size_hint_y=None,
+            height='52dp',
         )
-        self.current_password = SecretInput()
-        self.password = SecretInput()
-        self.confirmation = SecretInput()
+        self.current_password = SecretInput(accessible_name='Current profile password')
+        self.password = SecretInput(accessible_name='New password')
+        self.confirmation = SecretInput(accessible_name='Confirm password')
         self.feedback = Label('', role='support', tone='danger')
         self._serial: int | None = None
         self.recheck = Action('Check address', lambda: self._save(generate=False))

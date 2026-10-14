@@ -10,6 +10,7 @@ from metor.core.daemon import InvalidMasterPasswordError, verify_master_password
 from metor.core.key import KeyManager
 from metor.core.tor import TorManager
 from metor.data import ProfileManager, Settings
+from metor.data.profile import offline_profile_guard
 
 
 def profile_address(
@@ -25,38 +26,43 @@ def profile_address(
     """
     request.__post_init__()
     pm = ProfileManager(request.profile)
-    if not pm.exists() or pm.is_remote():
-        return FrontendProfileOperationResult(
-            False, 'local_profile_required', request.profile
-        )
-    if pm.is_daemon_running():
-        return FrontendProfileOperationResult(
-            False, 'address_cant_generate_running', request.profile
-        )
-    Settings.validate_integrity()
-    pm.validate_integrity()
-    manager = KeyManager(pm, password)
-    try:
-        if pm.supports_password_auth():
-            try:
-                verify_master_password(manager)
-            except InvalidMasterPasswordError:
-                return FrontendProfileOperationResult(
-                    False, 'invalid_password', request.profile
-                )
-        tor = TorManager(pm, manager)
-        _success, event_type, params = (
-            tor.generate_address() if request.generate else tor.get_address()
-        )
-        event = create_event(event_type, params)
-        success = isinstance(event, (AddressCurrentEvent, AddressGeneratedEvent))
-        return FrontendProfileOperationResult(
-            success,
-            event.event_type.value,
-            request.profile,
-            event.onion
-            if isinstance(event, (AddressCurrentEvent, AddressGeneratedEvent))
-            else None,
-        )
-    finally:
-        manager.clear_sensitive_state()
+    with offline_profile_guard(pm.paths) as offline:
+        if not offline:
+            return FrontendProfileOperationResult(
+                False, 'address_cant_generate_running', request.profile
+            )
+        if not pm.exists() or pm.is_remote():
+            return FrontendProfileOperationResult(
+                False, 'local_profile_required', request.profile
+            )
+        if pm.is_daemon_running():
+            return FrontendProfileOperationResult(
+                False, 'address_cant_generate_running', request.profile
+            )
+        Settings.validate_integrity()
+        pm.validate_integrity()
+        manager = KeyManager(pm, password)
+        try:
+            if pm.supports_password_auth():
+                try:
+                    verify_master_password(manager)
+                except InvalidMasterPasswordError:
+                    return FrontendProfileOperationResult(
+                        False, 'invalid_password', request.profile
+                    )
+            tor = TorManager(pm, manager)
+            _success, event_type, params = (
+                tor.generate_address() if request.generate else tor.get_address()
+            )
+            event = create_event(event_type, params)
+            success = isinstance(event, (AddressCurrentEvent, AddressGeneratedEvent))
+            return FrontendProfileOperationResult(
+                success,
+                event.event_type.value,
+                request.profile,
+                event.onion
+                if isinstance(event, (AddressCurrentEvent, AddressGeneratedEvent))
+                else None,
+            )
+        finally:
+            manager.clear_sensitive_state()
