@@ -6,6 +6,7 @@ import sys
 import time
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import BinaryIO, Callable, Optional, TextIO
 
 from metor.core.api import EventType, JsonValue
@@ -358,8 +359,24 @@ def _start_managed_daemon_process_unlocked(
     with open(os.devnull, 'wb') as sink:
         output_target: BinaryIO = diagnostic_output or sink
         if os.name == 'nt':
+            executable = Path(sys.executable)
+            child_env = None
+            base = getattr(sys, '_base_executable', None)
+            if (
+                sys.prefix != sys.base_prefix
+                and base
+                and executable.name.lower() in ('python.exe', 'pythonw.exe')
+                and Path(base) != executable
+            ):
+                # CPython's venv redirector would own the Popen handle while
+                # a second PID publishes IPC. Select the same venv in-process,
+                # as multiprocessing does, so ownership stays with the daemon.
+                child_env = {**os.environ, '__PYVENV_LAUNCHER__': sys.executable}
+                executable = Path(base)
             process: subprocess.Popen[bytes] = subprocess.Popen(
                 command,
+                executable=executable,
+                env=child_env,
                 stdin=stdin_target,
                 stdout=output_target,
                 stderr=output_target,

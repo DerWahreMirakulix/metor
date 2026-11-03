@@ -336,6 +336,10 @@ def _run_installed_start(
         pid = profile.get_daemon_pid()
         if port is None or pid is None:
             raise AssertionError((port, pid))
+        if diagnostics.process is None or diagnostics.process.pid != pid:
+            raise AssertionError(
+                'The managed child handle does not own the published daemon PID.'
+            )
         if console_observation_failed.is_set():
             raise AssertionError('Native console observation failed.')
         if new_consoles or _windows_console_handles() - consoles_before:

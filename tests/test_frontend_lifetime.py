@@ -15,6 +15,8 @@ import unittest
 from typing import cast
 from unittest.mock import PropertyMock, patch
 
+import psutil
+
 from metor.application.frontend.host import create_local_frontend_host
 from metor.application.runtime.daemon import (
     DaemonStartDiagnostics,
@@ -263,7 +265,20 @@ class FrontendLifetimeProcessTests(unittest.TestCase):
         """Stop every child and remove all profile bytes after the assertion."""
         for process in self._processes:
             if process.poll() is None:
-                process.terminate()
+                runtime = self._redirected_runtime(process)
+                if runtime is not None:
+                    try:
+                        runtime.terminate()
+                        runtime.wait(
+                            timeout=Constants.OWNED_DAEMON_SHUTDOWN_TIMEOUT_SEC
+                        )
+                    except psutil.NoSuchProcess:
+                        pass
+                    except psutil.TimeoutExpired:
+                        runtime.kill()
+                        runtime.wait(timeout=Constants.TOR_KILL_TIMEOUT_SEC)
+                elif process.poll() is None:
+                    process.terminate()
                 try:
                     process.wait(timeout=Constants.OWNED_DAEMON_SHUTDOWN_TIMEOUT_SEC)
                 except subprocess.TimeoutExpired:
@@ -276,20 +291,50 @@ class FrontendLifetimeProcessTests(unittest.TestCase):
             os.environ['METOR_DATA_DIR_PARENT'] = self._old_parent
         self._temporary.cleanup()
 
+    @staticmethod
+    def _redirected_runtime(launcher: subprocess.Popen[bytes]) -> psutil.Process | None:
+        """Find the direct CPython child of this fixture's Windows venv launcher."""
+        if os.name != 'nt' or launcher.poll() is not None:
+            return None
+        base = Path(getattr(sys, '_base_executable', sys.executable))
+        if Path(sys.executable).samefile(base):
+            return None
+        try:
+            parent = psutil.Process(launcher.pid)
+            if not Path(parent.exe()).samefile(sys.executable):
+                return None
+            args = launcher.args
+            assert isinstance(args, list)
+            for child in parent.children():
+                try:
+                    if (
+                        Path(child.exe()).samefile(base)
+                        and child.cmdline()[1:] == args[1:]
+                    ):
+                        return child
+                except psutil.NoSuchProcess:
+                    continue
+        except psutil.NoSuchProcess:
+            pass
+        return None
+
+    def _runtime_pid(self, launcher: subprocess.Popen[bytes]) -> int:
+        """Identify the actual daemon interpreter behind a directly invoked CLI."""
+        runtime = self._redirected_runtime(launcher)
+        return runtime.pid if runtime is not None else launcher.pid
+
     def _start(self, automatic: bool) -> DaemonStartDiagnostics:
         """Launch one real locked daemon and record exact child ownership."""
         diagnostics = DaemonStartDiagnostics()
-        self.assertTrue(
-            start_managed_daemon_process(
-                self._profile,
-                start_locked=True,
-                automatic_lifetime=automatic,
-                diagnostics=diagnostics,
-            ),
-            diagnostics.phase,
+        started = start_managed_daemon_process(
+            self._profile,
+            start_locked=True,
+            automatic_lifetime=automatic,
+            diagnostics=diagnostics,
         )
         if diagnostics.process is not None:
             self._processes.append(diagnostics.process)
+        self.assertTrue(started, diagnostics.phase)
         return diagnostics
 
     def _connect(self) -> IpcClient:
@@ -506,12 +551,12 @@ class FrontendLifetimeProcessTests(unittest.TestCase):
             thread.start()
         for thread in threads:
             thread.join(timeout=Constants.OWNED_DAEMON_SHUTDOWN_TIMEOUT_SEC)
+        spawned = [item.process for item in diagnostics if item.process is not None]
+        self._processes.extend(spawned)
         self.assertFalse(any(thread.is_alive() for thread in threads))
         self.assertFalse(failures, [type(error).__name__ for error in failures])
         self.assertEqual(results, [True, True])
-        spawned = [item.process for item in diagnostics if item.process is not None]
         self.assertEqual(len(spawned), 1)
-        self._processes.extend(spawned)
         self.assertEqual(self._profile.get_daemon_pid(), spawned[0].pid)
 
     def test_manual_and_frontend_starts_publish_one_daemon(self) -> None:
@@ -569,17 +614,18 @@ class FrontendLifetimeProcessTests(unittest.TestCase):
             thread.start()
         for thread in threads:
             thread.join(timeout=Constants.OWNED_DAEMON_SHUTDOWN_TIMEOUT_SEC)
+        if diagnostics.process is not None:
+            self._processes.append(diagnostics.process)
         self.assertFalse(any(thread.is_alive() for thread in threads))
         self.assertFalse(failures, [type(error).__name__ for error in failures])
         self.assertEqual(results, [True])
         self.assertEqual(len(manual), 1)
-        if diagnostics.process is not None:
-            self._processes.append(diagnostics.process)
         active_pid = self._profile.get_daemon_pid()
-        self.assertIn(
-            active_pid,
-            [manual[0].pid, diagnostics.process.pid if diagnostics.process else None],
-        )
+        self.assertIsNotNone(active_pid)
+        owned_pids = [self._runtime_pid(manual[0])]
+        if diagnostics.process is not None:
+            owned_pids.append(diagnostics.process.pid)
+        self.assertIn(active_pid, owned_pids)
         deadline = time.monotonic() + Constants.FRONTEND_FINAL_RELEASE_GRACE_SEC
         while (
             sum(
@@ -628,10 +674,12 @@ class FrontendLifetimeProcessTests(unittest.TestCase):
         deadline = time.monotonic() + Constants.OWNED_DAEMON_SHUTDOWN_TIMEOUT_SEC
         while self._profile.get_daemon_port() is None and time.monotonic() < deadline:
             time.sleep(Constants.LOCK_SLEEP_SEC)
-        self.assertIn(self._profile.get_daemon_pid(), [child.pid for child in children])
-        loser = next(
-            child for child in children if child.pid != self._profile.get_daemon_pid()
-        )
+        active_pid = self._profile.get_daemon_pid()
+        winners = [
+            child for child in children if self._runtime_pid(child) == active_pid
+        ]
+        self.assertEqual(len(winners), 1)
+        loser = next(child for child in children if child is not winners[0])
         loser.wait(timeout=Constants.MAX_DERIVED_DAEMON_START_WAIT_SEC)
         self.assertEqual(sum(child.poll() is None for child in children), 1)
 
