@@ -382,6 +382,33 @@ class TorLifecycleTests(unittest.TestCase):
                 self.assertEqual(messages, ['Tor launch failed.'])
                 self.assertNotIn(private_detail, repr(result) + repr(messages))
 
+    def test_both_launchers_receive_literal_single_line_torrc_paths(self) -> None:
+        """Filesystem text cannot truncate a directory or add a Tor directive."""
+        for windows, launcher in (
+            (False, 'stem.process.launch_tor_with_config'),
+            (True, 'metor.core.tor.launch_tor_without_console'),
+        ):
+            with self.subTest(windows=windows):
+                manager = self._manager(None)
+                manager._pm.paths.get_tor_data_dir.return_value = Path('data #1')
+                manager._pm.paths.get_hidden_service_dir.return_value = Path(
+                    'ü"\\\nControlPort 1'
+                )
+                manager._pm.config.get_int.return_value = 1
+                with (
+                    patch('metor.core.tor._is_windows', return_value=windows),
+                    patch.object(
+                        TorManager, '_resolve_tor_command', return_value='tor'
+                    ),
+                    patch(launcher, side_effect=OSError) as launch,
+                ):
+                    manager._launch_process()
+                config = launch.call_args.kwargs['config']
+                self.assertEqual(config['DataDirectory'], '"data #1"')
+                self.assertEqual(
+                    config['HiddenServiceDir'], r'"\303\274\042\134\012ControlPort 1"'
+                )
+
     def test_failed_launch_cleanup_retains_unconfirmed_process(self) -> None:
         """A failed PID write must not retry over an unconfirmed Tor process.
 

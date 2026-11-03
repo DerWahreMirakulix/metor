@@ -31,6 +31,21 @@ from metor.core.key import KeyManager
 from metor.core.tor_windows import launch_tor_without_console
 
 
+def _torrc_path(path: Path) -> str:
+    """Quote one filesystem path as an ASCII torrc value for either launcher.
+
+    Tor treats an unquoted hash as a comment. Octal escapes preserve control
+    characters and filesystem bytes even through Stem's Latin-1 stdin encoder.
+    """
+    escaped = ''.join(
+        chr(byte)
+        if 0x20 <= byte <= 0x7E and chr(byte) not in '"\\'
+        else f'\\{byte:03o}'
+        for byte in os.fsencode(path)
+    )
+    return f'"{escaped}"'
+
+
 def _is_windows() -> bool:
     """Returns whether the running host uses the Windows process model.
 
@@ -334,8 +349,8 @@ class TorManager:
             'SocksPort': str(self.socks_port),
             'ControlPort': str(self.control_port),
             'CookieAuthentication': '1',
-            'DataDirectory': str(data_dir),
-            'HiddenServiceDir': str(hs_dir),
+            'DataDirectory': _torrc_path(data_dir),
+            'HiddenServiceDir': _torrc_path(hs_dir),
             'HiddenServicePort': f'80 {Constants.LOCALHOST}:{self.incoming_port}',
         }
 
