@@ -14,11 +14,14 @@ os.environ['KIVY_NO_ARGS'] = '1'
 os.environ['KIVY_NO_FILELOG'] = '1'
 os.environ['KIVY_NO_CONFIG'] = '1'
 os.environ['MESA_SHADER_CACHE_DISABLE'] = 'true'
+if os.name == 'nt':
+    os.environ['KCFG_GRAPHICS_WINDOW_STATE'] = 'hidden'
 
 from kivy.config import Config
 
-Config.set('graphics', 'width', '720')
-Config.set('graphics', 'height', '1328')
+# Start smaller than the scaled minimum so SDL must resize the existing window.
+Config.set('graphics', 'width', '800')
+Config.set('graphics', 'height', '600')
 
 from kivy.clock import Clock
 from kivy.core.window import Window
@@ -37,8 +40,8 @@ from metor.utils import open_private_binary_file
 DEVICE = """schema_version = 1
 [display]
 adapter = 'simulator'
-width_px = 1280
-height_px = 720
+width_px = 1440
+height_px = 840
 rotation_deg = 90
 scale = 2
 [input]
@@ -62,7 +65,7 @@ def main() -> None:
         with open_private_binary_file(path) as target:
             target.write(DEVICE.encode('utf-8'))
         configuration = read_configuration(str(path), simulator=True)
-    assert configuration.logical_size == (360, 640)
+    assert configuration.logical_size == (420, 720)
     app = MetorApp(
         FrontendLaunchContext('Simulator', cast(FrontendHost, object())), configuration
     )
@@ -90,12 +93,12 @@ def main() -> None:
 
     def verify_window(_elapsed: float) -> None:
         """Require native pixels and logical controls to agree with the TOML."""
-        assert tuple(Window.size) == (720, 1328), tuple(Window.size)
+        assert tuple(Window.size) == (840, 1488), tuple(Window.size)
         assert dp(1) == configuration.scale
         assert Window.minimum_width == dp(Geometry.MIN_WIDTH)
         assert Window.minimum_height == dp(Geometry.MIN_HEIGHT + 24)
         assert app.shell is not None
-        assert tuple(app.shell.size) == (720, 1280), tuple(app.shell.size)
+        assert tuple(app.shell.size) == (840, 1440), tuple(app.shell.size)
         peer = app.shell._peer_panel
         assert peer is not None, (
             controller.state.route,
@@ -137,8 +140,13 @@ def main() -> None:
         """Fail a live native loop that did not complete the bounded checks."""
         raise AssertionError('Native device configuration acceptance timed out')
 
+    def after_first_frame(*_args: object) -> None:
+        """Let SDL apply its asynchronous native resize before inspecting the window."""
+        Window.unbind(on_flip=after_first_frame)
+        Clock.schedule_once(verify_window, 0)
+
     deadline = Clock.schedule_once(timed_out, ACCEPTANCE_SECONDS)
-    Clock.schedule_once(verify_window, 0.8)
+    Window.bind(on_flip=after_first_frame)
     with patch('metor.ui.gui.app.create_desktop_lifecycle_source', return_value=None):
         app.run()
     assert completed, 'Native device configuration acceptance did not complete'

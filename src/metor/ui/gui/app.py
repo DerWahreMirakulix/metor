@@ -122,10 +122,13 @@ class MetorApp(App):
         width, height = self.configuration.native_size
         if self.configuration.mode != 'desktop':
             Metrics.density = self.configuration.scale
-        self._set_window_minimum()
-        Window.size = self._window_units(
+        target_size = self._window_units(
             width, height + (dp(24) if self.controller.simulator else 0)
         )
+        # SDL can enlarge the drawable immediately when its minimum changes;
+        # system_size still describes the old window until the next resize event.
+        self._set_window_minimum()
+        Window.size = target_size
         root = BoxLayout(orientation='vertical')
         if self.controller.simulator:
             simulator_bar = BoxLayout(size_hint_y=None, height='24dp')
