@@ -90,15 +90,19 @@ def main() -> None:
     )
     controller.state.route = Route('V08', 'peer', Delivery.DROP)
     completed = False
+    window_size, content_size = (840, 1488), (840, 1440)
 
-    def verify_window(_elapsed: float) -> None:
-        """Require native pixels and logical controls to agree with the TOML."""
-        assert tuple(Window.size) == (840, 1488), tuple(Window.size)
+    def verify_window(_elapsed: float) -> bool:
+        """Wait for SDL and the shell to finish their asynchronous startup resize."""
+        if (
+            tuple(Window.size) != window_size
+            or app.shell is None
+            or tuple(app.shell.size) != content_size
+        ):
+            return True
         assert dp(1) == configuration.scale
         assert Window.minimum_width == dp(Geometry.MIN_WIDTH)
         assert Window.minimum_height == dp(Geometry.MIN_HEIGHT + 24)
-        assert app.shell is not None
-        assert tuple(app.shell.size) == (840, 1440), tuple(app.shell.size)
         peer = app.shell._peer_panel
         assert peer is not None, (
             controller.state.route,
@@ -112,6 +116,7 @@ def main() -> None:
         assert controller.client is None
         peer.composer.entry.focus = True
         Clock.schedule_once(verify_keyboard, 0.5)
+        return False
 
     def verify_keyboard(_elapsed: float) -> None:
         """Require declared touch input to dock a usable keyboard at scaled size."""
@@ -122,6 +127,8 @@ def main() -> None:
         keyboard = app.input_dock.keyboard
         assert app.input_dock.target is entry
         assert keyboard.height == dp(Geometry.KEYBOARD)
+        assert tuple(Window.size) == window_size
+        assert (app.shell.width, app.shell.height + keyboard.height) == content_size
         assert keyboard.width == Window.width
         assert entry.to_window(*entry.pos)[1] >= keyboard.top - 1
         assert app.root is not None
@@ -138,12 +145,15 @@ def main() -> None:
 
     def timed_out(_elapsed: float) -> None:
         """Fail a live native loop that did not complete the bounded checks."""
-        raise AssertionError('Native device configuration acceptance timed out')
+        shell_size = tuple(app.shell.size) if app.shell is not None else None
+        raise AssertionError(
+            f'Simulator timed out with window {tuple(Window.size)} and shell {shell_size}'
+        )
 
     def after_first_frame(*_args: object) -> None:
-        """Let SDL apply its asynchronous native resize before inspecting the window."""
+        """Begin observing geometry once Kivy has rendered the peer controls."""
         Window.unbind(on_flip=after_first_frame)
-        Clock.schedule_once(verify_window, 0)
+        Clock.schedule_interval(verify_window, 0)
 
     deadline = Clock.schedule_once(timed_out, ACCEPTANCE_SECONDS)
     Window.bind(on_flip=after_first_frame)
