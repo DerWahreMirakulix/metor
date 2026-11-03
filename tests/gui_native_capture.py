@@ -102,6 +102,32 @@ from metor.ui.gui.widgets.qr import ContactQr
 from metor.ui.gui.widgets.sheet import ActionSheet, confirm
 
 
+def assert_field_clipboard_privacy() -> None:
+    """Exercise selection and keyboard shortcuts without using the host clipboard."""
+    with (
+        patch('kivy.uix.textinput.Clipboard') as clipboard,
+        patch('kivy.uix.textinput.CutBuffer') as primary_selection,
+    ):
+        for field in (TextField(), SecretInput()):
+            Window.add_widget(field)
+            try:
+                field.focus = True
+                field.text = 'synthetic private input'
+                field.select_all()
+                Clock.tick()  # Flush Kivy's deferred primary-selection export.
+                for key in ('c', 'x'):
+                    Window.dispatch('on_key_down', ord(key), 0, key, ['ctrl'])
+                    Window.dispatch('on_key_up', ord(key), 0)
+                primary_selection.set_cutbuffer.assert_not_called()
+                clipboard.copy.assert_not_called()
+                assert field.text == 'synthetic private input'
+                field.delete_selection()
+                assert field.text == ''
+            finally:
+                field.focus = False
+                Window.remove_widget(field)
+
+
 def assert_qr_visible(app: MetorApp) -> None:
     """Checks the QR, centered address, copy action, and native viewport fit.
 
@@ -602,6 +628,9 @@ def main() -> None:
         touch=args.view == 'setting_keyboard',
         clipboard_own_address=True,
     )
+    if args.view == 'qr':
+        Metrics.density = config.scale
+        assert_field_clipboard_privacy()
     host = cast(FrontendHost, object())
     app = MetorApp(FrontendLaunchContext('Simulator', host), config)
     controller = app.controller

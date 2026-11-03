@@ -582,14 +582,17 @@ class TextField(TextInput):
             None
         """
 
-    def cut(self) -> None:
-        """Disables clipboard Cut while ordinary keyboard editing remains available.
+    def _cut(self, data: str) -> None:
+        """Block the shared Cut path used by Kivy's keyboard and selection menu.
 
         Args:
-            None
+            data: Selected field content.
         Returns:
             None
         """
+
+    def _update_cutbuffer(self, *_args: object) -> None:
+        """Keep native text selection local when a primary-selection provider exists."""
 
 
 class SecretInput(TextField):
