@@ -397,6 +397,7 @@ class TorLifecycleTests(unittest.TestCase):
                 manager._pm.config.get_int.return_value = 1
                 with (
                     patch('metor.core.tor._is_windows', return_value=windows),
+                    patch('metor.core.tor.locale.getencoding', return_value='cp1252'),
                     patch.object(
                         TorManager, '_resolve_tor_command', return_value='tor'
                     ),
@@ -406,8 +407,30 @@ class TorLifecycleTests(unittest.TestCase):
                 config = launch.call_args.kwargs['config']
                 self.assertEqual(config['DataDirectory'], '"data #1"')
                 self.assertEqual(
-                    config['HiddenServiceDir'], r'"\303\274\042\134\012ControlPort 1"'
+                    config['HiddenServiceDir'],
+                    r'"\374\042\134\012ControlPort 1"'
+                    if windows
+                    else r'"\303\274\042\134\012ControlPort 1"',
                 )
+
+    def test_unrepresentable_windows_directory_never_launches_tor(self) -> None:
+        """Tor must not create its service keys under a substituted path."""
+        manager = self._manager(None)
+        manager._pm.paths.get_hidden_service_dir.return_value = Path('service界')
+        with (
+            patch('metor.core.tor._is_windows', return_value=True),
+            patch('metor.core.tor.locale.getencoding', return_value='cp1252'),
+            patch('metor.core.tor.launch_tor_without_console') as launch,
+        ):
+            self.assertEqual(
+                manager._launch_process(),
+                (
+                    False,
+                    EventType.TOR_START_FAILED,
+                    {'error_code': RuntimeErrorCode.TOR_LAUNCH_FAILED},
+                ),
+            )
+        launch.assert_not_called()
 
     def test_failed_launch_cleanup_retains_unconfirmed_process(self) -> None:
         """A failed PID write must not retry over an unconfirmed Tor process.

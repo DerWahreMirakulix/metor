@@ -110,7 +110,7 @@ The wheel bundle is a **release artifact**, not a normal repository file. A plai
 
 ### 1. Install Tor
 
-- **Windows (Manual Security Install):** Download the [Tor Expert Bundle](https://www.torproject.org/download/tor/). Extract it and either set `METOR_TOR_PATH=C:\path\to\tor.exe` in your environment or a local `.env` file, or copy `tor.exe` into `C:\Users\YourName\.metor\tor.exe`. If `METOR_TOR_PATH` is unset, Metor first tries `tor.exe` from `PATH` and then falls back to `.metor\tor.exe`.
+- **Windows (Manual Security Install):** Download the [Tor Expert Bundle](https://www.torproject.org/download/tor/). Extract it and either set `METOR_TOR_PATH=C:\path\to\tor.exe` in your environment or a local `.env` file, or copy `tor.exe` into `C:\Users\YourName\.metor\tor.exe`. Without an override, Metor uses `tor.exe` in its data directory. Choose a profile data path that the Windows system code page can represent. Set `METOR_DATA_DIR_PARENT` before creating profiles if you need a different location.
 - **Linux (Debian/Ubuntu):** `sudo apt update && sudo apt install tor`
 - **Linux (Fedora):** `sudo dnf install tor`
 

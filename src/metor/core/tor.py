@@ -3,6 +3,7 @@ Module for managing the local Tor process, hidden services, and local proxies.
 Enforces strict socket timeouts, configurable network resilience, and Tor circuit rotations.
 """
 
+import locale
 import os
 import socket
 import subprocess
@@ -36,12 +37,20 @@ def _torrc_path(path: Path) -> str:
 
     Tor treats an unquoted hash as a comment. Octal escapes preserve control
     characters and filesystem bytes even through Stem's Latin-1 stdin encoder.
+    The Windows Tor Expert Bundle opens paths using the system ANSI code page.
     """
+    if _is_windows():
+        encoding = locale.getencoding()
+        encoded = str(path).encode(encoding)
+        if encoded.decode(encoding) != str(path):
+            raise UnicodeError('Tor cannot represent the profile directory.')
+    else:
+        encoded = os.fsencode(path)
     escaped = ''.join(
         chr(byte)
         if 0x20 <= byte <= 0x7E and chr(byte) not in '"\\'
         else f'\\{byte:03o}'
-        for byte in os.fsencode(path)
+        for byte in encoded
     )
     return f'"{escaped}"'
 
@@ -345,12 +354,21 @@ class TorManager:
 
         self._reserve_ports()
 
+        try:
+            tor_data_path = _torrc_path(data_dir)
+            tor_service_path = _torrc_path(hs_dir)
+        except UnicodeError:
+            return (
+                False,
+                EventType.TOR_START_FAILED,
+                {'error_code': RuntimeErrorCode.TOR_LAUNCH_FAILED},
+            )
         config: Dict[str, str] = {
             'SocksPort': str(self.socks_port),
             'ControlPort': str(self.control_port),
             'CookieAuthentication': '1',
-            'DataDirectory': _torrc_path(data_dir),
-            'HiddenServiceDir': _torrc_path(hs_dir),
+            'DataDirectory': tor_data_path,
+            'HiddenServiceDir': tor_service_path,
             'HiddenServicePort': f'80 {Constants.LOCALHOST}:{self.incoming_port}',
         }
 
