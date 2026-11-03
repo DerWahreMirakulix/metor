@@ -14,6 +14,7 @@ from metor.ui.gui.runtime.contacts import ContactIntent
 from metor.ui.gui.state import Route
 from metor.ui.gui.widgets import Action, ActionRow, Label, TextField
 from metor.ui.gui.widgets.context import ContextAction
+from metor.ui.gui.widgets.preview import BoundedLabel
 from metor.ui.gui.widgets.symbol import IconAction
 from metor.ui.gui.widgets.sheet import ActionSheet, confirm
 
@@ -52,6 +53,7 @@ class ContactListView(BoxLayout):
         )
         self.add_widget(header)
         self.search = TextField(
+            accessible_name='Search saved contacts',
             multiline=False,
             hint_text='Search saved contacts',
             size_hint_y=None,
@@ -65,7 +67,7 @@ class ContactListView(BoxLayout):
         self.rows.bind(minimum_height=self.rows.setter('height'))
         self.scroll.add_widget(self.rows)
         self.add_widget(self.scroll)
-        pages = ActionRow(spacing=dp(12))
+        self.pages = ActionRow(spacing=dp(12))
         self.previous = IconAction(
             'chevron-left', 'Previous contact page', partial(self.page, -1)
         )
@@ -74,14 +76,31 @@ class ContactListView(BoxLayout):
         )
         self.page_label = Label(role='support')
         for widget in (self.previous, self.page_label, self.next):
-            pages.add_widget(widget)
+            self.pages.add_widget(widget)
+        self.enter_contact = Action(
+            'Add contact' if self.route.view == 'V12' else 'Enter contact data',
+            self.open_form,
+            surface='live' if self.route.delivery is Delivery.LIVE else 'drop',
+            tone='onAccent',
+        )
         self.footer = BoxLayout(
             orientation='vertical', spacing=dp(12), size_hint_y=None, height=0
         )
         self.footer.bind(minimum_height=self.footer.setter('height'))
         self.add_widget(self.footer)
-        self.add_widget(pages)
         self.update()
+
+    def open_form(self, scan: bool = False) -> None:
+        """Open manual entry or the scanner with the invoking picker's send intent."""
+        self.controller.contacts.begin(
+            'save'
+            if self.route.view == 'V12'
+            else 'live'
+            if self.route.delivery is Delivery.LIVE
+            else 'drop',
+            scan=scan,
+        )
+        self.refresh()
 
     def go_back(self) -> None:
         """Cancels contact selection or returns to the invoking root presentation.
@@ -188,23 +207,6 @@ class ContactListView(BoxLayout):
             action()
             self.refresh()
 
-        def add(scan: bool = False) -> None:
-            """Preserves picker intent in the shared contact form.
-
-            Args:
-                scan: Whether to open the camera/manual fallback with the same form intent.
-            Returns:
-                None
-            """
-            controller.contacts.begin(
-                'save'
-                if self.route.view == 'V12'
-                else 'live'
-                if self.route.delivery is Delivery.LIVE
-                else 'drop',
-                scan=scan,
-            )
-
         def manage() -> None:
             """Enters selection with no automatically chosen peers.
 
@@ -226,13 +228,15 @@ class ContactListView(BoxLayout):
             body.add_widget(
                 Action(
                     'Add contact' if self.route.view == 'V12' else 'Enter contact data',
-                    lambda: run(add),
+                    lambda: run(self.open_form),
                 )
             )
             body.add_widget(
                 Action('My QR', lambda: run(lambda: controller.navigate(Route('V15'))))
             )
-            body.add_widget(Action('Scan QR', lambda: run(lambda: add(True))))
+            body.add_widget(
+                Action('Scan QR', lambda: run(partial(self.open_form, True)))
+            )
             if self.route.view == 'V12':
                 body.add_widget(Action('Manage contacts', lambda: run(manage)))
                 body.add_widget(
@@ -281,6 +285,12 @@ class ContactListView(BoxLayout):
             if self.route.delivery is Delivery.LIVE
             else 'New Drop'
         )
+        if maximum and self.pages.parent is None:
+            self.add_widget(self.pages)
+        elif not maximum and self.pages.parent is self:
+            if self.previous.focus or self.next.focus:
+                self.back.focus = True
+            self.remove_widget(self.pages)
         self.previous.disabled, self.next.disabled = (
             book.page == 0,
             book.page >= maximum,
@@ -338,7 +348,7 @@ class ContactListView(BoxLayout):
                     )
                 )
             action = ContextAction(
-                item.alias,
+                BoundedLabel(item.alias, role='button', max_lines=3),
                 activate,
                 context,
                 disabled=selecting and (book.pending or book.unknown),
@@ -388,7 +398,7 @@ class ContactListView(BoxLayout):
                 )
             )
             self.footer.add_widget(Action('Cancel selection', self.cancel))
+        else:
+            self.footer.add_widget(self.enter_contact)
         if book.unknown and not book.pending:
             self.footer.add_widget(Action('Check saved contacts', book.check))
-        if not self.footer.children:
-            self.footer.height = 0

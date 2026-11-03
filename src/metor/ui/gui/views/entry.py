@@ -2,17 +2,16 @@
 
 from collections.abc import Callable
 
-from kivy.metrics import dp
+from kivy.metrics import sp
 from kivy.uix.anchorlayout import AnchorLayout
-from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.scrollview import ScrollView
 
 from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.state import Route
 from metor.ui.gui.theme import color, font_path
-from metor.ui.gui.widgets import TextField, Action, Label, SecretInput
+from metor.ui.gui.widgets import Action, ActionRow, Label, SecretInput, TextField
 
 # Local Package Imports
+from .cover import PrivateForm
 from .profiles import profiles_body, lifecycle_body
 
 
@@ -25,49 +24,8 @@ def entry_view(controller: GuiController, refresh: Callable[[], None]) -> Anchor
     Returns:
         AnchorLayout: Centered scrollable authentication composition.
     """
-    outer = AnchorLayout(padding='24dp')
-    scroll = ScrollView(
-        size_hint=(None, None),
-        width='400dp',
-        do_scroll_x=False,
-        always_overscroll=False,
-    )
-
-    def fit_width(*_args: object) -> None:
-        """Keep the form inside its live, density-scaled horizontal padding.
-
-        Args:
-            _args: Native width or padding changes.
-        Returns:
-            None
-        """
-        scroll.width = max(
-            0, min(dp(400), outer.width - outer.padding[0] - outer.padding[2])
-        )
-
-    outer.bind(width=fit_width, padding=fit_width)
-    column = BoxLayout(
-        orientation='vertical', spacing='8dp', size_hint_y=None, padding=(0, '24dp')
-    )
-    column.bind(minimum_height=column.setter('height'))
-
-    def fit_cover(*_args: object) -> None:
-        """Centers a fitting cover and scrolls only when its controls overflow.
-
-        Args:
-            _args: Native layout changes.
-        Returns:
-            None
-        """
-        available = max(0, outer.height - outer.padding[1] - outer.padding[3])
-        scroll.height = min(column.minimum_height, available)
-        scroll.do_scroll_y = column.minimum_height > available
-
-    outer.bind(height=fit_cover, padding=fit_cover)
-    column.bind(minimum_height=fit_cover)
-    scroll.add_widget(column)
-    outer.add_widget(scroll)
-    column.add_widget(Label('Metor', role='hero'))
+    outer = PrivateForm()
+    column = outer.body
     prompt = controller.interactions.prompt
     state = controller.state
 
@@ -96,7 +54,7 @@ def entry_view(controller: GuiController, refresh: Callable[[], None]) -> Anchor
         refresh()
 
     if controller.native_lifecycle_failed:
-        column.add_widget(Label('Restart Metor', role='peer'))
+        column.add_widget(Label('Restart Metor', role='title'))
         column.add_widget(
             Label(
                 'Desktop security monitoring stopped. Close and restart Metor to continue safely.',
@@ -121,7 +79,7 @@ def entry_view(controller: GuiController, refresh: Callable[[], None]) -> Anchor
             refresh()
 
         if prompt.kind == 'start':
-            column.add_widget(Label('Start Metor?', role='peer'))
+            column.add_widget(Label('Start Metor?', role='title'))
             column.add_widget(
                 Label('Start the local service for this profile.', tone='textSecondary')
             )
@@ -142,7 +100,7 @@ def entry_view(controller: GuiController, refresh: Callable[[], None]) -> Anchor
                 'session_auth': 'Profile or session password',
             }[prompt.kind]
             title = 'Start local service' if start_session else 'Open profile'
-            column.add_widget(Label(title, role='peer'))
+            column.add_widget(Label(title, role='title'))
             if start_session:
                 column.add_widget(
                     Label(
@@ -179,19 +137,19 @@ def entry_view(controller: GuiController, refresh: Callable[[], None]) -> Anchor
     elif controller.lifecycle.active or controller.lifecycle.failed:
         lifecycle_body(controller, column)
     elif state.busy and state.route.view == 'V01':
-        column.add_widget(Label('Opening profile', role='peer'))
+        column.add_widget(Label('Opening profile', role='title'))
         column.add_widget(
             Label(state.status or 'Please wait…', role='support', tone='textSecondary')
         )
     elif state.route.view == 'V02':
-        column.add_widget(Label('Choose profile', role='peer'))
+        column.add_widget(Label('Choose profile', role='title'))
         profiles_body(controller, column, startup=True)
         column.add_widget(
             Action('New profile', lambda: navigate('V03'), disabled=state.busy)
         )
         column.add_widget(Action('Back', lambda: navigate('V01'), disabled=state.busy))
     elif state.route.view == 'V03':
-        column.add_widget(Label('New profile', role='peer'))
+        column.add_widget(Label('New profile', role='title'))
         column.add_widget(Label('Name', role='support'))
         name = TextField(
             accessible_name='Profile name',
@@ -211,7 +169,6 @@ def entry_view(controller: GuiController, refresh: Callable[[], None]) -> Anchor
         confirmation = SecretInput(accessible_name='Confirm password')
         column.add_widget(confirmation)
         error = Label('', role='support', tone='danger')
-        column.add_widget(error)
 
         def create() -> None:
             """Validates matching credentials then invokes encrypted creation.
@@ -226,21 +183,22 @@ def entry_view(controller: GuiController, refresh: Callable[[], None]) -> Anchor
                 or not password.text
                 or password.text != confirmation.text
             ):
+                if error.parent is None:
+                    column.add_widget(error, index=column.children.index(submit) + 1)
                 error.text = 'Enter a name and matching passwords.'
                 return
             if controller.create_profile(name.text.strip(), password.text):
                 password.text = confirmation.text = ''
                 refresh()
 
-        column.add_widget(
-            Action(
-                'Create profile',
-                create,
-                surface='drop',
-                tone='onAccent',
-                disabled=state.busy,
-            )
+        submit = Action(
+            'Create profile',
+            create,
+            surface='drop',
+            tone='onAccent',
+            disabled=state.busy,
         )
+        column.add_widget(submit)
         column.add_widget(Action('Back', lambda: navigate('V01'), disabled=state.busy))
     else:
         selected = (
@@ -251,7 +209,7 @@ def entry_view(controller: GuiController, refresh: Callable[[], None]) -> Anchor
             if controller.simulator
             else (selected.profile if selected is not None else 'Choose profile')
         )
-        column.add_widget(Label(profile_name, role='peer'))
+        column.add_widget(Label(profile_name, role='title'))
         column.add_widget(
             Action(
                 'Open profile',
@@ -261,17 +219,27 @@ def entry_view(controller: GuiController, refresh: Callable[[], None]) -> Anchor
                 disabled=state.busy,
             )
         )
-        column.add_widget(
+        alternatives = ActionRow(spacing='8dp')
+        alternatives.add_widget(
             Action('Switch profile', lambda: navigate('V02'), disabled=state.busy)
         )
-        column.add_widget(
+        alternatives.add_widget(
             Action('New profile', lambda: navigate('V03'), disabled=state.busy)
         )
+
+        def arrange(*_args: object) -> None:
+            """Stack the secondary choices before their short labels would wrap unevenly."""
+            alternatives.orientation = (
+                'vertical' if alternatives.width < sp(240) else 'horizontal'
+            )
+
+        alternatives.bind(width=arrange)
+        arrange()
+        column.add_widget(alternatives)
     if (
         state.status
         and not controller.native_lifecycle_failed
         and not (state.busy and state.route.view == 'V01' and prompt is None)
     ):
         column.add_widget(Label(state.status, role='support', tone='info'))
-    fit_cover()
     return outer

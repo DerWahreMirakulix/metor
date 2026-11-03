@@ -109,8 +109,24 @@ def settings_body(controller: GuiController, refresh: Callable[[], None]) -> Box
         Action('Audio settings', partial(show_audio_routes, controller, refresh))
     )
     body.add_widget(
-        Label('Metor application lock', role='support', tone='textSecondary')
+        SettingRow(
+            'Keyboard layout',
+            preferences.keyboard_layout.upper(),
+            'This profile · local software keyboard only',
+            lambda: save(
+                replace(
+                    preferences,
+                    keyboard_layout='qwertz'
+                    if preferences.keyboard_layout == 'qwerty'
+                    else 'qwerty',
+                )
+            ),
+            disabled=state.busy,
+        )
     )
+    if controller.device.power_available:
+        body.add_widget(Action('Power off', controller.device.open_power_menu))
+    body.add_widget(Label('Metor application lock', role='peer'))
 
     def lock() -> None:
         """Requests application restriction and immediately repaints the cover.
@@ -122,10 +138,6 @@ def settings_body(controller: GuiController, refresh: Callable[[], None]) -> Box
         """
         controller.security.lock()
         refresh()
-
-    body.add_widget(Action('Lock Metor', lock))
-    if controller.device.power_available:
-        body.add_widget(Action('Power off', controller.device.open_power_menu))
 
     def manage() -> None:
         """Opens protected lock-method management.
@@ -153,22 +165,6 @@ def settings_body(controller: GuiController, refresh: Callable[[], None]) -> Box
     profile_name_preference(controller, body, preferences, save)
     body.add_widget(
         SettingRow(
-            'Keyboard layout',
-            preferences.keyboard_layout.upper(),
-            'This profile · local software keyboard only',
-            lambda: save(
-                replace(
-                    preferences,
-                    keyboard_layout='qwertz'
-                    if preferences.keyboard_layout == 'qwerty'
-                    else 'qwerty',
-                )
-            ),
-            disabled=state.busy,
-        )
-    )
-    body.add_widget(
-        SettingRow(
             'Application timeout',
             str(preferences.idle_seconds) + ' s'
             if preferences.idle_seconds
@@ -178,6 +174,7 @@ def settings_body(controller: GuiController, refresh: Callable[[], None]) -> Box
             disabled=state.busy,
         )
     )
+    body.add_widget(Action('Lock Metor', lock))
     body.add_widget(Label('Profiles and Advanced', role='peer'))
     body.add_widget(Action('Profiles', lambda: controller.navigate(Route('V20'))))
     body.add_widget(Action('Advanced', lambda: controller.navigate(Route('V19'))))

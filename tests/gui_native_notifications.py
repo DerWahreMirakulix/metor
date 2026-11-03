@@ -206,13 +206,17 @@ def exercise_notification_actions(
         settled(inspect_pin)
 
     def inspect_pin() -> None:
-        """Keeps pin, unread badge and menu centered inside one conversation surface."""
+        """Keep the full name above its pinned status, beside the unread count and menu."""
         root = shell._root_panel
         assert root is not None
         row = root.rows[PEER]
-        assert row.pin.parent is row.group
-        assert abs(row.pin.center_y - row.more.center_y) <= dp(1)
-        assert row.pin.right <= row.more.x
+        assert row.pin.parent is row.metadata
+        assert abs(row.pin.center_y - row.detail.center_y) <= dp(1)
+        assert row.pin.right <= row.detail.x
+        assert not row.name.shorten and row.name.height >= row.name.texture_size[1]
+        assert row.name.y >= row.metadata.top - dp(1)
+        assert row.name.right <= row.badge.x
+        assert abs(row.badge.center_y - row.more.center_y) <= dp(1)
         assert row.badge.right <= row.more.x
         assert row.more.right <= row.action.right
         assert app.root is not None

@@ -1,7 +1,9 @@
 """Stable editable composer, held recording strip and exact-owner DROP/LIVE review."""
 
 from collections.abc import Callable
+from typing import cast
 
+from kivy.graphics import Canvas, Color, Line
 from kivy.metrics import dp, sp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.widget import Widget
@@ -52,6 +54,7 @@ class Composer(BoxLayout):
         )
         self.entry = TextField(
             accessible_name='Message',
+            framed=False,
             font_name=font_path(),
             font_size=sp(15),
             multiline=True,
@@ -63,6 +66,12 @@ class Composer(BoxLayout):
             hint_text='Message',
             padding=dp(8),
         )
+        with cast(Canvas, self.bar.canvas).after:
+            self._composer_edge = Color(*color('line'))
+            self._composer_outline = Line(width=dp(1))
+        self.bar.bind(pos=self._frame, size=self._frame)
+        self.entry.bind(focus=self._frame)
+        self._frame()
         self.entry.use_bubble = False
         self.entry.use_handles = False
         self.entry.bind(text=self._edit, on_text_validate=self._submit)
@@ -88,12 +97,16 @@ class Composer(BoxLayout):
             height=dp(200),
         )
         self.review.bind(minimum_height=self.review.setter('height'))
-        self.review_title = Label('Voice message · Unsent', role='support')
+        self.review_title = Label('Voice message · Unsent', role='row')
         self.review.add_widget(self.review_title)
+        playback_row = ActionRow(spacing=dp(12))
+        self.duration = Label(
+            '', role='support', tone='textSecondary', pos_hint={'center_y': 0.5}
+        )
+        playback_row.add_widget(self.duration)
         self.preview = Action('Play', self._play_review, disabled=True)
-        self.review.add_widget(self.preview)
-        self.duration = Label('', role='caption', tone='textSecondary')
-        self.review.add_widget(self.duration)
+        playback_row.add_widget(self.preview)
+        self.review.add_widget(playback_row)
         actions = ActionRow(spacing=dp(12))
         self.delete = Action(
             'Discard', lambda: self._review_action(False), tone='danger'
@@ -123,6 +136,17 @@ class Composer(BoxLayout):
             self._recheck,
         )
         self.pending_footer = PendingLiveFooter(controller, route, refresh)
+
+    def _frame(self, *_args: object) -> None:
+        """Show keyboard focus on the shared composer surface without resizing it."""
+        self._composer_edge.rgba = color('focus' if self.entry.focus else 'line')
+        self._composer_outline.rounded_rectangle = (
+            self.bar.x,
+            self.bar.y,
+            self.bar.width,
+            self.bar.height,
+            dp(16),
+        )
 
     def has_pending_footer(self) -> bool:
         """Reports ended-context work while preserving active recording ownership."""
@@ -370,7 +394,9 @@ class Composer(BoxLayout):
                     else 'Audio unavailable · Retry'
                 )
             self.duration.text = (
-                f'{(review.duration_ms or 0) / PcmVoice.MILLISECONDS:.1f} seconds'
+                f'{review.duration_ms / PcmVoice.MILLISECONDS:.1f} s'
+                if review.duration_ms is not None
+                else 'Duration unavailable'
             )
             blocked = (
                 state.covered or state.busy or review.unknown or voice.press.active
@@ -411,7 +437,7 @@ class Composer(BoxLayout):
                 if review.unknown
                 else 'Live chat ended. Reconnect or explicitly send as Drop.'
                 if is_live and not live_ready
-                else 'Play, send or discard this recording.'
+                else ''
             )
             if review.unknown and self.recheck.parent is None:
                 self.add_widget(self.recheck)

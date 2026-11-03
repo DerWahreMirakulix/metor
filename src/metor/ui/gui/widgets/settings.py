@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 
+from kivy.core.text import Label as TextMeasure
 from kivy.metrics import dp, sp
 from kivy.uix.boxlayout import BoxLayout
 
@@ -34,7 +35,8 @@ class SettingRow(Action):
         super().__init__(title, callback, surface='surface', tone='text', **kwargs)
         self.focus_key = ('setting', title)
         self.remove_widget(self.label)
-        self.padding = (dp(20), dp(16))
+        horizontal_padding, vertical_padding = dp(20), dp(16)
+        self.padding = (horizontal_padding, vertical_padding)
         self.spacing = dp(12)
         group = BoxLayout(
             orientation='vertical',
@@ -46,13 +48,13 @@ class SettingRow(Action):
         group.add_widget(Label(title, role='row'))
         group.add_widget(Label(scope, role='support', tone='textSecondary'))
         self.add_widget(group)
-        trailing = Label(value, role='support', tone='textSecondary')
-        trailing.size_hint_x = None
-        trailing.width = max(dp(64), sp(64))
-        trailing.halign = 'right'
+        trailing = Label(value, role='support')
         trailing.pos_hint = {'center_y': 0.5}
         self.add_widget(trailing)
         self.accessible_name = title + ': ' + value + '. ' + scope
+        natural_width = TextMeasure(
+            font_name=trailing.font_name, font_size=trailing.font_size
+        ).get_extents(value)[0] + dp(2)
 
         def measure(*_args: object) -> None:
             """Grows the whole row for measured wrapped title, help and value.
@@ -62,8 +64,24 @@ class SettingRow(Action):
             Returns:
                 None
             """
-            self.height = max(dp(76), group.height + dp(32), trailing.height + dp(32))
+            available = max(0, self.width - 2 * horizontal_padding)
+            value_width = min(natural_width, available * 0.4)
+            if available - value_width - dp(12) < sp(140):
+                self.orientation = 'vertical'
+                self.spacing = dp(6)
+                trailing.size_hint_x = 1
+                trailing.halign = 'left'
+                content_height = group.height + self.spacing + trailing.height
+            else:
+                self.orientation = 'horizontal'
+                self.spacing = dp(12)
+                trailing.size_hint_x = None
+                trailing.width = value_width
+                trailing.halign = 'right'
+                content_height = max(group.height, trailing.height)
+            self.height = max(dp(76), content_height + 2 * vertical_padding)
 
+        self.bind(width=measure)
         group.bind(height=measure)
         trailing.bind(height=measure)
         measure()

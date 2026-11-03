@@ -10,8 +10,10 @@ from kivy.uix.boxlayout import BoxLayout
 from metor.core.api import Delivery
 from metor.ui.gui.runtime import GuiController, ConversationRow
 from metor.ui.gui.state import Route
+from metor.ui.gui.theme import color
 from metor.ui.gui.widgets import Label, Panel
 from metor.ui.gui.widgets.context import ContextAction
+from metor.ui.gui.widgets.preview import BoundedLabel
 from metor.ui.gui.widgets.symbol import IconAction, Symbol
 
 # Local Package Imports
@@ -44,37 +46,45 @@ class RootRow(BoxLayout):
         context = partial(
             conversation_menu, controller, entry.peer, entry.delivery, refresh
         )
-        self.action = ContextAction(entry.label, self._open, context, surface='surface')
+        self.action = ContextAction('', self._open, context, surface='surface')
         self.action.padding = (dp(12), dp(16))
         self.action.remove_widget(self.action.label)
         self.action.focus_key = ('peer', entry.delivery.value, entry.peer)
-        self.group = BoxLayout(spacing=dp(12))
-        avatar = Panel(
+        self.group = BoxLayout(spacing=dp(8))
+        self.avatar = Panel(
             surface=entry.delivery.value + 'Surface',
             size_hint=(None, None),
-            width=dp(48),
-            height=dp(48),
+            width=dp(40),
+            height=dp(40),
             pos_hint={'center_y': 0.5},
         )
-        avatar._rectangle.radius = [dp(24)]
+        self.avatar._rectangle.radius = [self.avatar.width / 2]
         self.initials = Label('', role='row', tone=entry.delivery.value, wrap=False)
         self.initials.halign = 'center'
-        avatar.add_widget(self.initials)
-        self.group.add_widget(avatar)
-        column = BoxLayout(orientation='vertical', spacing=dp(3))
-        self.name_row = BoxLayout(size_hint_y=None, height=sp(22), spacing=dp(4))
-        self.name = Label('', role='row', wrap=False)
+        self.avatar.add_widget(self.initials)
+        self.group.add_widget(self.avatar)
+        column = BoxLayout(
+            orientation='vertical',
+            spacing=dp(3),
+            size_hint_y=None,
+            pos_hint={'center_y': 0.5},
+        )
+        column.bind(minimum_height=column.setter('height'))
+        self.name = BoundedLabel()
+        column.add_widget(self.name)
+        self.metadata = BoxLayout(size_hint_y=None, spacing=dp(4))
         self.pin = Symbol(
             'pin',
-            tone='drop',
+            tone=entry.delivery.value,
             size_hint=(None, None),
             size=(dp(24), dp(24)),
             pos_hint={'center_y': 0.5},
         )
-        self.name_row.add_widget(self.name)
-        column.add_widget(self.name_row)
-        self.detail = Label('', role='support', tone='textSecondary')
-        column.add_widget(self.detail)
+        self.detail = Label(
+            '', role='support', tone='textSecondary', pos_hint={'center_y': 0.5}
+        )
+        self.metadata.add_widget(self.detail)
+        column.add_widget(self.metadata)
         self.group.add_widget(column)
         self.count = Label('', role='caption', tone='onAccent', wrap=False)
         self.count.halign = 'center'
@@ -99,6 +109,7 @@ class RootRow(BoxLayout):
         more.focus_key = ('peer_more', entry.delivery.value, entry.peer)
         self.more = more
         self.group.add_widget(more)
+        self.name.bind(height=self._measure)
         self.detail.bind(height=self._measure)
         self.update(entry)
 
@@ -127,8 +138,11 @@ class RootRow(BoxLayout):
         Returns:
             None
         """
+        self.metadata.height = max(
+            self.detail.height, self.pin.height if self.pin.parent is not None else 0
+        )
         self.action.height = self.height = max(
-            dp(84), dp(35) + self.name_row.height + self.detail.height
+            dp(84), dp(35) + self.name.height + self.metadata.height
         )
 
     def update(self, entry: ConversationRow) -> None:
@@ -142,16 +156,14 @@ class RootRow(BoxLayout):
         if (entry.peer, entry.delivery) != (self.entry.peer, self.entry.delivery):
             raise ValueError('Conversation row identity changed')
         self.entry = entry
-        self.name.text = self.action.label.text = entry.label
+        self.name.full_text = entry.label
         self.initials.text = ''.join(
             word[0] for word in entry.label.split()[:2] if word
         ).upper()
         if entry.pinned and self.pin.parent is None:
-            self.group.add_widget(
-                self.pin, index=self.group.children.index(self.more) + 1
-            )
+            self.metadata.add_widget(self.pin, index=len(self.metadata.children))
         elif not entry.pinned and self.pin.parent is not None:
-            self.group.remove_widget(self.pin)
+            self.metadata.remove_widget(self.pin)
         status = (
             'New Drops'
             if entry.unseen and entry.delivery is Delivery.DROP
@@ -205,5 +217,8 @@ class RootRow(BoxLayout):
             ', open conversation' if selected else ''
         )
         self.action._feedback()
+        self.avatar._fill.rgba = color(
+            'background' if selected else self.avatar.surface
+        )
         self.more.surface = self.action.surface
         self.more._feedback()

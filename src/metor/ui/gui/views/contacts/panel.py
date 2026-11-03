@@ -81,19 +81,28 @@ def contact_sheet(
             )
         body.add_widget(
             Action(
-                call_label,
-                call,
-                disabled=controller.state.busy
-                or 'calls' not in controller.state.capabilities,
+                'Open Drop',
+                partial(selected, Delivery.DROP),
+                surface='dropSurface',
+                tone='drop',
             )
         )
-        body.add_widget(Action('Open Drop', partial(selected, Delivery.DROP)))
         body.add_widget(
             Action(
                 'Open active Live'
                 if controller.contacts.active(peer)
                 else 'Start Live',
                 partial(selected, Delivery.LIVE),
+                surface='liveSurface',
+                tone='live',
+            )
+        )
+        body.add_widget(
+            Action(
+                call_label,
+                call,
+                disabled=controller.state.busy
+                or 'calls' not in controller.state.capabilities,
             )
         )
 

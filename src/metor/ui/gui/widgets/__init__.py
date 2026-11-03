@@ -1,6 +1,7 @@
 """Reusable Kivy components implementing the approved native layout tokens."""
 
-from .controls import Action, Label, Panel, SecretInput, TextField
+from .controls import Action, Label, Panel
+from .fields import SecretInput, TextField
 from .layout import ActionRow
 from .settings import SettingRow
 from .tooltip import PointerTooltip

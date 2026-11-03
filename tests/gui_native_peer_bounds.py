@@ -220,7 +220,8 @@ class PeerBoundsHarness:
         assert peer.call is self.original_call
         if peer.width < dp(640):
             assert peer.header.expanded_title
-            assert peer.name.parent is peer.header
+            assert peer.name.parent is peer.header.name_viewport
+            assert peer.header.name_viewport.parent is peer.header
             assert peer.header.height < dp(220)
         self.capture('-long-keyboard')
         peer.header_viewport.scroll_to(peer.call, animate=False)

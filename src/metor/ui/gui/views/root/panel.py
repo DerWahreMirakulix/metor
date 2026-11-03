@@ -3,15 +3,17 @@
 from collections.abc import Callable
 from functools import partial
 
+from kivy.graphics import Color, RoundedRectangle
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.scrollview import ScrollView
 
 from metor.core.api import Delivery
-from metor.ui.gui.constants import GuiLimits
+from metor.ui.gui.constants import Geometry, GuiLimits
 from metor.ui.gui.runtime import GuiController, conversation_rows
 from metor.ui.gui.state import Route
-from metor.ui.gui.widgets import Action, ActionRow, Label
+from metor.ui.gui.theme import color
+from metor.ui.gui.widgets import Action, ActionRow, Label, Panel
 from metor.ui.gui.widgets.symbol import IconAction
 
 # Local Package Imports
@@ -43,20 +45,27 @@ class RootPanel(BoxLayout):
         self.rows: dict[str, RootRow] = {}
         state = controller.state
         self.delivery = state.root_delivery
-        header = BoxLayout(size_hint_y=None, height=dp(48), spacing=dp(8))
+        header = BoxLayout(
+            size_hint_y=None, height=dp(Geometry.TARGET + 8), spacing=dp(8)
+        )
         header.add_widget(Label('METOR', role='wordmark', wrap=False))
+        tools = Panel(size_hint_x=None, padding=dp(4), spacing=dp(4))
+        tools.bind(minimum_width=tools.setter('width'))
         self.header_actions: dict[str, IconAction] = {}
         for icon, title, view in (
-            ('bell', 'Notifications', 'V16'),
             ('users', 'Contacts', 'V12'),
             ('settings', 'Settings', 'V17'),
+            ('bell', 'Notifications', 'V16'),
         ):
-            action = IconAction(icon, title, partial(navigate, Route(view)))
+            action = IconAction(
+                icon, title, partial(navigate, Route(view)), surface='surface'
+            )
             action.focus_key = ('header', view)
             self.header_actions[view] = action
-            header.add_widget(action)
+            tools.add_widget(action)
             if view == 'V16':
                 self.notifications = action
+        header.add_widget(tools)
         self.add_widget(header)
         tabs = ActionRow(spacing=dp(4))
         self.tabs: dict[Delivery, Action] = {}
@@ -67,12 +76,26 @@ class RootPanel(BoxLayout):
                 surface=delivery.value + 'Surface'
                 if delivery is self.delivery
                 else 'surface',
-                tone=delivery.value,
+                tone=delivery.value if delivery is self.delivery else 'textSecondary',
             )
             action.focus_key = ('selector', delivery.value.upper())
             self.tabs[delivery] = action
             tabs.add_widget(action)
         Action.group(tuple(reversed(tabs.children)))
+        current_tab = self.tabs[self.delivery]
+        with current_tab.canvas.after:
+            Color(*color(self.delivery.value))
+            indicator = RoundedRectangle(size=(dp(20), dp(3)), radius=[dp(1.5)])
+
+        def position_indicator(*_args: object) -> None:
+            """Keep the current mode identifiable by shape as well as its accent."""
+            indicator.pos = (
+                current_tab.center_x - indicator.size[0] / 2,
+                current_tab.y + dp(4),
+            )
+
+        current_tab.bind(pos=position_indicator, size=position_indicator)
+        position_indicator()
         self.add_widget(tabs)
         self.scroll = ScrollView(do_scroll_x=False, always_overscroll=False)
         self.column = BoxLayout(
@@ -181,7 +204,7 @@ class RootPanel(BoxLayout):
         )
         for view, action in self.header_actions.items():
             selected = section == view
-            action.surface = 'dropSurface' if selected else 'raised'
+            action.surface = 'dropSurface' if selected else 'surface'
             action.accessible_name = (
                 'Notifications'
                 if view == 'V16'

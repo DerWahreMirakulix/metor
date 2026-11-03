@@ -46,6 +46,17 @@ def exercise_root_navigation(app: MetorApp, complete: Callable[[], None]) -> Non
 
     assert_overview('V06')
     root = shell._root_panel
+    contacts, settings, bell = (
+        root.header_actions[view] for view in ('V12', 'V17', 'V16')
+    )
+    for target in (contacts, settings, bell):
+        assert target.width >= dp(48) and target.height >= dp(48)
+    assert contacts.right < settings.x < settings.right < bell.x
+    tray = bell.parent
+    assert tray is not None
+    assert abs((contacts.x - tray.x) - (tray.right - bell.right)) <= dp(1)
+    assert abs((tray.top - bell.top) - (bell.y - tray.y)) <= dp(1)
+    assert abs(tray.right - root.new.right) <= dp(1)
     root.header_actions['V12'].dispatch('on_release')
     shell.render()
     assert state.route.view == 'V12' and shell._contacts_panel is not None
@@ -115,7 +126,7 @@ def exercise_root_navigation(app: MetorApp, complete: Callable[[], None]) -> Non
         assert settings.surface == 'dropSurface'
         assert 'current view' in settings.accessible_name
         assert not root.header_actions['V16'].focus
-        assert root.header_actions['V16'].surface == 'raised'
+        assert root.header_actions['V16'].surface == 'surface'
         assert root.tabs[Delivery.LIVE].surface == 'liveSurface'
         assert root.new.surface == 'live' and root.new._tone == 'onAccent'
         detail = shell._detail
@@ -210,7 +221,63 @@ def exercise_root_refresh(app: MetorApp, complete: Callable[[], None]) -> None:
     assert app.shell is not None
     controller = app.controller
     controller.state.root_pages[Delivery.DROP] = 0
+    snapshot = controller.state.snapshot
+    assert snapshot is not None
+    aliases = ('W' * 320, ('North Station Field Engineering ' * 11)[:320].rstrip())
+    examples = [
+        replace(summary, alias=alias)
+        for summary, alias in zip(snapshot.conversations[:2], aliases, strict=True)
+    ]
+    controller.state.snapshot = replace(
+        snapshot, conversations=examples + snapshot.conversations[2:]
+    )
     app.shell.render()
+
+    def check_previews(_elapsed: float) -> None:
+        """Long natural and unbroken names stay readable without displacing the list."""
+        root = app.shell._root_panel
+        ordinary = root.rows[snapshot.conversations[2].onion]
+        for sample in examples:
+            row = root.rows[sample.onion]
+            assert row.name.text.endswith('…') and sample.alias.startswith(
+                row.name.text[:-1]
+            )
+            assert row.name.height <= 3 * ordinary.name.height + 1
+            assert row.action.accessible_name.startswith(sample.alias)
+            assert row.action.label.text == ''
+        root.rows[examples[0].onion].action.dispatch('on_release')
+        app.shell.render()
+        after_layout(check_detail)
+
+    def check_detail(_elapsed: float) -> None:
+        """Opening the bounded list preview shows the original identity and its actions."""
+        panel = app.shell._peer_panel
+        assert panel is not None and panel.name.text == aliases[0]
+        viewport = panel.header_viewport
+        name_viewport = panel.header.name_viewport
+        assert name_viewport.do_scroll_y and name_viewport.scroll_y == 1
+        if app.shell.width < dp(960):
+            assert viewport.height <= 0.4 * panel.height + 1
+            assert panel.timeline.height >= max(viewport.height, 0.4 * panel.height)
+        bottom = viewport.to_window(viewport.x, viewport.y)[1]
+        for action in (panel.call, panel.more, panel.connect, panel.subtitle):
+            action_bottom = action.to_window(action.x, action.y)[1]
+            assert bottom - 1 <= action_bottom
+            assert action_bottom + action.height <= bottom + viewport.height + 1
+        name_viewport.scroll_y = 0
+        after_layout(check_name_end)
+
+    def check_name_end(_elapsed: float) -> None:
+        """Scrolling the title reveals its last line while retaining the timeline."""
+        panel = app.shell._peer_panel
+        name_viewport = panel.header.name_viewport
+        bottom = name_viewport.to_window(name_viewport.x, name_viewport.y)[1]
+        name_bottom = panel.name.to_window(panel.name.x, panel.name.y)[1]
+        assert abs(name_bottom - bottom) <= 1
+        controller.back()
+        controller.state.snapshot = snapshot
+        app.shell.render()
+        after_layout(scroll_older)
 
     def scroll_older(_elapsed: float) -> None:
         """Moves the native viewport before selecting a genuinely visible row.
@@ -249,7 +316,8 @@ def exercise_root_refresh(app: MetorApp, complete: Callable[[], None]) -> None:
             and widget.to_window(*widget.pos)[1] + widget.height
             <= bottom + scroll.height
         )
-        key, y = action.focus_key, action.to_window(*action.pos)[1]
+        # A renamed alias can wrap to more lines. Its reading origin is the top.
+        key, top = action.focus_key, action.to_window(action.x, action.top)[1]
         action.focus = True
         snapshot = controller.state.snapshot
         controller.state.snapshot = replace(
@@ -284,9 +352,10 @@ def exercise_root_refresh(app: MetorApp, complete: Callable[[], None]) -> None:
             )
             assert replacement.focus
             assert 'Renamed while focused' in replacement.accessible_name
-            assert abs(replacement.to_window(*replacement.pos)[1] - y) <= 1, (
-                y,
-                replacement.to_window(*replacement.pos)[1],
+            new_top = replacement.to_window(replacement.x, replacement.top)[1]
+            assert abs(new_top - top) <= 1, (
+                top,
+                new_top,
                 app.shell._root_panel.scroll.scroll_y,
             )
             assert controller.state.route.view == 'V06' and controller.client is None
@@ -294,4 +363,4 @@ def exercise_root_refresh(app: MetorApp, complete: Callable[[], None]) -> None:
 
         after_layout(verify)
 
-    after_layout(scroll_older)
+    after_layout(check_previews)

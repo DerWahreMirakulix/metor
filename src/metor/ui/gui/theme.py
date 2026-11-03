@@ -39,6 +39,7 @@ TYPE: dict[str, tuple[int, int, int]] = {
     'caption': (12, 16, 500),
     'meta': (11, 14, 500),
     'wordmark': (18, 22, 700),
+    'eyebrow': (13, 18, 700),
     'timer': (16, 22, 500),
 }
 

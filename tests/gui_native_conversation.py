@@ -46,7 +46,7 @@ from metor.core.api import (
     SendMessageCommand,
     TextContent,
 )
-from metor.ui.gui.constants import GuiLimits
+from metor.ui.gui.constants import Geometry, GuiLimits
 from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.state import Route
 from metor.ui.gui.state.mailbox import Update
@@ -452,10 +452,18 @@ class ConversationHarness(App):
             if isinstance(widget, MessageBubble)
             and widget._body.text == 'Enter sends one Drop'
         )
-        assert any(
-            isinstance(widget, Action) and widget.accessible_name == 'Message actions'
+        menu = next(
+            widget
             for widget in accepted.walk(restrict=True)
+            if isinstance(widget, IconAction)
+            and widget.accessible_name == 'Message actions'
         )
+        left, _, width, height = rectangle(menu)
+        assert min(width, height) >= dp(Geometry.TARGET) - GEOMETRY_TOLERANCE
+        for label in (accepted._body, accepted._metadata):
+            text_left, _, text_width, _ = rectangle(label)
+            assert text_left + text_width <= left + GEOMETRY_TOLERANCE
+        self.records['menu_target_clear_of_message_and_status'] = 'pass'
         entry.text = 'First line'
         entry.cursor = (len(entry.text), 0)
         Window.dispatch('on_key_down', 13, 40, '\r', ['shift'])

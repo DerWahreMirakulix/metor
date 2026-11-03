@@ -434,7 +434,25 @@ class Shell(BoxLayout):
             if self.keyboard_inset:
                 panel.padding[3] = dp(Geometry.KEYBOARD_GAP)
             if root:
-                panel.add_widget(Label('Choose a conversation', tone='textSecondary'))
+                empty = BoxLayout(
+                    orientation='vertical', size_hint_y=None, spacing=dp(6)
+                )
+                empty.bind(minimum_height=empty.setter('height'))
+                title = Label('Choose a conversation', role='peer')
+                title.halign = 'center'
+                hint = Label(
+                    'Use New Drop to message a saved contact.'
+                    if state.root_delivery is Delivery.DROP
+                    else 'Use Start Live to invite a saved contact.',
+                    role='support',
+                    tone='textSecondary',
+                )
+                hint.halign = 'center'
+                empty.add_widget(title)
+                empty.add_widget(hint)
+                center = AnchorLayout()
+                center.add_widget(empty)
+                panel.add_widget(center)
             elif state.route.view in ('V08', 'V09'):
                 self._peer_key = peer_key
                 self._peer_panel = self._peer_projections.current(wide=wide)

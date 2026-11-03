@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 
+from kivy.core.text import Label as CoreLabel
 from kivy.input.motionevent import MotionEvent
 from kivy.metrics import dp
 
@@ -10,6 +11,7 @@ from metor.ui.gui.runtime.voice import PressSource
 
 # Local Package Imports
 from .controls import Action
+from .symbol import Symbol
 
 
 class PttAction(Action):
@@ -30,7 +32,20 @@ class PttAction(Action):
         Returns:
             None
         """
-        super().__init__('Hold to talk', lambda: None, size_hint_x=None, width=dp(148))
+        super().__init__('Hold to talk', lambda: None, size_hint_x=None)
+        self.spacing = dp(4)
+        self.padding = [dp(8)] * 4
+        self._microphone = Symbol(
+            'mic',
+            size_hint=(None, None),
+            size=(dp(24), dp(24)),
+            pos_hint={'center_y': 0.5},
+        )
+        self.label.bind(
+            text=self._fit_width, font_size=self._fit_width, font_name=self._fit_width
+        )
+        self.bind(disabled=self._retone_microphone)
+        self._fit_width()
         self.controller = controller
         self.refresh = refresh
         self.unavailable = unavailable
@@ -38,6 +53,28 @@ class PttAction(Action):
         self._touch_identity: str | None = None
         self._key_identity: str | None = None
         self.bind(focus=self._focus_changed, parent=self._parent_changed)
+
+    def _fit_width(self, *_args: object) -> None:
+        """Reserve enough room for the label while keeping the message field usable."""
+        label = CoreLabel(
+            text=self.label.text,
+            font_name=self.label.font_name,
+            font_size=self.label.font_size,
+        )
+        text_width = label.render()[0] + self.padding[0] + self.padding[2]
+        with_icon = text_width + self._microphone.width + self.spacing
+        if with_icon <= dp(148):
+            if self._microphone.parent is None:
+                self.add_widget(self._microphone, index=len(self.children))
+            self.width = with_icon
+        else:
+            if self._microphone.parent is self:
+                self.remove_widget(self._microphone)
+            self.width = min(text_width, dp(148))
+
+    def _retone_microphone(self, *_args: object) -> None:
+        """Keep the glyph and its action label in the same enabled state."""
+        self._microphone.tone = 'textDisabled' if self.disabled else 'text'
 
     @property
     def held(self) -> bool:

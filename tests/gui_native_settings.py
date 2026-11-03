@@ -10,7 +10,8 @@ from kivy.clock import Clock
 from kivy.base import EventLoop
 from kivy.core.window import Window
 from kivy.input.providers.mouse import MouseMotionEvent
-from kivy.metrics import dp
+from kivy.metrics import Metrics, dp
+from kivy.core.text import Label as TextMeasure
 from kivy.uix.scrollview import ScrollView
 
 from metor.client.platform import (
@@ -175,6 +176,29 @@ def exercise_settings_loading(app: MetorApp, complete: Callable[[], None]) -> No
         )
         assert timeout.focus and '120 s' in timeout.accessible_name
         assert abs(scroll.scroll_y - 0.4) < 0.001
+        unlock = next(
+            row
+            for row in shell.walk()
+            if isinstance(row, SettingRow)
+            and row.focus_key == ('setting', 'Unlock method')
+        )
+        value = next(
+            label
+            for label in unlock.walk()
+            if isinstance(label, Label) and label.text == 'Profile password'
+        )
+        scope = next(
+            label
+            for label in unlock.walk()
+            if isinstance(label, Label) and label.text.startswith('This profile')
+        )
+        if unlock.width >= dp(520):
+            full_width = TextMeasure(
+                font_name=value.font_name, font_size=value.font_size
+            ).get_extents(value.text)[0]
+            assert value.x > scope.right and value.width >= full_width
+        if unlock.width <= dp(320) and Metrics.fontscale >= 1.5:
+            assert abs(value.x - scope.x) <= dp(1) and value.top <= scope.y
         timeout.focus = False
         complete()
 

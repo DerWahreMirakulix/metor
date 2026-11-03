@@ -27,7 +27,7 @@ from gui_native_action_lifetime import (
     verify_detached_action_input,
 )
 from metor.ui.gui.widgets.context import ContextAction
-from metor.ui.gui.widgets.controls import TextField
+from metor.ui.gui.widgets import Action, TextField
 from metor.ui.gui.widgets.symbol import IconAction
 from metor.client import FrontendLaunchContext, FrontendProfileState
 from metor.core.api import (
@@ -49,7 +49,6 @@ from metor.ui.gui.views.peer import PeerView
 from metor.ui.gui.state import Route
 from metor.ui.gui.runtime.voice.models import VoiceReview
 from metor.ui.gui.runtime.voice.press import CaptureBinding
-from metor.ui.gui.widgets.controls import Action
 
 
 class GestureHarness(App):

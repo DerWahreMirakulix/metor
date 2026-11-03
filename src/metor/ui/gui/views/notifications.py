@@ -11,10 +11,11 @@ from kivy.uix.scrollview import ScrollView
 
 from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.state.notifications import Notice, NoticeKind
-from metor.ui.gui.widgets import Action, ActionRow, Label
+from metor.ui.gui.widgets import Action, ActionRow, Label, Panel
 from metor.ui.gui.widgets.sheet import ActionSheet
 from metor.ui.gui.widgets.symbol import IconAction
 from metor.ui.gui.widgets.context import ContextAction
+from metor.ui.gui.widgets.preview import BoundedLabel
 
 
 TITLES: dict[NoticeKind, str] = {
@@ -98,7 +99,19 @@ def notification_center(
     scroll.add_widget(body)
     panel.add_widget(scroll)
     if not store.items:
-        body.add_widget(Label('No notifications', role='peer'))
+        empty = Panel(
+            orientation='vertical', size_hint_y=None, padding=dp(16), spacing=dp(4)
+        )
+        empty.bind(minimum_height=empty.setter('height'))
+        empty.add_widget(Label('No notifications', role='row'))
+        empty.add_widget(
+            Label(
+                'New Drops and Live activity appear here.',
+                role='support',
+                tone='textSecondary',
+            )
+        )
+        body.add_widget(empty)
     for notice in reversed(tuple(store.items.values())):
         body.add_widget(notice_row(controller, notice, refresh))
     if store.selecting:
@@ -163,15 +176,15 @@ def notice_row(
     )
     action.focus_key = ('notice', key[0].value, key[1])
     action.height = dp(88)
-    action.padding = (dp(16), dp(16), dp(16), dp(18))
+    action.padding = dp(16)
     action.remove_widget(action.label)
     group = BoxLayout(spacing=dp(8))
     column = BoxLayout(orientation='vertical', spacing=dp(8))
-    top = BoxLayout(size_hint_y=None, height=dp(28), spacing=dp(8))
     kind = Label(TITLES[notice.kind], role='row')
-    top.add_widget(kind)
+    column.add_widget(kind)
+    time_text = datetime.fromtimestamp(notice.created_at).strftime('%H:%M')
     stamp = Label(
-        datetime.fromtimestamp(notice.created_at).strftime('%H:%M'),
+        f'×{notice.count} · {time_text}' if notice.count > 1 else time_text,
         role='meta',
         tone='textSecondary',
         wrap=False,
@@ -180,24 +193,22 @@ def notice_row(
     measure_stamp = TextMeasure(
         text=stamp.text, font_name=stamp.font_name, font_size=stamp.font_size
     )
-    measure_stamp.refresh()
-    stamp.width = max(dp(40), measure_stamp.texture.size[0] + dp(2))
+    stamp.width = max(dp(40), measure_stamp.get_extents(stamp.text)[0] + dp(2))
     stamp.shorten = False
-    top.add_widget(stamp)
-    column.add_widget(top)
-    summary = controller.contacts.alias(notice.peer)
-    if notice.count > 1:
-        summary += f' · {notice.count}'
-    summary_label = Label(summary, role='support', tone='textSecondary')
+    alias = controller.contacts.alias(notice.peer)
+    summary_label = BoundedLabel(
+        alias, role='support', tone='textSecondary', max_lines=2
+    )
     summary_row = BoxLayout(size_hint_y=None, height=dp(18), spacing=dp(8))
     summary_row.add_widget(summary_label)
-    summary_label.bind(
-        height=lambda _widget, height: setattr(
-            summary_row, 'height', max(dp(18), height)
-        )
-    )
+    stamp.pos_hint = {'center_y': 0.5}
+    stamp.halign = 'right'
+    summary_row.add_widget(stamp)
+    summary_row.bind(minimum_height=summary_row.setter('height'))
     column.add_widget(summary_row)
-    action.accessible_name = TITLES[notice.kind] + ': ' + summary
+    action.accessible_name = TITLES[notice.kind] + ': ' + alias
+    if notice.count > 1:
+        action.accessible_name += f' · {notice.count}'
     group.add_widget(column)
     action.add_widget(group)
 
@@ -210,13 +221,12 @@ def notice_row(
         Returns:
             None
         """
-        top.height = max(dp(28), kind.height)
         action.height = row.height = max(
-            dp(88), dp(16 + 8 + 18) + top.height + summary_label.height
+            dp(88), dp(16 + 8 + 16) + kind.height + summary_row.height
         )
 
     kind.bind(height=measure)
-    summary_label.bind(height=measure)
+    summary_row.bind(height=measure)
     measure()
     row.add_widget(action)
     if store.selecting:

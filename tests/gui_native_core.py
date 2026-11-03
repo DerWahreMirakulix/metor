@@ -363,6 +363,11 @@ class NativeCoreApp(MetorApp):
                 and (
                     item.accessible_name == name
                     or item.accessible_name.startswith(name + ', ')
+                    or (
+                        item.focus_key[:1] in (('peer',), ('contact',))
+                        and item.focus_key[-1] == self.target
+                        and item.accessible_name.startswith(name + ': ')
+                    )
                     or item.label.text == name
                 )
                 and item.get_root_window() is not None

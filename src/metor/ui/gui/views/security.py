@@ -2,17 +2,17 @@
 
 from collections.abc import Callable
 
-from kivy.metrics import dp
 from kivy.uix.anchorlayout import AnchorLayout
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.gridlayout import GridLayout
-from kivy.uix.scrollview import ScrollView
 
 from metor.core.api import ClientUnlockMethod, NotificationPrivacy, Delivery
-from metor.ui.gui.constants import Geometry
 from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.state import Route
 from metor.ui.gui.widgets import Action, Label, SecretInput
+
+# Local Package Imports
+from .cover import PrivateForm
 
 
 class LockedActivity(Action):
@@ -88,56 +88,11 @@ def security_view(
     Returns:
         AnchorLayout: Centered, measured private form.
     """
-    outer = AnchorLayout(padding=f'{Geometry.EDGE}dp')
-    scroll = ScrollView(
-        size_hint=(None, None),
-        width=f'{Geometry.FORM_MAX}dp',
-        do_scroll_x=False,
-        always_overscroll=False,
-    )
-
-    def fit_width(*_args: object) -> None:
-        """Keep the lock form within live, density-scaled cover insets.
-
-        Args:
-            _args: Native width or padding changes.
-        Returns:
-            None
-        """
-        scroll.width = max(
-            0,
-            min(
-                dp(Geometry.FORM_MAX),
-                outer.width - outer.padding[0] - outer.padding[2],
-            ),
-        )
-
-    outer.bind(width=fit_width, padding=fit_width)
-    body = BoxLayout(
-        orientation='vertical', spacing='8dp', size_hint_y=None, padding=(0, '24dp')
-    )
-    body.bind(minimum_height=body.setter('height'))
-
-    def fit_cover(*_args: object) -> None:
-        """Keeps a fitting lock form fixed while allowing overflow to remain reachable.
-
-        Args:
-            _args: Native layout or notification changes.
-        Returns:
-            None
-        """
-        available = max(0, outer.height - outer.padding[1] - outer.padding[3])
-        scroll.height = min(body.minimum_height, available)
-        scroll.do_scroll_y = body.minimum_height > available
-
-    outer.bind(height=fit_cover, padding=fit_cover)
-    body.bind(minimum_height=fit_cover)
-    scroll.add_widget(body)
-    outer.add_widget(scroll)
-    body.add_widget(Label('Metor', role='hero'))
+    outer = PrivateForm()
+    body = outer.body
     state, security = controller.state, controller.security
     if state.route.view == 'V05':
-        body.add_widget(Label('Locked', role='peer'))
+        body.add_widget(Label('Locked', role='title'))
         body.add_widget(LockedActivity(controller, refresh))
         if security.profile_label:
             body.add_widget(Label(security.profile_label, role='support'))
@@ -181,8 +136,8 @@ def security_view(
                     cols=3,
                     spacing='8dp',
                     size_hint_y=None,
-                    height=f'{Geometry.TARGET * 4 + 8 * 3}dp',
                 )
+                keypad.bind(minimum_height=keypad.setter('height'))
                 for key in (
                     '1',
                     '2',
@@ -213,7 +168,15 @@ def security_view(
                         else:
                             secret.insert_text(value)
 
-                    keypad.add_widget(Action(key, press, disabled=state.busy))
+                    button = Action(
+                        key,
+                        press,
+                        surface='drop' if key == 'Unlock' else 'raised',
+                        tone='onAccent' if key == 'Unlock' else 'text',
+                        disabled=state.busy,
+                    )
+                    button.padding = ('4dp', '8dp')
+                    keypad.add_widget(button)
                 body.add_widget(keypad)
 
                 def forgot_pin() -> None:
@@ -245,7 +208,7 @@ def security_view(
                     )
                 )
     else:
-        body.add_widget(Label('Secure Metor', role='peer'))
+        body.add_widget(Label('Secure Metor', role='title'))
         body.add_widget(
             Label(
                 'Choose how to unlock this application. Opening an encrypted profile still requires its password.',
@@ -293,7 +256,7 @@ def security_view(
                 None
             """
             body.clear_widgets()
-            body.add_widget(Label('Set PIN', role='hero'))
+            body.add_widget(Label('Set PIN', role='title'))
             body.add_widget(Label('New PIN', role='support'))
             body.add_widget(pin)
             body.add_widget(Label('Confirm PIN', role='support'))
@@ -379,5 +342,4 @@ def security_view(
         )
     if state.status:
         body.add_widget(Label(state.status, role='support', tone='info'))
-    fit_cover()
     return outer

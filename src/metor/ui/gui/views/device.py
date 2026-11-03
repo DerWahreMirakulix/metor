@@ -2,15 +2,18 @@
 
 from collections.abc import Callable
 
+from kivy.graphics import Color, RoundedRectangle
 from kivy.metrics import dp
 from kivy.uix.anchorlayout import AnchorLayout
-from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.scrollview import ScrollView
+from kivy.uix.widget import Widget
 
-from metor.ui.gui.constants import Geometry
 from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.runtime.device import DevicePhase
+from metor.ui.gui.theme import color
 from metor.ui.gui.widgets import Action, Label
+
+# Local Package Imports
+from .cover import PrivateForm
 
 
 def device_view(controller: GuiController, refresh: Callable[[], None]) -> AnchorLayout:
@@ -23,37 +26,33 @@ def device_view(controller: GuiController, refresh: Callable[[], None]) -> Ancho
         AnchorLayout: Full-application covered surface.
     """
     device = controller.device
-    wrapper = AnchorLayout(padding=f'{Geometry.EDGE}dp')
-    scroll = ScrollView(do_scroll_x=False, always_overscroll=False, size_hint_x=None)
-
-    def fit_width(*_args: object) -> None:
-        """Keep device controls inside the current density-scaled insets.
-
-        Args:
-            _args: Native width or padding changes.
-        Returns:
-            None
-        """
-        scroll.width = max(
-            0,
-            min(
-                dp(Geometry.FORM_MAX),
-                wrapper.width - wrapper.padding[0] - wrapper.padding[2],
-            ),
-        )
-
-    wrapper.bind(width=fit_width, padding=fit_width)
-    body = BoxLayout(orientation='vertical', size_hint_y=None, spacing='16dp')
-    body.bind(minimum_height=body.setter('height'))
+    wrapper = PrivateForm()
+    body = wrapper.body
     body.add_widget(Label(device.title, role='title'))
     body.add_widget(Label(device.detail, tone='textSecondary'))
     if device.phase is DevicePhase.PURGE_ARMING:
+        progress = max(0.0, min(device.progress, 1.0))
         body.add_widget(
             Label(
-                f'Hold progress · {round(device.progress * 100)}%',
-                role='peer',
+                f'Hold progress · {round(progress * 100)}%',
+                role='support',
             )
         )
+        track = Widget(size_hint_y=None, height=dp(6))
+        with track.canvas:
+            Color(*color('raised'))
+            rail = RoundedRectangle(radius=[dp(3)])
+            Color(*color('danger'))
+            fill = RoundedRectangle(radius=[dp(3)])
+
+        def place(*_args: object) -> None:
+            """Draw only the hold time reported by the device controller."""
+            rail.pos, rail.size = track.pos, track.size
+            fill.pos, fill.size = track.pos, (track.width * progress, track.height)
+
+        track.bind(pos=place, size=place)
+        place()
+        body.add_widget(track)
     elif device.phase in {DevicePhase.POWER_MENU, DevicePhase.POWER_FAILED}:
 
         def poweroff() -> None:
@@ -87,6 +86,4 @@ def device_view(controller: GuiController, refresh: Callable[[], None]) -> Ancho
             )
         )
         body.add_widget(Action('Cancel', cancel, disabled=controller.state.busy))
-    scroll.add_widget(body)
-    wrapper.add_widget(scroll)
     return wrapper

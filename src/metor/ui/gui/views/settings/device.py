@@ -16,8 +16,9 @@ from metor.client.platform import (
 )
 from metor.ui.gui.constants import GuiLimits
 from metor.ui.gui.runtime import GuiController
-from metor.ui.gui.widgets import Action, Label, SettingRow, TextField
+from metor.ui.gui.widgets import Action, ActionRow, Label, SettingRow, TextField
 from metor.ui.gui.widgets.sheet import ActionSheet
+from metor.ui.gui.widgets.symbol import IconAction
 
 
 def _value_text(
@@ -151,7 +152,19 @@ def device_settings_group(
     settings = controller.device.settings
     if not settings.available:
         return
-    body.add_widget(Label('Hardware settings', role='peer'))
+    header = ActionRow()
+    header.add_widget(
+        Label('Hardware settings', role='row', pos_hint={'center_y': 0.5})
+    )
+    header.add_widget(
+        IconAction(
+            'refresh-cw',
+            'Reload device settings',
+            settings.refresh,
+            disabled=settings.pending,
+        )
+    )
+    body.add_widget(header)
     if not settings.loaded:
         body.add_widget(Label('Loading device settings…', role='support'))
         settings.refresh()
@@ -177,6 +190,3 @@ def device_settings_group(
         )
     if settings.feedback:
         body.add_widget(Label(settings.feedback, role='support', tone='info'))
-    body.add_widget(
-        Action('Reload device settings', settings.refresh, disabled=settings.pending)
-    )

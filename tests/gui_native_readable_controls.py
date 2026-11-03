@@ -138,9 +138,10 @@ class ReadableControlHarness(App):
         assert self.header.call.accessible_name == 'Open call controls'
         assert self.header.call.label.parent is self.header.call
         if self.header.expanded_title:
-            assert self.header.name.parent is self.header
+            assert self.header.name.parent is self.header.name_viewport
+            assert self.header.name_viewport.parent is self.header
             assert self.header.call.parent is self.header.more.parent
-            assert self.header.name.y >= self.header.title_row.top
+            assert self.header.name_viewport.y >= self.header.title_row.top
         else:
             assert (
                 self.header.name.parent

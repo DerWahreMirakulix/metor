@@ -32,6 +32,9 @@ def configure_contact_pages(controller: GuiController) -> None:
         ContactEntry('Person ' + str(index).zfill(3), address(index))
         for index in range(130)
     ]
+    controller.state.snapshot.contacts[-1] = ContactEntry(
+        'Person 129 ' + 'W' * 320, address(129)
+    )
 
 
 def exercise_contact_pages(app: MetorApp, complete: Callable[[], None]) -> None:
@@ -46,7 +49,8 @@ def exercise_contact_pages(app: MetorApp, complete: Callable[[], None]) -> None:
     view = app.shell._contacts_panel
     assert view is not None
     assert len(view._rows) == 64
-    assert view.footer.height == 0
+    assert view.enter_contact.parent is view.footer
+    assert view.pages.parent is view
     assert abs(view.next.y - view.y) < dp(1)
     original_search = view.search
     first = view._rows[address(0)]
@@ -98,8 +102,23 @@ def exercise_contact_pages(app: MetorApp, complete: Callable[[], None]) -> None:
         assert current.footer.height > 0
         assert app.controller.client is None
         current.cancel()
-        assert current.footer.height == 0
+        assert current.enter_contact.parent is current.footer
         assert abs(current.next.y - current.y) < dp(1)
+        current.previous.focus = True
+        current.search.text = 'Person 129'
+        assert (
+            current.pages.parent is None
+            and current.enter_contact.parent is current.footer
+        )
+        assert current.back.focus
+        last = current._rows[address(129)]
+        assert last.label.text.endswith('…')
+        assert last.accessible_name.startswith(state.snapshot.contacts[-1].alias + ': ')
+        current.search.text = 'Person'
+        assert current.pages.parent is current
+        current.page(1)
+        current.page(1)
+        assert current.page_label.text == '3 / 3'
         current.more()
         sheet = ActionSheet.current
         assert sheet is not None

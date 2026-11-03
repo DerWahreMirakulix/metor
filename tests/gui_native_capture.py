@@ -12,6 +12,7 @@ import string
 import time
 from collections.abc import Callable
 from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 from typing import cast
 from unittest.mock import Mock, patch
@@ -58,6 +59,7 @@ from gui_native_timeout import exercise_timeout
 from kivy.clock import Clock
 from kivy.core.clipboard import Clipboard
 from kivy.core.clipboard.clipboard_dummy import ClipboardDummy
+from kivy.core.text import Label as TextMeasure
 from kivy.core.window import Window
 from kivy.graphics import Rectangle
 from kivy.input.providers.mouse import MouseMotionEvent
@@ -774,6 +776,12 @@ def main() -> None:
         controller.state.route = Route(
             'V08' if delivery is Delivery.DROP else 'V09', 'rhea', delivery
         )
+        sent_at = (
+            datetime.now()
+            .astimezone()
+            .replace(hour=18, minute=42, second=0, microsecond=0)
+            .isoformat()
+        )
         controller.messages = MessagesDataEvent(
             [
                 MessageEntry(
@@ -781,7 +789,7 @@ def main() -> None:
                     MessageStatusCode.READ,
                     delivery,
                     TextContent('I can hear you.'),
-                    '18:42',
+                    sent_at,
                     'one',
                 ),
                 MessageEntry(
@@ -789,7 +797,7 @@ def main() -> None:
                     MessageStatusCode.DELIVERED,
                     delivery,
                     TextContent('Ready. Let me know when you reach the meeting point.'),
-                    '18:42',
+                    sent_at,
                     'two',
                 ),
             ],
@@ -1152,6 +1160,28 @@ def main() -> None:
                 widget for widget in app.shell.walk() if isinstance(widget, ScrollView)
             ]
             assert len(covers) == 1 and not covers[0].do_scroll_y
+        if args.view in {'entry', 'lock', 'locked_notice'}:
+            names = (
+                {'Switch profile', 'New profile'}
+                if args.view == 'entry'
+                else {'Unlock'}
+            )
+            choices = [
+                widget
+                for widget in app.shell.walk()
+                if isinstance(widget, Action) and widget.accessible_name in names
+            ]
+            assert len(choices) == len(names)
+            for choice in choices:
+                label = choice.label
+                text_width, _ = TextMeasure(
+                    font_name=label.font_name, font_size=label.font_size
+                ).get_extents(label.text)
+                assert text_width <= label.width + 1, (
+                    label.text,
+                    label.width,
+                    text_width,
+                )
         if args.view == 'entry_loading':
             assert any(
                 getattr(widget, 'text', '') == 'Opening profile'

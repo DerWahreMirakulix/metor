@@ -419,6 +419,16 @@
       "path": "icons/phone-native.svg",
       "source": "icons/phone.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
       "sha256": "2a6e39407165fcd445dcf292e3e74e6630652c4444d8a44b896e8a45631d1db1"
+    },
+    {
+      "path": "icons/symbols.png",
+      "source": "icons/*-native.svg via scripts/render_gui_symbols.py",
+      "sha256": "390db92dcdf0cc46a2423721c73537d45cb5aee5ec7447ec7f753fc5186285f0"
+    },
+    {
+      "path": "icons/symbols.atlas",
+      "source": "icons/*-native.svg via scripts/render_gui_symbols.py",
+      "sha256": "51cd860c1d60604edb0d08697771665561fd2c0cdf4726a8dca85a639455651a"
     }
   ]
 }

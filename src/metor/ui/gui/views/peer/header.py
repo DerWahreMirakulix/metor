@@ -2,17 +2,21 @@
 
 from collections.abc import Callable
 from functools import partial
+from typing import cast
 
 from kivy.clock import Clock
 from kivy.core.text import Label as CoreLabel
+from kivy.graphics import Canvas, Color, Rectangle
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.scrollview import ScrollView
 from kivy.uix.widget import Widget
 
 from metor.core.api import CallState, Delivery
 from metor.ui.gui.constants import Geometry
 from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.state import Route
+from metor.ui.gui.theme import color
 from metor.ui.gui.widgets import ActionRow, Label
 from metor.ui.gui.widgets.symbol import IconAction
 
@@ -53,10 +57,7 @@ class LiveHeaderAction(IconAction):
                 font_name=self.label.font_name,
                 font_size=self.label.font_size,
             )
-            measured.refresh()
-            self._text_width = max(
-                dp(Geometry.TARGET), measured.texture.size[0] + dp(24)
-            )
+            self._text_width = max(dp(Geometry.TARGET), measured.render()[0] + dp(24))
             self._measurement = key
         show_text = available_width >= dp(Geometry.TARGET)
         if show_text != self._show_text:
@@ -83,16 +84,36 @@ class PeerHeader(BoxLayout):
         end: Callable[[int | None, str | None], object],
     ) -> None:
         """Keeps Call and More beside the contact while connection state has its own row."""
-        super().__init__(orientation='vertical', size_hint_y=None, spacing=dp(8))
+        super().__init__(
+            orientation='vertical',
+            size_hint_y=None,
+            spacing=dp(8),
+            padding=(0, 0, 0, dp(8)),
+        )
         self.controller, self.route = controller, route
         self._end_callback = end
+        with cast(Canvas, self.canvas).before:
+            Color(*color('line'))
+            self._divider = Rectangle(pos=self.pos, size=(self.width, dp(1)))
+        self.bind(pos=self._place_divider, size=self._place_divider)
         self.bind(minimum_height=self.setter('height'))
         title_row = ActionRow(spacing=dp(8))
         self.title_row = title_row
         title_row.add_widget(
-            IconAction('chevron-left', 'Back', back, pos_hint={'center_y': 0.5})
+            IconAction(
+                'chevron-left',
+                'Back',
+                back,
+                surface='background',
+                pos_hint={'center_y': 0.5},
+            )
         )
         self.name = Label('', role='peer', pos_hint={'center_y': 0.5})
+        self.name_viewport = ScrollView(
+            size_hint_y=None, do_scroll_x=False, always_overscroll=False
+        )
+        self._title_line_height = self.name.font_size
+        self.name.bind(height=self._fit_expanded_name, text=self._reset_name_scroll)
         self._name_space = Widget()
         self.expanded_title = False
         self._expanded_next = False
@@ -101,14 +122,18 @@ class PeerHeader(BoxLayout):
         title_row.add_widget(self.name)
         self.call = LiveHeaderAction('In call', 'phone', call)
         self.more = IconAction(
-            'ellipsis', 'Conversation actions', more, pos_hint={'center_y': 0.5}
+            'ellipsis',
+            'Conversation actions',
+            more,
+            surface='background',
+            pos_hint={'center_y': 0.5},
         )
         title_row.add_widget(self.call)
         title_row.add_widget(self.more)
         self.add_widget(title_row)
         self.controls = ActionRow(spacing=dp(12))
         self.subtitle = Label(
-            '', role='caption', tone='textSecondary', pos_hint={'center_y': 0.5}
+            '', role='support', tone='textSecondary', pos_hint={'center_y': 0.5}
         )
         self.controls.add_widget(self.subtitle)
         self.live_slot = BoxLayout(
@@ -135,15 +160,30 @@ class PeerHeader(BoxLayout):
             font_size=self._reflow_identity,
         )
 
+    def _place_divider(self, *_args: object) -> None:
+        """Keep the boundary between identity and messages outside the action rows."""
+        self._divider.pos = self.pos
+        self._divider.size = self.width, dp(1)
+
+    def _fit_expanded_name(self, *_args: object) -> None:
+        """Keep up to three complete title lines above the fixed conversation actions."""
+        self.name_viewport.height = min(self.name.height, 3 * self._title_line_height)
+        self.name_viewport.do_scroll_y = self.name.height > self.name_viewport.height
+
+    def _reset_name_scroll(self, *_args: object) -> None:
+        """Start a newly displayed identity at its first character."""
+        self.name_viewport.scroll_y = 1
+
     def _reflow_identity(self, *_args: object) -> None:
         """Gives unusually long aliases full width instead of squeezing many narrow lines."""
-        inline_width = max(
-            dp(1),
+        inline_width = (
             self.title_row.width
             - 2 * dp(Geometry.TARGET)
             - self.call.width
-            - 3 * self.title_row.spacing,
+            - 3 * self.title_row.spacing
         )
+        if inline_width <= 0:
+            return
         key = self.name.text, self.name.font_name, self.name.font_size, inline_width
         if key == self._name_measurement:
             return
@@ -153,13 +193,11 @@ class PeerHeader(BoxLayout):
             font_name=self.name.font_name,
             font_size=self.name.font_size,
             text_size=(inline_width, None),
+            max_lines=4,
         )
-        measured.refresh()
-        line = CoreLabel(
-            text='Ag', font_name=self.name.font_name, font_size=self.name.font_size
-        )
-        line.refresh()
-        expanded = measured.texture.size[1] > 3 * line.texture.size[1]
+        self._title_line_height = measured.get_extents('Ag')[1]
+        self._fit_expanded_name()
+        expanded = measured.render()[1] > 3 * self._title_line_height
         self._expanded_next = expanded
         if expanded != self.expanded_title:
             self._identity_trigger()
@@ -172,9 +210,11 @@ class PeerHeader(BoxLayout):
         if expanded:
             self.title_row.remove_widget(self.name)
             self.title_row.add_widget(self._name_space, index=2)
-            self.add_widget(self.name, index=len(self.children))
+            self.name_viewport.add_widget(self.name)
+            self.add_widget(self.name_viewport, index=len(self.children))
         else:
-            self.remove_widget(self.name)
+            self.remove_widget(self.name_viewport)
+            self.name_viewport.remove_widget(self.name)
             self.title_row.remove_widget(self._name_space)
             self.title_row.add_widget(self.name, index=2)
         self.expanded_title = expanded

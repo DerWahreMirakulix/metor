@@ -1,9 +1,12 @@
 """Offline Lucide vector symbols with explicit accessible action names."""
 
 from collections.abc import Callable
+from functools import lru_cache
+import json
 
-from kivy.graphics import PopMatrix, PushMatrix, Scale, Translate, Color, Ellipse
-from kivy.graphics.svg import Svg
+from kivy.core.image import Image
+from kivy.graphics import Color, Ellipse, Rectangle
+from kivy.graphics.texture import Texture
 from kivy.metrics import dp
 from kivy.uix.widget import Widget
 from kivy.properties import StringProperty
@@ -15,8 +18,20 @@ from .context import ContextAction
 from .tooltip import PointerTooltip
 
 
+@lru_cache(maxsize=1)
+def _symbols() -> dict[str, Texture]:
+    """Share a mipmapped local atlas; only fixed artwork is retained by the renderer."""
+    icons = ASSET_ROOT / 'icons'
+    regions: dict[str, list[int]] = json.loads((icons / 'symbols.atlas').read_bytes())[
+        'symbols.png'
+    ]
+    sheet = Image(str(icons / 'symbols.png'), mipmap=True).texture
+    sheet.min_filter = 'linear_mipmap_linear'
+    return {name: sheet.get_region(*bounds) for name, bounds in regions.items()}
+
+
 class Symbol(Widget):
-    """Renders a packaged SVG at the normative 24-unit viewbox size."""
+    """Draw the antialiased 24-unit vector artwork independently of its touch target."""
 
     tone = StringProperty('text')
 
@@ -32,15 +47,12 @@ class Symbol(Widget):
         """
         super().__init__(**kwargs)
         self.tone = tone
-        path = ASSET_ROOT / 'icons' / f'{name}-native.svg'
-        if path.parent != ASSET_ROOT / 'icons' or not path.is_file():
+        texture = _symbols().get(name)
+        if texture is None:
             raise ValueError('Unknown local symbol')
         with self.canvas:
-            PushMatrix()
-            self._translate = Translate()
-            self._scale = Scale(dp(1), dp(1), 1)
-            self._svg = Svg(str(path))
-            PopMatrix()
+            self._ink = Color(*color(tone))
+            self._glyph = Rectangle(texture=texture)
         self.bind(center_x=self._place, center_y=self._place)
         self._place()
         self.bind(tone=self._retone)
@@ -54,7 +66,7 @@ class Symbol(Widget):
         Returns:
             None
         """
-        self._svg.color = color(self.tone)
+        self._ink.rgba = color(self.tone)
 
     def _place(self, *_args: object) -> None:
         """Centers the visible symbol inside its larger hit target.
@@ -64,10 +76,8 @@ class Symbol(Widget):
         Returns:
             None
         """
-        self._translate.x = self.center_x - dp(12)
-        self._translate.y = self.center_y - dp(12)
-        self._scale.x = dp(1)
-        self._scale.y = dp(1)
+        self._glyph.pos = round(self.center_x - dp(12)), round(self.center_y - dp(12))
+        self._glyph.size = dp(24), dp(24)
 
 
 class IconAction(ContextAction):
@@ -168,4 +178,5 @@ class IconAction(ContextAction):
         Returns:
             None
         """
-        self._badge.pos = self.right - dp(12), self.top - dp(12)
+        self._badge.size = dp(8), dp(8)
+        self._badge.pos = self.center_x + dp(8), self.center_y + dp(8)

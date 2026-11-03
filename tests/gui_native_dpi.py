@@ -291,6 +291,8 @@ def main() -> None:
                 peer.header.height
                 - sum(row.height for row in peer.header.children)
                 - peer.header.spacing
+                - peer.header.padding[1]
+                - peer.header.padding[3]
             )
             <= 1
         )
@@ -671,15 +673,20 @@ def main() -> None:
         narrow_scroll = next(
             item for item in narrow_cover.walk() if isinstance(item, ScrollView)
         )
-        prior_scroll_width = narrow_scroll.width
-        Window.dpi = original_dpi * 1.3
-        Metrics.density = original_metrics_density * 1.3
 
-        def finish() -> None:
+        def change_cover_density() -> None:
+            """Compare two settled form layouts rather than the scroll widget's constructor width."""
+            prior_scroll_width = narrow_scroll.width
+            assert dp(200) < prior_scroll_width <= narrow_cover.width
+            Window.dpi = original_dpi * 1.3
+            Metrics.density = original_metrics_density * 1.3
+            after_layout(lambda: finish(prior_scroll_width))
+
+        def finish(prior_scroll_width: float) -> None:
             """Captures the still-covered screen and restores process-local metrics.
 
             Args:
-                None
+                prior_scroll_width: Measured content width before the density change.
             Returns:
                 None
             """
@@ -715,7 +722,7 @@ def main() -> None:
             print('NATIVE_GUI_DPI_REFLOW_OK')
             app.stop()
 
-        after_layout(finish)
+        after_layout(change_cover_density)
 
     Clock.schedule_once(
         lambda _elapsed: (

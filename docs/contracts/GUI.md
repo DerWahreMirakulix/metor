@@ -742,6 +742,26 @@ position shows the complete Back, Call and More controls. The name and connectio
 actions remain scrollable; ordinary refreshes preserve the user's scroll position.
 Closing the keyboard restores the full header when space permits.
 
+The master toolbar groups Contacts, Settings and Notifications in that order.
+The notification dot stays inside the bell's touch target and the active
+DROP/LIVE tab has a visible underline. In wide windows the empty detail
+centers its next step. Conversation previews leave room for the unread
+count and menu. An exceptionally long peer name scrolls within three lines
+in the detail, leaving the conversation controls and messages reachable.
+Message menus share the bubble with its text and timestamp while retaining
+their own touch target.
+
+Entry, lock, device power and purge covers use one centered column with a
+measured scroll area. A pending physical hold shows the controller's
+reported progress as both a percentage and a bar.
+Standalone inputs have a visible boundary and focus ring; the message field
+shows focus on the enclosing composer. Profile choices stack when the text
+no longer fits side by side. In Settings, short values sit alongside their
+label and longer values move below when horizontal space is limited.
+Icons are drawn from a packaged, tintable atlas of the local Lucide artwork.
+Maintainers can rebuild it offline with Inkscape and
+`python scripts/render_gui_symbols.py`; running Metor does not need Inkscape.
+
 The packaged Inter Tight face is the visual baseline. The current core palette
 uses background `#101619`, surface `#171F22`, primary text `#F3F7F6`, DROP
 `#4ED7C8`, LIVE `#FFB454`, danger `#FF6474`, and success `#72D68C`.

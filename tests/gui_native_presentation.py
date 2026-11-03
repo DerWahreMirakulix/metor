@@ -370,14 +370,17 @@ def main() -> None:
             None
         """
         assert app.shell is not None and app.viewport is not None
-        labels = [widget for widget in app.shell.walk() if isinstance(widget, Label)]
-        name = next((widget for widget in labels if widget.text == alias), None)
-        assert name is not None, (
-            controller.state.route,
-            controller.state.covered,
-            [widget.text for widget in labels],
-            app.shell.children,
-            app.shell._foreground_key,
+        root = app.shell._root_panel
+        assert root is not None
+        row = root.rows['unicode-peer']
+        name = row.name
+        assert name.get_root_window() is not None
+        assert name.full_text == alias and alias in row.action.accessible_name
+        displayed_name = name.text
+        assert displayed_name == alias or (
+            displayed_name.endswith('…')
+            and len(displayed_name) > 1
+            and alias.startswith(displayed_name[:-1])
         )
         assert Path(name.font_name).name == 'DejaVuSans-Bold.ttf'
         assert name.texture is not None and name.texture.width > 0
@@ -424,7 +427,10 @@ def main() -> None:
             app.shell.render()
             assert not icon.tooltip.visible and icon.tooltip.label is None
             assert all(
-                getattr(widget, 'text', '') != alias for widget in app.shell.walk()
+                getattr(widget, 'text', '') not in (alias, displayed_name)
+                and getattr(widget, 'full_text', '') != alias
+                and alias not in getattr(widget, 'accessible_name', '')
+                for widget in app.shell.walk()
             )
             assert controller.client is None
             print('NATIVE_GUI_FALLBACK_TOOLTIP_PRIVACY_OK')

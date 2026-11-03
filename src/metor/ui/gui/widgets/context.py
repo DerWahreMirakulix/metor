@@ -10,7 +10,7 @@ from kivy.metrics import dp
 from metor.ui.gui.constants import GuiLimits
 
 # Local Package Imports
-from .controls import Action
+from .controls import Action, Label
 
 
 class ContextAction(Action):
@@ -18,7 +18,7 @@ class ContextAction(Action):
 
     def __init__(
         self,
-        text: str,
+        text: str | Label,
         callback: Callable[[], object],
         context: Callable[[], object] | None = None,
         surface: str = 'surface',

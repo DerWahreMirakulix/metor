@@ -13,7 +13,7 @@ from metor.client import (
 )
 from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.state import Route
-from metor.ui.gui.widgets import Action, ActionRow, Label
+from metor.ui.gui.widgets import Action, ActionRow, Label, Panel
 from metor.ui.gui.widgets.sheet import ActionSheet, confirm
 from metor.ui.gui.widgets.symbol import IconAction
 
@@ -45,13 +45,15 @@ def profiles_body(
             )
         )
     else:
-        if not startup:
+        names = {entry.profile for entry in page.entries}
+        if not startup and page.selected_profile not in names:
             body.add_widget(
-                Label('Current: ' + (page.selected_profile or 'none'), role='peer')
+                Label('Current profile · ' + (page.selected_profile or 'None'))
             )
+        if not startup and page.default_profile not in names:
             body.add_widget(
                 Label(
-                    'Default: ' + (page.default_profile or 'none'),
+                    'Default profile · ' + (page.default_profile or 'None'),
                     role='support',
                     tone='textSecondary',
                 )
@@ -60,29 +62,46 @@ def profiles_body(
             body.add_widget(Label('No profiles exist yet.', role='peer'))
         for profile in page.entries:
             row = ActionRow(spacing=dp(12))
-            label = profile.profile + (
-                ' · Unavailable'
-                if profile.issue
-                else ' · Default'
-                if profile.profile == page.default_profile
-                else ''
-            )
-            row.add_widget(
-                Action(
+            label = profile.profile
+            if profile.profile == page.default_profile:
+                label += ' · Default'
+            if profile.issue:
+                label += ' · Unavailable'
+            if not startup and profile.profile == page.selected_profile:
+                current = Panel(
+                    surface='dropSurface',
+                    orientation='vertical',
+                    size_hint_y=None,
+                    spacing=dp(2),
+                    padding=(dp(12), dp(8)),
+                )
+                current.bind(minimum_height=current.setter('height'))
+                status = (
+                    'Current · Default profile'
+                    if profile.profile == page.default_profile
+                    else 'Current profile'
+                )
+                if profile.issue:
+                    status += ' · Unavailable'
+                current.add_widget(Label(status, role='meta', tone='drop'))
+                current.add_widget(Label(profile.profile, role='row'))
+                row.add_widget(current)
+            else:
+                select = Action(
                     label,
                     partial(select_profile, controller, profile.profile, startup),
-                    disabled=state.busy
-                    or profile.issue is not None
-                    or (not startup and profile.profile == page.selected_profile),
+                    disabled=state.busy or profile.issue is not None,
                 )
-            )
+                select.label.halign = 'left'
+                row.add_widget(select)
             if not startup:
                 row.add_widget(
                     IconAction(
                         'ellipsis',
-                        'Profile actions',
+                        'Profile actions for ' + profile.profile,
                         partial(profile_menu, controller, profile),
                         disabled=state.busy,
+                        pos_hint={'center_y': 0.5},
                     )
                 )
             body.add_widget(row)
@@ -94,22 +113,30 @@ def profiles_body(
                     disabled=state.busy,
                 )
             )
-    body.add_widget(
-        Action(
-            'Refresh profiles' if catalog.on_first_page else 'Back to first profiles',
-            catalog.reload,
-            disabled=state.busy,
-        )
+    reload_label = (
+        'Refresh profiles' if catalog.on_first_page else 'Back to first profiles'
     )
     if startup:
+        body.add_widget(Action(reload_label, catalog.reload, disabled=state.busy))
         return
-    body.add_widget(
+    toolbar = ActionRow(spacing=dp(12))
+    toolbar.add_widget(
         Action(
             'New profile',
             lambda: ProfileEditor(controller, 'create').show(),
+            surface='drop',
+            tone='onAccent',
             disabled=catalog.host is None or state.busy,
         )
     )
+    if catalog.on_first_page:
+        toolbar.add_widget(
+            IconAction('refresh-cw', reload_label, catalog.reload, disabled=state.busy)
+        )
+    else:
+        toolbar.add_widget(Action(reload_label, catalog.reload, disabled=state.busy))
+    body.add_widget(toolbar)
+    body.add_widget(Label('Profile settings', role='row'))
     body.add_widget(Action('My contact', lambda: controller.navigate(Route('V15'))))
     body.add_widget(
         Action(
