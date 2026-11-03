@@ -210,3 +210,116 @@ After native acceptance, follow [RELEASING.md](../RELEASING.md). Its release
 workflow must validate the actual proposed version and native archives; ordinary
 PR CI is not a substitute. A release dry run and publication were not executed
 by this audit. Final merge into `main` and publication are separate owner actions.
+
+## Native follow-up on 2026-11-03
+
+The Windows checkout contained merge `b79907a9b73876cb2cb06e14c159874a8dbc1e01`.
+Its tree matched PR #11 head `3609f6d7ce72bb3b9caec96670d7500407c2dcfb`.
+All eight jobs passed on that PR head, including the
+[required acceptance job](https://github.com/DerWahreMirakulix/metor/actions/runs/38632103796/job/116098396381).
+The following tests used disposable profiles and a separate candidate branch.
+
+### Repairs reproduced on the desktop
+
+- **Tor profile directories.** With a data parent containing ` #1`, Tor
+  0.4.9.5 truncated both directory directives at the comment marker. On this
+  Windows system, passing UTF-8 bytes for an accented directory also created a
+  different directory under code page 1252. Core now quotes each filesystem
+  path as a single torrc value, escapes special bytes and rejects a Windows
+  path that cannot round-trip through the system code page. With the fix, an
+  actual network-disabled Tor process created its data and service directories
+  under the supplied accented names, including the hashes. The service hostname
+  appeared at the expected location. Both launcher paths have regression tests.
+- **GUI clipboard privacy.** On Kivy 2.3.1, Ctrl+X exported a selected draft
+  and removed it from the field. Cutting a password exported its mask and
+  removed the password. Selection could also export draft text through the
+  primary-selection callback. The field now intercepts both Kivy paths. The
+  native regression drives Ctrl+C and Ctrl+X, checks text retention and ordinary
+  deletion, and records clipboard calls using memory-only providers. A separate
+  disposable Linux X11 display verified the behavior with the real Xclip
+  provider. Before the repair, selecting and cutting a draft replaced both
+  PRIMARY and CLIPBOARD. With the repair, both retained their sentinel values
+  and the selected fields retained their contents.
+- **Authentication prompts.** Starting a plaintext profile showed “Open profile”
+  and “Profile password” while asking the user to choose a new runtime-only
+  session password. The native Windows window and its accessibility tree now
+  show “Start local service” and “New session password” for that action. Cold
+  profile unlock and proof for an already running service retain their own
+  prompts. The change is in commit `b3e6a266259093222cf8ce85498e949e02983924`.
+- **Rotated simulator geometry.** Starting at a small window size, Windows SDL
+  enlarged the drawable when Metor set its minimum height. Kivy still reported
+  the old system dimensions when Metor then computed the target. A 1600 × 960
+  configuration rotated 90° at scale 2 produced a 960 × 1328 client. Computing
+  the target before setting the minimum restored the 960 × 1648 client,
+  including its 48-pixel status banner. The regression enlarges a real SDL
+  window from 800 × 600 and checks the shell, keyboard and audio capabilities.
+- **Windows daemon ownership.** In a standard CPython virtual environment,
+  launching an encrypted profile started a redirector and a second interpreter.
+  The host compared the redirector's PID with the daemon's published PID,
+  incorrectly reported that it had borrowed the daemon, and discarded the
+  one-use startup credential. A 1,455-case run exposed three assertion failures
+  and three errors across four lifetime tests. The Windows launcher now starts
+  the interpreter directly with CPython's virtual-environment selection, keeps
+  isolated mode and retains the strict PID check. Manual-launch tests identify
+  only the matching interpreter child when a redirector is involved. All
+  13 targeted lifetime tests passed in the same virtual environment.
+
+### Native evidence
+
+**W** is the local Windows 11 Home x86-64 desktop (build 26300.9818),
+CPython 3.11.13 and Tor 0.4.9.5. **L** is Ubuntu 22.04.2 x86-64 under WSL2,
+CPython 3.11.15 and Tor 0.4.9.5. WSLg advertised a display, but logind
+could not resolve the shell's login session. Production GUI observations below
+are attributed to Windows. **C** is source commit
+`b39a370029485a5e84ce9d9967d6164a68628566`. The original WSL checkout was
+at `9de90d0372cad53d2122bd4013bb563ff2793030`. Tests used isolated candidate
+copies, separate from the user's profile directories.
+
+**P** is the credential-prompt revision `b3e6a266259093222cf8ce85498e949e02983924`.
+**S** is the simulator repair `cb3a9f43e93dba5e6ff9000c9ec0eb30460596b5`.
+**F** is `0852529ab9c88aa733b76c762f9a95f1829f8894`. Its two commits
+after S change only the three standalone native fixtures.
+**D** is the Windows daemon repair `432969e8db14ac2f6ebc72c38f6da6d01b3d63e1`.
+
+| Check                                         | PASS/FAIL/BLOCKED | Observed evidence                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | Host                          | Commit                |
+| --------------------------------------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------- | --------------------- |
+| Public-Tor DROP                               | PASS              | Two encrypted peers received `dropB-4d923c` (CLI to Terminal) and `dropA-4d923c` (Terminal to Terminal). After reopen, each received DROP appeared exactly once in the relevant CLI history.                                                                                                                                                                                                                                                                                        | L                             | C                     |
+| Public-Tor LIVE text                          | PASS              | Alice explicitly accepted Bob's invitation. Both Terminals showed the connected state and the other peer's distinct LIVE text. Bob received Alice's second line.                                                                                                                                                                                                                                                                                                                    | L                             | C                     |
+| Windows ↔ WSL public-Tor DROP and LIVE        | PASS              | In run `f07a93`, each native CLI sent a DROP that appeared in the opposite Terminal. Windows accepted WSL's invitation and both Terminals received the other peer's LIVE text. Windows history contained each DROP once. Both encrypted profiles used parents containing spaces, a hash and an accented character. All acceptance daemon and Tor processes exited.                                                                                                                  | W ↔ L                         | W: P, L: C            |
+| CLI and Terminal interoperability             | PASS              | A second Alice Terminal authenticated independently. The CLI observed the quoted alias `Böb Chat`. An incoming LIVE message and a PTY resize preserved Alice's Unicode draft before send.                                                                                                                                                                                                                                                                                           | L                             | C                     |
+| Independent Terminal lifetime                 | PASS              | Alice's second Terminal still queried contacts after the first exited. All acceptance Terminals exited with status 0. Their scoped daemon and Tor workers exited after the last participant.                                                                                                                                                                                                                                                                                        | L                             | C                     |
+| Tor path isolation                            | PASS              | Real Tor wrote its data and onion-service files under the requested accented directories containing a hash on both hosts with networking disabled.                                                                                                                                                                                                                                                                                                                                  | W, L                          | C                     |
+| Private field clipboard                       | PASS              | Kivy's native Ctrl+C/X path retained draft and password contents, and the primary-selection callback made no export to either memory-backed provider. The ordinary deletion check passed.                                                                                                                                                                                                                                                                                           | W, L (offscreen widget check) | C                     |
+| Windows installed artifacts and launchers     | PASS              | Built four fresh 0.2.0 offline bundles per revision. All four ZIPs installed, and the installed GUI checks passed with SDL2/ANGLE, including existing-console preservation and orderly autostart cancellation. On S the installed consumer also passed public-Tor startup and IPC with a disposable profile.                                                                                                                                                                        | W                             | C, S                  |
+| WSL CLI → Windows GUI DROP                    | PASS              | The native GUI rendered the received body `WSL-CLI-to-Windows-GUI-b5273b` under the sending peer and showed Read. The isolated host supplied a one-use synthetic credential through the public frontend bootstrap contract; the GUI performed the production SDK challenge proof.                                                                                                                                                                                                   | W ↔ L                         | S                     |
+| Windows GUI → WSL Terminal DROP               | PASS              | A native pointer click on Send produced a Pending row for `Windows-GUI-DROP-to-WSL-f9e2d9`. The WSL peer independently read that body through its Terminal inbox. Its reciprocal CLI DROP also appeared in the Windows GUI.                                                                                                                                                                                                                                                         | W ↔ L                         | W: F, L: S            |
+| Windows GUI ↔ WSL Terminal public-Tor LIVE    | PASS              | The GUI explicitly accepted the invitation and rendered `WSL-Terminal-LIVE-to-Windows-GUI-c2edcb`. A native click on Send submitted `Windows-GUI-LIVE-to-WSL-c2edcb`, which appeared in the WSL Terminal. The GUI detached while its local Terminal remained attached and another CLI authenticated and read history.                                                                                                                                                               | W ↔ L                         | S                     |
+| GUI detach and independent reattach           | PASS              | After the first GUI closed, the attached Windows Terminal remained usable. A separately authenticated CLI counted each of the two DROPs once. A fresh GUI process authenticated via a new one-use host credential and displayed the incoming DROP as Read and the outgoing DROP as Delivered. All acceptance clients and their daemon and Tor children exited.                                                                                                                      | W ↔ L                         | W: F, L: S            |
+| Desktop entry and authentication UI           | PASS              | Inspected the 1180 × 760 first-run window and its UI Automation tree for the named profile, password, confirmation, Create and Back controls. Verified the changed masked field, explanation, Start local service and Cancel on the plaintext daemon startup screen. Native SDL2/GLEW with NVIDIA OpenGL 4.6 at 96 DPI.                                                                                                                                                             | W                             | C, P                  |
+| Simulator configuration and touch keyboard    | PASS              | The repository example inherited disallowed write permissions. An owner-private copy with identical bytes mounted its 480 × 800 usable layout. The local touch keyboard entered a visible and accessible character. The private 90° scale-2 variant mounted a 960 × 1600 usable area plus the 48-pixel banner after repair. The active 1920 × 1032 work area could not display the entire scale-2 window simultaneously.                                                            | W                             | C, S                  |
+| Native layout, input, focus and accessibility | PASS              | The conversation fixture exercised 360 × 640, widths 959 and 960, and 1180 × 760 at 1.5× font scale. It checked Enter/Shift+Enter, pending sends, draft retention and a real resize with a 20-endpoint synthetic picker open. A physical 96 → 144 → 96 DPI monitor move preserved the logical control minimum. Separate simulator inspection covered New Drop, empty contacts, camera-unavailable recovery, manual contact entry, wide two-pane navigation and empty notifications. | W                             | S product, F fixtures |
+| Linux native simulator regression             | PASS              | A 1280 × 1600 Xvfb display exercised the SDL2/X11 resize sequence. The fixture waits within its original 15-second deadline for the requested 840 × 1488 drawable and 840 × 1440 shell and rechecks geometry with the keyboard open. A permanent 836-pixel-width mismatch failed at the deadline.                                                                                                                                                                                   | L                             | S product, F fixture  |
+| Linux installed artifacts and launchers       | PASS              | All four fresh CPython 3.11 x86-64 ZIP installers passed. Isolated consumers passed the installed native GUI smoke check on a private X11 display, independent frontend removal and SDK reimport.                                                                                                                                                                                                                                                                                   | L                             | F                     |
+| Windows installed daemon identity             | PASS              | A fresh installed frontend reported ownership of the exact PID published by its daemon. The credential could be claimed once, the SDK challenge succeeded, and a second attachment acquired neither startup ownership nor its secret. The last lease released the daemon. Locked startup and public-Tor startup passed the installed PID check.                                                                                                                                     | W                             | D                     |
+| Linux full unittest inventory                 | PASS              | 1,455 cases accounted for, with 1,441 passes and 14 skips. No failures or errors.                                                                                                                                                                                                                                                                                                                                                                                                   | L                             | S                     |
+| Final installed consumers                     | PASS              | Both platforms passed the isolated SDK, Base, Terminal and GUI checks with freshly rebuilt bundles, installed native GUI smoke, and the stricter managed daemon PID check.                                                                                                                                                                                                                                                                                                          | W, L                          | D                     |
+| Physical DROP and LIVE Voice, Alice → Bob     | BLOCKED           | No spoken sample or human observation of intelligible playback.                                                                                                                                                                                                                                                                                                                                                                                                                     | W                             | C                     |
+| Physical DROP and LIVE Voice, Bob → Alice     | BLOCKED           | No reverse-direction capture, preview, discard, or playback observation.                                                                                                                                                                                                                                                                                                                                                                                                            | W                             | C                     |
+| Audio endpoint recovery and two-way calls     | BLOCKED           | PortAudio 19.7.0 enumerated headset, USB, and Realtek devices. Endpoint disconnect, audible calls, Mute, and Hang up were deferred.                                                                                                                                                                                                                                                                                                                                                 | W                             | C                     |
+| Actual OS lock during recording               | BLOCKED           | Physical lock and recording were deferred.                                                                                                                                                                                                                                                                                                                                                                                                                                          | W                             | C                     |
+| Actual OS lock during playback                | BLOCKED           | Physical lock and playback were deferred.                                                                                                                                                                                                                                                                                                                                                                                                                                           | W                             | C                     |
+| Accepted call under OS lock                   | BLOCKED           | No live call was observed across a physical screen lock.                                                                                                                                                                                                                                                                                                                                                                                                                            | W                             | C                     |
+| Actual suspend/resume                         | BLOCKED           | System sleep and post-resume call/media observations were deferred.                                                                                                                                                                                                                                                                                                                                                                                                                 | W                             | C                     |
+
+The owner deferred the physical checks. Entering credentials by hand, destructive
+profile actions, physical touch hardware and comprehensive assistive-technology
+coverage were outside the observed paths. The public-Tor GUI runs used the
+documented host bootstrap credential for a disposable encrypted profile.
+The ordinary installed launcher was independently exercised through its masked
+prompt and cancellation path.
+
+The public-Tor and native renderer checks above establish software behavior
+on these hosts. Release acceptance remains open for physical Voice, calls, and
+OS lock/suspend. The full hosted matrix for a direct push can be identified by
+its exact head SHA in the
+[manually dispatched CI runs for embeddedui](https://github.com/DerWahreMirakulix/metor/actions/workflows/ci.yml?query=branch%3Aembeddedui+event%3Aworkflow_dispatch).

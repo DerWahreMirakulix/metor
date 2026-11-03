@@ -232,8 +232,13 @@ configured devices require a supported audio adapter before it can be enabled.
 
 The file is bounded to 64 KiB and must be a trusted regular file. The parser
 does not follow symlinks or accept multiply linked files. On POSIX it requires
-current-user ownership and rejects group or world write permission; Windows
-uses native handle trust checks. Parsing uses strict types, field allowlists,
+current-user ownership and rejects group or world write permission. On Windows,
+the current user must own the file. Only that user and LocalSystem may have
+write access. If the checked-out example inherits write access for other
+accounts or the Administrators group, make a private copy. Under **Properties →
+Security → Advanced** on the copy, check the owner and remove those write
+grants, including inherited ones. Pass the copy to `--device-config`.
+Parsing uses strict types, field allowlists,
 finite numeric bounds, and no evaluation of shell fragments, imports, or URLs.
 Errors report a safe reason; configuration content and secrets must not enter
 logs.
