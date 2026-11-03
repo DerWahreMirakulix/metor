@@ -323,3 +323,57 @@ on these hosts. Release acceptance remains open for physical Voice, calls, and
 OS lock/suspend. The full hosted matrix for a direct push can be identified by
 its exact head SHA in the
 [manually dispatched CI runs for embeddedui](https://github.com/DerWahreMirakulix/metor/actions/workflows/ci.yml?query=branch%3Aembeddedui+event%3Aworkflow_dispatch).
+
+## Visual review on 2026-11-03
+
+Compared the native Windows renderer at `0517d7c` with the GUI built from
+[`f307cd1`](https://github.com/DerWahreMirakulix/metor/commit/f307cd130ab0d5b7682fdcbd13dd09353458f1f4).
+The two images below are crops of the same synthetic conversation list at
+480 × 800 logical units and 100% text. Each toolbar action retains a 48 × 48
+target; the notification indicator now sits eight units inside the top and
+right of the bell's target.
+
+![Before and after: the master toolbar, bell indicator, active mode and first conversation row](./assets/2026-11-03-toolbar.png)
+
+- **Navigation and chat:** DROP and LIVE now indicate the active mode with an
+  underline as well as color. Short messages use less vertical space while
+  keeping a full-size action target. The composer has one focus outline;
+  playback and duration sit together in voice review.
+- **Forms and secondary screens:** single-page contact lists keep Add visible
+  without showing page arrows. Settings put long values below their labels
+  when space is tight. In the narrow profile form at 150% text, the masked
+  confirmation field and submit action stayed reachable with the touch
+  keyboard open. The PIN screen kept Unlock on one line.
+- **Field contrast:** against the default field fill, the palette's relative
+  luminance ratios were 13.58:1 for entered text, 6.04:1 for placeholder
+  text, 3.15:1 for the enabled outline and 8.29:1 for the focused outline.
+- **Window coverage:** all 45 native capture scenarios passed on Windows
+  (80 combinations of view, size and text scale). Comparisons used 360 × 640
+  at 150% text, 480 × 800 at 100%, and 1180 × 760 at 100%. Live resizing at
+  the 959/960 breakpoint preserved route, draft, focus and scroll position.
+  A move from a 96 DPI monitor to a 144 DPI monitor and back passed.
+- **Long content:** a 320-character alias previously made one compact list
+  row more than 2,000 units high. List previews now end in an ellipsis when
+  needed. In the tested compact conversation at 150% text, the full alias
+  scrolled in three lines, the header occupied 231 units, and 265 remained
+  for the timeline. Navigation, call and overflow controls stayed reachable.
+- **Installed native behavior:** both Windows and Linux GUI installations
+  matched the 253 GUI source and asset files. All 12 Linux GUI acceptance
+  scenarios passed on X11, including Core-backed compact and wide journeys
+  driven by XTest, AT-SPI privacy and actions, keyboard and modal focus,
+  pointer scrolling, and bounded stream processing.
+- **GUI regression suite:** all 490 GUI tests passed without skips on both
+  Windows and Linux at the linked product revision. The separate Windows
+  full-suite run during the review passed 1,419 of 1,455 tests with 36 skips.
+- **Linux full-suite setup:** the first run during the review had 1,438 passes,
+  14 platform skips and three failed daemon-ownership assertions. The parent
+  imported the source checkout from `PYTHONPATH`, while children launched
+  with `python -I` used a different editable installation. The PID check
+  rejects a different installation root by design. With the parent and child
+  using the same installed wheels, all 13 frontend-lifetime tests passed
+  without skips. The three original failures also passed on an independent
+  fresh build of the same commit. No ownership checks were relaxed.
+
+These checks used synthetic UI content or disposable local Core profiles.
+They did not retest live microphone or speaker audio, real calls across an OS
+lock, physical touch hardware, or suspend/resume.
