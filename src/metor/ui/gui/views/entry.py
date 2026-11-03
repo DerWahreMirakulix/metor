@@ -135,9 +135,30 @@ def entry_view(controller: GuiController, refresh: Callable[[], None]) -> Anchor
             )
             column.add_widget(Action('Cancel', lambda: respond(None)))
         else:
-            column.add_widget(Label('Open profile', role='peer'))
-            column.add_widget(Label('Profile password', role='support'))
-            secret = SecretInput(accessible_name='Profile password')
+            start_session = prompt.kind == 'new_session_password'
+            label = {
+                'new_session_password': 'New session password',
+                'unlock_password': 'Profile password',
+                'session_auth': 'Profile or session password',
+            }[prompt.kind]
+            title = 'Start local service' if start_session else 'Open profile'
+            column.add_widget(Label(title, role='peer'))
+            if start_session:
+                column.add_widget(
+                    Label(
+                        'Choose a password for this run of the service.', role='support'
+                    )
+                )
+            elif prompt.kind == 'session_auth':
+                column.add_widget(
+                    Label(
+                        'For an encrypted profile, use its profile password. '
+                        'For a plaintext profile, use the password chosen at startup.',
+                        role='support',
+                    )
+                )
+            column.add_widget(Label(label, role='support'))
+            secret = SecretInput(accessible_name=label)
             column.add_widget(secret)
 
             def answer() -> None:
@@ -153,9 +174,7 @@ def entry_view(controller: GuiController, refresh: Callable[[], None]) -> Anchor
                 respond(value)
 
             secret.bind(on_text_validate=lambda *_args: answer())
-            column.add_widget(
-                Action('Open profile', answer, surface='drop', tone='onAccent')
-            )
+            column.add_widget(Action(title, answer, surface='drop', tone='onAccent'))
             column.add_widget(Action('Cancel', lambda: respond(None)))
     elif controller.lifecycle.active or controller.lifecycle.failed:
         lifecycle_body(controller, column)

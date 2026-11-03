@@ -595,9 +595,11 @@ def _worker_case(case: str, progress: _WorkerProgress) -> None:
                 prompt = app.controller.interactions.prompt
                 password_visible = (
                     prompt is not None
-                    and prompt.kind == 'password'
+                    and prompt.kind == 'unlock_password'
                     and any(
-                        isinstance(widget, SecretInput) for widget in app.shell.walk()
+                        isinstance(widget, SecretInput)
+                        and widget.accessible_name == 'Profile password'
+                        for widget in app.shell.walk()
                     )
                     and any(
                         isinstance(widget, Action)

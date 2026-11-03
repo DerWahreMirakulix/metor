@@ -2,9 +2,13 @@
 
 from dataclasses import dataclass
 import threading
+from typing import Literal
 
 from metor.client import OneUseSecretProvider, build_session_auth_proof
 from metor.ui.gui.state.mailbox import Mailbox, Update
+
+
+CredentialKind = Literal['new_session_password', 'unlock_password', 'session_auth']
 
 
 @dataclass(frozen=True)
@@ -12,7 +16,7 @@ class Prompt:
     """Non-secret prompt state carrying its activation identity."""
 
     generation: int
-    kind: str
+    kind: Literal['start'] | CredentialKind
 
 
 class Interactions:
@@ -95,11 +99,11 @@ class Interactions:
                 self._startup = None
             self._condition.notify_all()
 
-    def _ask(self, kind: str) -> str | bool | None:
+    def _ask(self, kind: Literal['start'] | CredentialKind) -> str | bool | None:
         """Waits off the UI/IPC-reader thread for a graphical response.
 
         Args:
-            kind: Safe prompt type.
+            kind: Start confirmation or the credential requested by the host or SDK.
         Returns:
             str | bool | None: Single-use answer or cancellation.
         """
@@ -127,14 +131,14 @@ class Interactions:
         return result if isinstance(result, bool) else None
 
     def request_session_auth_secret(self) -> str | None:
-        """Requests a graphical password without retaining it after handoff.
+        """Chooses a session password when starting a local plaintext profile.
 
         Args:
             None
         Returns:
             str | None: Credential or cancellation.
         """
-        result = self._ask('password')
+        result = self._ask('new_session_password')
         return result if isinstance(result, str) else None
 
     def get_unlock_password(self) -> str | None:
@@ -145,13 +149,13 @@ class Interactions:
         Returns:
             str | None: Credential or cancellation.
         """
-        return self._password()
+        return self._password('unlock_password')
 
-    def _password(self) -> str | None:
+    def _password(self, credential: CredentialKind) -> str | None:
         """Consumes startup input once before asking for a fresh graphical secret.
 
         Args:
-            None
+            credential: Purpose of a fresh prompt when no startup input remains.
         Returns:
             str | None: One-use credential or cancelled input.
         """
@@ -160,7 +164,10 @@ class Interactions:
                 return None
             provider, self._startup = self._startup, None
         secret = provider.take() if provider is not None else None
-        return secret if secret is not None else self.request_session_auth_secret()
+        if secret is not None:
+            return secret
+        result = self._ask(credential)
+        return result if isinstance(result, str) else None
 
     def get_session_auth_proof(self, challenge: str, salt: str) -> str | None:
         """Derives a fresh proof solely through the public SDK.
@@ -171,7 +178,7 @@ class Interactions:
         Returns:
             str | None: Proof or cancellation.
         """
-        secret = self._password()
+        secret = self._password('session_auth')
         return (
             build_session_auth_proof(secret, challenge, salt)
             if secret is not None

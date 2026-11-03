@@ -535,6 +535,38 @@ class PresentationTests(unittest.TestCase):
         self.assertIsNone(replacement.take())
         self.assertIsNone(bridge.get_unlock_password())
 
+    def test_startup_unlock_and_running_session_ask_for_the_right_credential(
+        self,
+    ) -> None:
+        """Expose the requested credential without keeping its value in prompt state."""
+        for request, expected in (
+            (Interactions.request_session_auth_secret, 'new_session_password'),
+            (Interactions.get_unlock_password, 'unlock_password'),
+            (
+                lambda bridge: bridge.get_session_auth_proof('11' * 32, '22' * 16),
+                'session_auth',
+            ),
+        ):
+            with self.subTest(expected=expected):
+                bridge = Interactions(0, Mailbox())
+                worker = threading.Thread(target=request, args=(bridge,))
+                worker.start()
+                try:
+                    with bridge._condition:
+                        self.assertTrue(
+                            bridge._condition.wait_for(
+                                lambda: bridge.prompt is not None, timeout=2
+                            )
+                        )
+                        prompt = bridge.prompt
+                        assert prompt is not None
+                        self.assertEqual(prompt.kind, expected)
+                finally:
+                    bridge.cancel()
+                    worker.join(2)
+                self.assertFalse(worker.is_alive())
+                self.assertIsNone(bridge.prompt)
+
     def test_failed_bootstrap_disconnects_and_remains_covered(self) -> None:
         """A failed SDK snapshot cannot leak its authenticated connection."""
         host, client = Mock(), Mock()
