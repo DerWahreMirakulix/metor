@@ -5,10 +5,10 @@
 import argparse
 from contextlib import ExitStack
 from dataclasses import replace
+from importlib import import_module
 import json
 import os
 from pathlib import Path
-from typing import cast
 from unittest.mock import Mock, patch
 
 os.environ['KIVY_NO_ARGS'] = '1'
@@ -25,7 +25,12 @@ from kivy.metrics import Metrics, dp
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.widget import Widget
 
-from metor.client import FrontendHost, FrontendLaunchContext
+from metor.client import (
+    FrontendHost,
+    FrontendLaunchContext,
+    FrontendSelection,
+    FrontendSelectionKind,
+)
 from metor.client.platform import AudioEndpoint
 from metor.core.api import (
     ContactEntry,
@@ -67,6 +72,25 @@ def rectangle(widget: Widget) -> tuple[float, float, float, float]:
     return float(left), float(bottom), float(widget.width), float(widget.height)
 
 
+def resize_client(size: tuple[int, int]) -> None:
+    """Resize the existing SDL window through the native Windows event path."""
+    if os.name != 'nt':
+        Window.size = size
+        return
+    gui = import_module('win32gui')
+    handle = Window.get_window_info().window
+    left, top, right, bottom = gui.GetWindowRect(handle)
+    _, _, client_width, client_height = gui.GetClientRect(handle)
+    gui.MoveWindow(
+        handle,
+        left,
+        top,
+        size[0] + right - left - client_width,
+        size[1] + bottom - top - client_height,
+        True,
+    )
+
+
 class ConversationHarness(App):
     """Exercises actual shell widgets without a Core process or physical audio."""
 
@@ -86,10 +110,11 @@ class ConversationHarness(App):
         """Creates concrete compact or desktop composition with enlarged native text."""
         Window.size = self.viewport
         Metrics.fontscale = 1.5
-        self.controller = GuiController(
-            FrontendLaunchContext('fixture', cast(FrontendHost, object())),
-            simulator=True,
+        host = Mock(spec=FrontendHost)
+        host.initial_selection.return_value = FrontendSelection(
+            FrontendSelectionKind.RESOLVED, 'fixture', 'fixture', 'fixture'
         )
+        self.controller = GuiController(FrontendLaunchContext('fixture', host))
         self.controller.state.covered = False
         self.controller.state.capabilities = frozenset(
             {'qualified_live_control', 'drop_pending_cancellation'}
@@ -622,11 +647,13 @@ class ConversationHarness(App):
         )
         self.endpoint_sheet = sheet
         self.capture('-endpoints')
-        Window.size = (1180, 760) if self.viewport[0] == 360 else (360, 640)
+        self.resized_viewport = (1180, 760) if self.viewport[0] == 360 else (360, 640)
+        resize_client(self.resized_viewport)
         Clock.schedule_once(self.audio_choices_resized, FRAME_SETTLE_SECONDS)
 
     def audio_choices_resized(self, _elapsed: float) -> None:
         """Keeps the same closed picker scrollable across the desktop breakpoint."""
+        assert tuple(Window.size) == self.resized_viewport, tuple(Window.size)
         sheet = ActionSheet.current
         assert sheet is self.endpoint_sheet
         assert sheet is not None and len(sheet.column.children) == 20
@@ -638,11 +665,12 @@ class ConversationHarness(App):
             if isinstance(widget, IconAction) and widget.accessible_name == 'Close'
         )
         self.click(close)
-        Window.size = self.viewport
+        resize_client(self.viewport)
         Clock.schedule_once(self.audio_closed, FRAME_SETTLE_SECONDS)
 
     def audio_closed(self, _elapsed: float) -> None:
         """Requires audio dismissal to leave no expanded picker in the conversation."""
+        assert tuple(Window.size) == self.viewport, tuple(Window.size)
         assert ActionSheet.current is None
         assert self.controller.state.route == Route('V09', PEER, Delivery.LIVE)
         assert not any(

@@ -175,7 +175,15 @@ def move_between_monitors(
             abs(app.shell._root_panel.tabs[Delivery.DROP].height - dp(Geometry.TARGET))
             <= 1
         )
-        assert Window.minimum_width == Geometry.MIN_WIDTH
+        # SDL expresses minimums in window units; this simulator fixes its
+        # logical scale at 1 even when the monitor supplies more drawable pixels.
+        system_width, system_height = Window.system_size
+        assert Window.minimum_width == round(
+            Geometry.MIN_WIDTH * system_width / Window.width
+        )
+        assert Window.minimum_height == round(
+            (Geometry.MIN_HEIGHT + 24) * system_height / Window.height
+        )
         target_output.parent.mkdir(parents=True, exist_ok=True)
         assert app.root is not None
         app.root.export_to_png(str(target_output))
