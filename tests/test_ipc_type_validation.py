@@ -7,6 +7,7 @@ import sys
 import threading
 import unittest
 from enum import Enum
+from itertools import count
 from types import UnionType
 from typing import ForwardRef, Union, cast, get_args, get_origin, get_type_hints
 from unittest.mock import Mock, patch
@@ -188,6 +189,45 @@ class IpcTypeValidationTests(unittest.TestCase):
             server._handler(cast(socket.socket, oversized_source))
         self.assertEqual(dispatched, ['first', 'other'])
         self.assertIs(send_to.call_args.args[1].event_type, EventType.UNKNOWN_COMMAND)
+
+    def test_managed_ipc_first_frame_must_finish_before_admission_deadline(
+        self,
+    ) -> None:
+        """A dripped but otherwise valid command cannot dispatch after first-frame expiry."""
+        dispatched: list[IpcCommand] = []
+        server = IpcServer(  # type: ignore[arg-type]
+            _DispatcherProfileManager(),
+            lambda command, _conn: dispatched.append(command),
+        )
+        local, peer = socket.socketpair()
+        with (
+            local,
+            peer,
+            patch.object(Constants, 'TCP_BUFFER_SIZE', 1),
+            patch('time.monotonic', side_effect=count(0.0, 0.02)),
+        ):
+            peer.sendall((GetSettingsListCommand().to_json() + '\n').encode())
+            peer.shutdown(socket.SHUT_WR)
+            server._handler(local)
+            self.assertEqual(dispatched, [])
+            self.assertEqual(local.fileno(), -1)
+
+    def test_headless_ipc_deadline_spans_fragments_without_dispatch(self) -> None:
+        """A one-shot offline socket cannot retain private state via tiny reads."""
+        daemon = Mock()
+        daemon._pm = _DispatcherProfileManager()
+        daemon._stop_event = threading.Event()
+        server, peer = socket.socketpair()
+        with (
+            server,
+            peer,
+            patch.object(Constants, 'TCP_BUFFER_SIZE', 1),
+            patch('time.monotonic', side_effect=count(5.0, 0.04)),
+        ):
+            peer.sendall((GetSettingsListCommand().to_json() + '\n').encode())
+            handle_headless_client(daemon, server)
+            daemon._process_command.assert_not_called()
+            self.assertEqual(server.fileno(), -1)
 
     def test_headless_ipc_accepts_first_bounded_coalesced_command(self) -> None:
         """Processes its one command when a second frame shares the same read.

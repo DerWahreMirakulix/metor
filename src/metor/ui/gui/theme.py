@@ -61,16 +61,16 @@ def color(name: str) -> tuple[float, float, float, float]:
     )
 
 
-@lru_cache(maxsize=1)
-def _primary_glyphs() -> frozenset[int]:
-    """Loads fixed packaged font coverage without retaining any displayed text.
+@lru_cache(maxsize=2)
+def _font_glyphs(filename: str) -> frozenset[int]:
+    """Load fixed packaged font coverage without retaining any displayed text.
 
     Args:
-        None
+        filename: Packaged coverage asset.
     Returns:
-        frozenset[int]: Codepoints covered by all four packaged primary weights.
+        frozenset[int]: Codepoints present in the recorded typeface.
     """
-    path = ASSET_ROOT / 'fonts' / 'InterTight-coverage.json'
+    path = ASSET_ROOT / 'fonts' / filename
     ranges: list[list[int]] = json.loads(path.read_text(encoding='utf-8'))
     return frozenset(value for start, end in ranges for value in range(start, end + 1))
 
@@ -84,7 +84,7 @@ def font_path(weight: int = 400, text: str = '') -> str:
     Returns:
         str: Local font file for the native text renderer.
     """
-    primary = _primary_glyphs()
+    primary = _font_glyphs('InterTight-coverage.json')
     fallback = any(
         ord(character) >= 32 and ord(character) not in primary for character in text
     )
@@ -97,3 +97,13 @@ def font_path(weight: int = 400, text: str = '') -> str:
     if not path.is_file():
         raise RuntimeError('Metor font assets are missing; reinstall metor-ui-gui')
     return str(path)
+
+
+def initial_font(text: str) -> str | None:
+    """Return the bundled row font only when it can draw every initial."""
+    face = font_path(TYPE['row'][2], text)
+    if Path(face).name == 'DejaVuSans-Bold.ttf':
+        coverage = _font_glyphs('DejaVuSans-Bold-coverage.json')
+        if any(ord(char) not in coverage for char in text):
+            return None
+    return face

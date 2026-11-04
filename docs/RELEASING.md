@@ -214,8 +214,9 @@ Offline installers select the intended distribution by name from the
 wheelhouse, allowing pip to resolve only its exact dependencies.
 Each native archive declares and verifies its exact CPython minor/ABI, OS, and
 architecture. Its installer verifies the complete `SHA256SUMS.txt` inventory,
-including the bundled pip wheel, before creating or changing `.venv`; an
-incompatible existing environment is rejected without deletion. The checksum
+including the bundled pip wheel, before reserving a new `.venv`. Unpack into
+a fresh directory for every installation; existing environments, files and
+links at that path are refused without execution or modification. The checksum
 manifest provides integrity detection, not origin authentication or a release
 signature.
 

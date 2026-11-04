@@ -88,20 +88,25 @@ class PeerView(BoxLayout):
             for child in self.children
             if child not in (self.header_viewport, self.timeline)
         )
+        gaps = len(self.children) - 1
+        history_target = self.height * 0.4
+        self.header.fit_height(
+            min(
+                history_target,
+                self.height - composer_height - dp(8) * gaps - history_target,
+            )
+        )
         self.spacing = dp(
             8
             if self.header.height
             + composer_height
-            + dp(Geometry.TARGET)
-            + dp(16) * (len(self.children) - 1)
+            + (history_target if self.header.expanded_title else dp(Geometry.TARGET))
+            + dp(16) * gaps
             > self.height
             else 16
         )
         available = (
-            self.height
-            - composer_height
-            - self.spacing * (len(self.children) - 1)
-            - dp(Geometry.TARGET)
+            self.height - composer_height - self.spacing * gaps - dp(Geometry.TARGET)
         )
         self.header_viewport.height = min(
             self.header.height, max(dp(Geometry.TARGET), available)

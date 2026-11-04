@@ -4,6 +4,7 @@ from collections.abc import Callable
 from dataclasses import replace
 
 from kivy.clock import Clock
+from kivy.core.text import Label as TextMeasure
 from kivy.metrics import dp
 from kivy.uix.scrollview import ScrollView
 
@@ -228,8 +229,29 @@ def exercise_root_refresh(app: MetorApp, complete: Callable[[], None]) -> None:
         replace(summary, alias=alias)
         for summary, alias in zip(snapshot.conversations[:2], aliases, strict=True)
     ]
+    avatar_names = (
+        ('MiXeD Case Contact', ('MC', 'M')),
+        ('Renamed while focused', ('RW', 'R')),
+        ('E\u0301lodie', ('É',)),
+        ('שחר', ('ש',)),
+        ('👩‍🔧', ()),
+        ('漢', ()),
+    )
+    avatar_end = 3 + len(avatar_names)
+    avatar_rows = [
+        replace(summary, alias=alias)
+        for summary, (alias, _) in zip(
+            snapshot.conversations[3:avatar_end], avatar_names, strict=True
+        )
+    ]
     controller.state.snapshot = replace(
-        snapshot, conversations=examples + snapshot.conversations[2:]
+        snapshot,
+        conversations=(
+            examples
+            + snapshot.conversations[2:3]
+            + avatar_rows
+            + snapshot.conversations[avatar_end:]
+        ),
     )
     app.shell.render()
 
@@ -237,6 +259,21 @@ def exercise_root_refresh(app: MetorApp, complete: Callable[[], None]) -> None:
         """Long natural and unbroken names stay readable without displacing the list."""
         root = app.shell._root_panel
         ordinary = root.rows[snapshot.conversations[2].onion]
+        for sample, (alias, allowed) in zip(avatar_rows, avatar_names, strict=True):
+            row = root.rows[sample.onion]
+            avatar = row.avatar
+            assert tuple(avatar.size) == (dp(40), dp(40))
+            assert row.action.accessible_name.startswith(alias)
+            if allowed:
+                label = avatar.initials
+                assert avatar.children == [label] and label.center == avatar.center
+                assert label.text in allowed and not label.shorten
+                width, height = TextMeasure(
+                    font_name=label.font_name, font_size=label.font_size
+                ).get_extents(label.text)
+                assert width <= avatar.width - dp(8) and height <= avatar.height - dp(4)
+            else:
+                assert avatar.children == [avatar.fallback] and not avatar.initials.text
         for sample in examples:
             row = root.rows[sample.onion]
             assert row.name.text.endswith('…') and sample.alias.startswith(

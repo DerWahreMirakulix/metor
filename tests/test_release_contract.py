@@ -681,7 +681,7 @@ class ReleaseContractTests(unittest.TestCase):
             guide,
         )
         self.assertIn('requires no package index access', guide)
-        self.assertIn('python -I verify_bundle.py .', guide)
+        self.assertIn('"$PYTHON" -I -S verify_bundle.py . &&', guide)
         self.assertIn('including the bundled pip wheel', guide)
         self.assertIn('not a signature', guide)
 
@@ -707,7 +707,7 @@ class ReleaseContractTests(unittest.TestCase):
         self.assertIn(f'python{target} python3 python', script)
         self.assertIn('verify_bundle.py', script)
         self.assertIn('--target-only', script)
-        self.assertIn('refusing to replace or delete it', script)
+        self.assertIn('extract the archive into a fresh directory', script)
         self.assertNotIn('sys.version_info >=', script)
         self.assertNotIn('rm -', script)
         self.assertIn(
@@ -733,15 +733,10 @@ class ReleaseContractTests(unittest.TestCase):
 
         self.assertIn('verify_bundle.py', script)
         self.assertIn('--target-only', script)
-        self.assertIn(f'call py -{target} -I -m venv', script)
-        self.assertIn('call python -I -m venv', script)
-        self.assertIn('goto selected_py', script)
-        self.assertIn('goto selected_python', script)
-        self.assertNotIn(':try_py', script)
-        self.assertNotIn(':try_python', script)
-        self.assertIn('if errorlevel 1', script)
-        self.assertNotIn('%ERRORLEVEL%', script)
-        self.assertIn('refusing to modify or delete it', script)
+        self.assertIn(f'set "PY_OPTION=-{target}"', script)
+        self.assertIn('$PATH:py.exe', script)
+        self.assertIn('$PATH:python.exe', script)
+        self.assertIn('extract the archive into a fresh directory', script)
         self.assertNotIn('sys.version_info >=', script)
         self.assertNotIn('rd /s /q', script)
         self.assertIn(
@@ -752,7 +747,7 @@ class ReleaseContractTests(unittest.TestCase):
             '--no-index --find-links "%BUNDLE_DIR%\\wheelhouse" metor', script
         )
         self.assertIn('Scripts\\metor.exe --help', script)
-        self.assertTrue(script.rstrip().endswith('endlocal\nexit /b 0'))
+        self.assertIn('popd\nexit /b 0', script)
 
         gui_script = build_install_windows_script('metor-ui-gui')
         self.assertIn('Scripts\\metor-gui.exe', gui_script)
@@ -847,8 +842,30 @@ class ReleaseContractTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'Linked bundle entry'):
                 verify_bundle(bundle)
 
+    def test_verifier_refuses_existing_environment_before_any_target_probe(
+        self,
+    ) -> None:
+        """An environment directory, ordinary file, or dangling link is never a fresh extraction."""
+        for entry in ('directory', 'file', 'link'):
+            if entry == 'link' and sys.platform == 'win32':
+                continue  # Native link creation requires a separately granted host privilege.
+            with self.subTest(entry=entry), TemporaryDirectory() as directory:
+                bundle = Path(directory)
+                existing = bundle / '.venv'
+                if entry == 'directory':
+                    existing.mkdir()
+                elif entry == 'file':
+                    existing.write_text('unchanged', encoding='utf-8')
+                else:
+                    existing.symlink_to(
+                        bundle / 'missing-target', target_is_directory=True
+                    )
+                for target_only in (True, False):
+                    with self.assertRaisesRegex(ValueError, 'Existing .venv'):
+                        verify_bundle(bundle, target_only=target_only)
+
     @unittest.skipIf(sys.platform == 'win32', 'Shell installer is validated on Unix.')
-    def test_shell_installer_preserves_incompatible_existing_venv(self) -> None:
+    def test_shell_installer_refuses_existing_venv_without_execution(self) -> None:
         """Refuses an old target environment without deleting or changing it.
 
         Args:
@@ -873,14 +890,18 @@ class ReleaseContractTests(unittest.TestCase):
                 build_install_shell_script('metor-sdk'), encoding='utf-8'
             )
             installer.chmod(0o755)
-            venv_bin = bundle / '.venv' / 'bin'
-            venv_bin.mkdir(parents=True)
-            (venv_bin / 'python').symlink_to(sys.executable)
-            sentinel = bundle / '.venv' / 'preserve-me'
-            sentinel.write_text('unchanged', encoding='utf-8')
             (bundle / CHECKSUM_FILE_NAME).write_text(
                 build_sha256_manifest(bundle), encoding='utf-8'
             )
+            venv_bin = bundle / '.venv' / 'bin'
+            venv_bin.mkdir(parents=True)
+            probe = venv_bin / 'python'
+            probe.write_text(
+                '#!/bin/sh\ntouch "$PWD/venv-python-ran"\nexit 1\n', encoding='utf-8'
+            )
+            probe.chmod(0o755)
+            sentinel = bundle / '.venv' / 'preserve-me'
+            sentinel.write_text('unchanged', encoding='utf-8')
 
             result = subprocess.run(
                 ['sh', str(installer)],
@@ -891,8 +912,9 @@ class ReleaseContractTests(unittest.TestCase):
             )
 
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn('refusing to modify it', result.stderr)
+            self.assertIn('fresh directory', result.stderr)
             self.assertEqual(sentinel.read_text(encoding='utf-8'), 'unchanged')
+            self.assertFalse((bundle / 'venv-python-ran').exists())
 
     def test_release_builder_downloads_pip_wheel_for_offline_installs(self) -> None:
         """

@@ -18,6 +18,7 @@ from metor.ui.gui.widgets.symbol import IconAction, Symbol
 
 # Local Package Imports
 from .actions import conversation_menu
+from .avatar import ConversationAvatar
 
 
 class RootRow(BoxLayout):
@@ -51,17 +52,7 @@ class RootRow(BoxLayout):
         self.action.remove_widget(self.action.label)
         self.action.focus_key = ('peer', entry.delivery.value, entry.peer)
         self.group = BoxLayout(spacing=dp(8))
-        self.avatar = Panel(
-            surface=entry.delivery.value + 'Surface',
-            size_hint=(None, None),
-            width=dp(40),
-            height=dp(40),
-            pos_hint={'center_y': 0.5},
-        )
-        self.avatar._rectangle.radius = [self.avatar.width / 2]
-        self.initials = Label('', role='row', tone=entry.delivery.value, wrap=False)
-        self.initials.halign = 'center'
-        self.avatar.add_widget(self.initials)
+        self.avatar = ConversationAvatar(entry.delivery.value, entry.label)
         self.group.add_widget(self.avatar)
         column = BoxLayout(
             orientation='vertical',
@@ -157,9 +148,7 @@ class RootRow(BoxLayout):
             raise ValueError('Conversation row identity changed')
         self.entry = entry
         self.name.full_text = entry.label
-        self.initials.text = ''.join(
-            word[0] for word in entry.label.split()[:2] if word
-        ).upper()
+        self.avatar.alias = entry.label
         if entry.pinned and self.pin.parent is None:
             self.metadata.add_widget(self.pin, index=len(self.metadata.children))
         elif not entry.pinned and self.pin.parent is not None:

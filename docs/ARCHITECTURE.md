@@ -828,6 +828,7 @@ History changes should follow these rules:
 - Plaintext profiles intentionally opt out of password-based local auth and encrypted runtime-mirror semantics; those features must degrade to disabled behavior instead of pretending to work.
 - Logging of Tor or SQL internals must stay explicit and documented because those logs can leak local operational details.
 - Stream framing, byte caps, and socket timeouts are security boundaries, not cosmetic implementation details.
+- A new managed IPC socket has `daemon.ipc_timeout` to send its first complete, valid command. Interactive unlock or session proof then has one shared window of up to 180 seconds from accept (or the configured timeout, if longer). Fragments, invalid frames, and repeated challenges do not renew it. After session authentication, a valid instance lifetime lease, or a command admitted by an unlocked runtime with local auth disabled, the socket may remain idle. A lifetime lease grants no access to profile data. The private one-command headless channel uses one `daemon.ipc_timeout` window for the whole request.
 
 ## Transport Model
 

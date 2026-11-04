@@ -876,7 +876,7 @@ class Daemon(DaemonLifecycleMixin):
             else None
         )
 
-    def _process_ui_command(self, cmd: IpcCommand, conn: socket.socket) -> None:
+    def _process_ui_command(self, cmd: IpcCommand, conn: socket.socket) -> bool:
         """
         Routes typed IPC commands from the Chat UI or CLI Proxy to dedicated Handlers.
         Enforces local authentication and controls daemon state operations (Unlock, Purge, Config).
@@ -886,7 +886,7 @@ class Daemon(DaemonLifecycleMixin):
             conn (socket.socket): The connection to respond to.
 
         Returns:
-            None
+            bool: Whether this socket may remain idle. This never grants command authority.
         """
         with request_context(cmd.request_id):
             if isinstance(cmd, FrontendLeaseCommand):
@@ -898,27 +898,27 @@ class Daemon(DaemonLifecycleMixin):
                     )
                 )
                 self._ipc.send_to(conn, FrontendLeaseEvent(state=state))
-                return
+                return state == 'joined'
             if self._purge_fence.is_set():
                 if isinstance(cmd, SelfDestructCommand):
                     self._send_self_destruct_initiated(conn)
                 else:
                     self._ipc.send_to(conn, create_event(EventType.DAEMON_OFFLINE))
-                return
+                return False
             with self._domain_operation_lock:
                 if self._purge_fence.is_set():
                     if isinstance(cmd, SelfDestructCommand):
                         self._send_self_destruct_initiated(conn)
                     else:
                         self._ipc.send_to(conn, create_event(EventType.DAEMON_OFFLINE))
-                    return
+                    return False
                 if isinstance(cmd, PrepareProfileExitCommand):
                     if not self._session_access.authorize(
                         cmd,
                         conn,
                         runtime_unlocked=self._lifecycle is DaemonLifecycle.UNLOCKED,
                     ):
-                        return
+                        return False
                     self._command_dispatcher.disconnect_voice_producer(conn)
                     self._command_dispatcher.clear_client_focus(conn)
                     self._ipc.send_to(
@@ -928,8 +928,12 @@ class Daemon(DaemonLifecycleMixin):
                             {'profile': self._pm.profile_name},
                         ),
                     )
-                    return
-                self._process_ui_command_in_context(cmd, conn)
+                else:
+                    self._process_ui_command_in_context(cmd, conn)
+                return self._lifecycle is DaemonLifecycle.UNLOCKED and (
+                    conn in self._session_access.authenticated_recipients()
+                    or not self._session_access.requires_auth()
+                )
 
     def _send_self_destruct_initiated(self, conn: socket.socket) -> None:
         """Best-effort notification that never gates destructive work.

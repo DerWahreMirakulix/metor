@@ -8,7 +8,9 @@ import hashlib
 import json
 import socket
 import sys
+import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 from typing import Any, Iterable, Optional, cast
@@ -20,6 +22,8 @@ import nacl.bindings
 
 from metor.core.api import (
     AckEvent,
+    AuthenticateSessionCommand,
+    AuthRequiredEvent,
     AutoFallbackQueuedEvent,
     AutoReconnectScheduledEvent,
     ConnectionActor,
@@ -29,6 +33,8 @@ from metor.core.api import (
     ConnectedEvent,
     EventType,
     FallbackSuccessEvent,
+    FrontendLeaseCommand,
+    FrontendLeaseEvent,
     GetChatStartupStateCommand,
     GetRuntimeSnapshotCommand,
     InitCommand,
@@ -48,6 +54,10 @@ from metor.core.key import KeyManager
 from metor.core.profile_keys import InvalidCredentialError
 from metor.core.tor import TorManager
 from metor.core.daemon.managed.engine import Daemon
+from metor.core.daemon.managed.frontend_lifetime import (
+    FrontendLifetime,
+    read_frontend_lifetime_token,
+)
 from metor.core.daemon.managed.factory import (
     PlaintextLockedDaemonError,
     create_managed_daemon,
@@ -98,7 +108,11 @@ from metor.data import (
     PendingLiveRecord,
     SettingKey,
 )
-from metor.client import IpcClient
+from metor.client import (
+    BufferedIpcEventReader,
+    IpcClient,
+    build_session_auth_proof_from_key,
+)
 from metor.data.profile import ProfileManager
 from metor.data.profile.config import Config
 from metor.cli.handlers import CommandHandlers
@@ -2696,6 +2710,137 @@ class DaemonHardeningTests(unittest.TestCase):
             self.assertFalse(receiver.mock_calls)
             conn.settimeout(0.1)
             self.assertEqual(conn.recv(4), b'AAA\n')
+
+    def test_managed_ipc_reclaims_untrusted_slots_and_preserves_authenticated_idle(
+        self,
+    ) -> None:
+        """One real localhost slot expires silent, malformed and repeated pending requests."""
+        daemon = self._build_daemon(require_session_auth=True)
+        context = create_session_auth_context('synthetic-admission-secret')
+        daemon._session_access.install_context(context)
+        with (
+            patch.object(daemon._pm.config, 'get_float', return_value=0.12),
+            patch.object(daemon._pm.config, 'get_int', return_value=1),
+            patch.object(Constants, 'IPC_CREDENTIAL_PROMPT_TIMEOUT_SEC', 0.6),
+        ):
+            daemon._ipc.start()
+            self.addCleanup(daemon._ipc.stop)
+            assert daemon._ipc.port is not None
+            address = (Constants.LOCALHOST, daemon._ipc.port)
+            for initial in (b'', b'{', b'{}\n'):
+                with (
+                    self.subTest(initial=initial),
+                    socket.create_connection(address, timeout=2) as client,
+                ):
+                    reader = BufferedIpcEventReader()
+                    if initial:
+                        client.sendall(initial)
+                    if initial == b'{}\n':
+                        event = reader.read_from_socket(client)
+                        assert event is not None
+                        self.assertIs(event.event_type, EventType.UNKNOWN_COMMAND)
+                    self.assertIsNone(reader.read_from_socket(client))
+
+            request = (PrepareProfileExitCommand().to_json() + '\n').encode()
+            with socket.create_connection(address, timeout=2) as untrusted:
+                reader = BufferedIpcEventReader()
+                end = time.monotonic() + 2
+                challenges = 0
+                while time.monotonic() < end:
+                    try:
+                        untrusted.sendall(request)
+                        event = reader.read_from_socket(untrusted)
+                    except (
+                        BrokenPipeError,
+                        ConnectionResetError,
+                        ConnectionAbortedError,
+                    ):
+                        break
+                    if event is None:
+                        break
+                    self.assertIs(event.event_type, EventType.AUTH_REQUIRED)
+                    challenges += 1
+                    time.sleep(0.07)
+                else:
+                    self.fail(
+                        'Repeated valid requests renewed admission without proof.'
+                    )
+                self.assertGreater(challenges, 1)
+
+            with socket.create_connection(address, timeout=2) as admitted:
+                reader = BufferedIpcEventReader()
+                admitted.sendall(request)
+                challenge = reader.read_from_socket(admitted)
+                assert isinstance(challenge, AuthRequiredEvent) and challenge.challenge
+                time.sleep(
+                    0.18
+                )  # Credential entry may outlive the first-frame timeout.
+                proof = build_session_auth_proof_from_key(
+                    context.proof_key, challenge.challenge
+                )
+                admitted.sendall(
+                    (AuthenticateSessionCommand(proof).to_json() + '\n').encode()
+                )
+                confirmation = reader.read_from_socket(admitted)
+                assert confirmation is not None
+                self.assertIs(confirmation.event_type, EventType.SESSION_AUTHENTICATED)
+                time.sleep(
+                    0.7
+                )  # An admitted frontend may idle beyond the entire prompt window.
+                admitted.sendall(request)
+                result = reader.read_from_socket(admitted)
+                assert result is not None
+                self.assertIs(result.event_type, EventType.PROFILE_EXIT_PREPARED)
+
+    def test_locked_ipc_admits_only_proven_lifetime_without_profile_access(
+        self,
+    ) -> None:
+        """A real lease can idle during unlock but cannot bypass a locked profile."""
+        daemon = self._build_daemon(start_locked=True, require_session_auth=True)
+        with (
+            tempfile.TemporaryDirectory() as folder,
+            patch.object(daemon._pm.config, 'get_float', return_value=0.1),
+            patch.object(daemon._pm.config, 'get_int', return_value=1),
+            patch.object(Constants, 'IPC_CREDENTIAL_PROMPT_TIMEOUT_SEC', 0.24),
+        ):
+            lifetime = FrontendLifetime(Path(folder), automatic=True)
+            lifetime.publish()
+            token = read_frontend_lifetime_token(Path(folder))
+            self.assertIsNotNone(token)
+            daemon._frontend_lifetime = lifetime
+            daemon._ipc.start()
+            self.addCleanup(daemon._ipc.stop)
+            assert daemon._ipc.port is not None
+            address = (Constants.LOCALHOST, daemon._ipc.port)
+            init = (
+                InitCommand(IPC_PROTOCOL_VERSION, IPC_PROTOCOL_MIN_SUPPORTED).to_json()
+                + '\n'
+            ).encode()
+            for bearer, expected in ((None, 'denied'), (token, 'joined')):
+                with (
+                    self.subTest(state=expected),
+                    socket.create_connection(address, timeout=2) as client,
+                ):
+                    reader = BufferedIpcEventReader()
+                    lease = FrontendLeaseCommand(
+                        '1' * (2 * Constants.FRONTEND_LIFETIME_ID_BYTES), bearer
+                    )
+                    client.sendall((lease.to_json() + '\n').encode())
+                    confirmation = reader.read_from_socket(client)
+                    assert isinstance(confirmation, FrontendLeaseEvent)
+                    self.assertEqual(confirmation.state, expected)
+                    client.sendall(init)
+                    locked = reader.read_from_socket(client)
+                    assert locked is not None
+                    self.assertIs(locked.event_type, EventType.DAEMON_LOCKED)
+                    if expected == 'denied':
+                        self.assertIsNone(reader.read_from_socket(client))
+                    else:
+                        time.sleep(0.32)
+                        client.sendall(init)
+                        locked = reader.read_from_socket(client)
+                        assert locked is not None
+                        self.assertIs(locked.event_type, EventType.DAEMON_LOCKED)
 
     def test_inbound_handshake_memory_error_keeps_detail_out_of_history(
         self,

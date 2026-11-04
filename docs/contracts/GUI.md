@@ -753,8 +753,11 @@ The master toolbar groups Contacts, Settings and Notifications in that order.
 The notification dot stays inside the bell's touch target and the active
 DROP/LIVE tab has a visible underline. In wide windows the empty detail
 centers its next step. Conversation previews leave room for the unread
-count and menu. An exceptionally long peer name scrolls within three lines
-in the detail, leaving the conversation controls and messages reachable.
+count and menu. A fixed-size avatar shows up to two complete initials or a
+contact icon when neither initial fits or has a packaged glyph. In the
+detail, an exceptionally long peer name scrolls within up to three full
+lines. Fewer lines are used when the available height is needed for conversation
+actions and message history.
 Message menus share the bubble with its text and timestamp while retaining
 their own touch target.
 

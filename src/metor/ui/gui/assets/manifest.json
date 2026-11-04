@@ -401,6 +401,11 @@
       "sha256": "d1c3ff99f1e1ce1827a33efd4dad81f40babda06bff9e43bd7591c86662a287b"
     },
     {
+      "path": "fonts/DejaVuSans-Bold-coverage.json",
+      "source": "Fontconfig charset ranges from the packaged DejaVuSans-Bold.ttf.",
+      "sha256": "047c88bc35ab06be75081e8da1c291b138874d367219df003ae973af7405a34c"
+    },
+    {
       "path": "fonts/DejaVu-LICENSE.txt",
       "source": "DejaVu Fonts 2.37 from Ubuntu fonts-dejavu-core; https://dejavu-fonts.github.io/",
       "sha256": "63d3ba759d12804c5b31a9d5940d855c1820d1f5999e6b0872eb1c7ff045fbc9"

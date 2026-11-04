@@ -2,10 +2,12 @@
 
 import json
 import socket
+import time
 from typing import Dict
 
 from metor.core.api import EventType, IpcCommand, JsonValue, create_event
 from metor.data import SettingKey
+from metor.shared import recv_before
 from metor.utils import Constants
 
 from metor.core.daemon.headless.protocols import HeadlessDaemonProtocol
@@ -25,10 +27,11 @@ def handle_client(daemon: HeadlessDaemonProtocol, conn: socket.socket) -> None:
     try:
         daemon_ipc_timeout = daemon._pm.config.get_float(SettingKey.DAEMON_IPC_TIMEOUT)
         conn.settimeout(daemon_ipc_timeout)
+        deadline = time.monotonic() + daemon_ipc_timeout
         buffer: bytearray = bytearray()
         while not daemon._stop_event.is_set():
             try:
-                data: bytes = conn.recv(Constants.TCP_BUFFER_SIZE)
+                data = recv_before(conn, Constants.TCP_BUFFER_SIZE, deadline)
             except socket.timeout:
                 break
             except OSError:

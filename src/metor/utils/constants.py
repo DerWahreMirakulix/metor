@@ -21,6 +21,7 @@ class Constants(ContractConstants):
     PEER_WRITER_QUEUE_FRAMES: int = 256
     DROP_SESSION_MAX_TRANSFERS: int = 64
     IPC_WRITER_QUEUE_FRAMES: int = 256
+    IPC_CREDENTIAL_PROMPT_TIMEOUT_SEC: float = 180.0
     PEER_WRITER_QUEUE_BYTES: int = 8 * ContractConstants.MAX_STREAM_BYTES
     IPC_WRITER_QUEUE_BYTES: int = 8 * ContractConstants.MAX_IPC_BYTES
     SOCKET_WRITER_FLUSH_TIMEOUT_SEC: float = 2.0

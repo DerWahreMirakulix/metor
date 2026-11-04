@@ -164,25 +164,33 @@ def build_install_guide(bundle_name: str, package_name: str = 'metor') -> str:
           Linux:   sh {INSTALL_SHELL_NAME}
           Windows: {INSTALL_WINDOWS_NAME}
 
-        Both scripts create a local .venv inside the extracted bundle and
-        install {package_name} entirely from the bundled wheelhouse.
+        Extract into a fresh directory for every installation. Both scripts
+        refuse an existing .venv and install {package_name} from the wheelhouse.
+        Use an installed interpreter on PATH outside the extracted directory.
 
         Manual fallback on Linux:
 
           export PIP_CONFIG_FILE=/dev/null
 
-          python -I {BUNDLE_VERIFIER_NAME} .
-          python -I -m venv .venv
-          .venv/bin/python -I -m pip --isolated --require-virtualenv install --no-index --find-links wheelhouse --upgrade pip=={PIP_VERSION}
+          PYTHON=/absolute/path/to/python{sys.version_info.major}.{sys.version_info.minor}
+          "$PYTHON" -I -S {BUNDLE_VERIFIER_NAME} . &&
+          mkdir .venv &&
+          "$PYTHON" -I -m venv .venv &&
+          .venv/bin/python -I -m pip --isolated --require-virtualenv install --no-index --find-links wheelhouse --upgrade pip=={PIP_VERSION} &&
           .venv/bin/python -I -m pip --isolated --require-virtualenv install --no-index --find-links wheelhouse {package_name}
 
         On Windows PowerShell, use:
 
           $env:PIP_CONFIG_FILE = "nul"
 
-          python -I {BUNDLE_VERIFIER_NAME} .
-          python -I -m venv .venv
+          $python = 'C:\\path\\to\\installed\\python.exe'
+          & $python -I -S {BUNDLE_VERIFIER_NAME} .
+          if ($LASTEXITCODE) {{ throw 'Bundle verification failed' }}
+          New-Item -ItemType Directory -Path .venv -ErrorAction Stop | Out-Null
+          & $python -I -m venv .venv
+          if ($LASTEXITCODE) {{ throw 'Environment creation failed' }}
           .venv\\Scripts\\python.exe -I -m pip --isolated --require-virtualenv install --no-index --find-links wheelhouse --upgrade pip=={PIP_VERSION}
+          if ($LASTEXITCODE) {{ throw 'Offline pip installation failed' }}
           .venv\\Scripts\\python.exe -I -m pip --isolated --require-virtualenv install --no-index --find-links wheelhouse {package_name}
 
         The --no-index flag ensures installation stays inside this bundle,
@@ -218,41 +226,48 @@ def build_install_shell_script(package_name: str = 'metor') -> str:
         set -eu
         export PIP_CONFIG_FILE=/dev/null
 
-        script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+        case "$0" in
+          */*) directory=${{0%/*}}; directory=${{directory:-/}} ;;
+          *) directory=. ;;
+        esac
+        script_dir=$(CDPATH= cd -P -- "$directory" && pwd -P)
         venv_dir="$script_dir/.venv"
         python_bin=''
 
-        if [ -e "$venv_dir" ]; then
-          if [ ! -x "$venv_dir/bin/python" ]; then
-            echo 'Existing .venv is incomplete; refusing to replace or delete it.' >&2
-            exit 1
-          fi
-          if ! "$venv_dir/bin/python" -I "$script_dir/{BUNDLE_VERIFIER_NAME}" "$script_dir" --target-only; then
-            echo 'Existing .venv targets a different Python/OS/architecture; refusing to modify it.' >&2
-            exit 1
-          fi
-          python_bin="$venv_dir/bin/python"
+        if [ -e "$venv_dir" ] || [ -L "$venv_dir" ]; then
+          echo 'Existing .venv; extract the archive into a fresh directory.' >&2
+          exit 1
         fi
 
-        if [ -z "$python_bin" ]; then
-          for candidate in python{sys.version_info.major}.{sys.version_info.minor} python3 python; do
-            if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -I "$script_dir/{BUNDLE_VERIFIER_NAME}" "$script_dir" --target-only >/dev/null 2>&1; then
-              python_bin="$candidate"
-              break
-            fi
-          done
-        fi
+        # Only search absolute PATH directories outside the extracted bundle.
+        safe_path=''
+        remaining=$PATH:
+        while [ -n "$remaining" ]; do
+          entry=${{remaining%%:*}}
+          remaining=${{remaining#*:}}
+          case "$entry" in /*) ;; *) continue ;; esac
+          entry=$(CDPATH= cd -P -- "$entry" 2>/dev/null && pwd -P) || continue
+          case "$entry/" in "$script_dir/"*) continue ;; esac
+          safe_path=${{safe_path:+$safe_path:}}$entry
+        done
+        [ -n "$safe_path" ] || {{ echo 'No external interpreter directory on PATH.' >&2; exit 1; }}
+        PATH=$safe_path
+        export PATH
+        for candidate in python{sys.version_info.major}.{sys.version_info.minor} python3 python; do
+          if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -I -S "$script_dir/{BUNDLE_VERIFIER_NAME}" "$script_dir" --target-only >/dev/null 2>&1; then
+            python_bin="$candidate"
+            break
+          fi
+        done
 
         if [ -z "$python_bin" ]; then
           echo 'No interpreter matches this bundle target.' >&2
           exit 1
         fi
 
-        "$python_bin" -I "$script_dir/{BUNDLE_VERIFIER_NAME}" "$script_dir"
-
-        if [ ! -x "$venv_dir/bin/python" ]; then
-          "$python_bin" -I -m venv "$venv_dir"
-        fi
+        "$python_bin" -I -S "$script_dir/{BUNDLE_VERIFIER_NAME}" "$script_dir"
+        mkdir -- "$venv_dir"
+        "$python_bin" -I -m venv "$venv_dir"
         "$venv_dir/bin/python" -I -m pip --isolated --require-virtualenv install --no-index --find-links "$script_dir/{WHEELHOUSE_DIRNAME}" --upgrade pip=={PIP_VERSION}
         "$venv_dir/bin/python" -I -m pip --isolated --require-virtualenv install --no-index --find-links "$script_dir/{WHEELHOUSE_DIRNAME}" {package_name}
 
@@ -286,55 +301,58 @@ def build_install_windows_script(package_name: str = 'metor') -> str:
         @echo off
         setlocal DisableDelayedExpansion
         set "PIP_CONFIG_FILE=nul"
-        set "BUNDLE_DIR=%~dp0."
+        for %%D in ("%~dp0.") do set "BUNDLE_DIR=%%~fD"
+        for %%D in ("%BUNDLE_DIR%") do set "BUNDLE_KEY=%%~fsD"
         set "VENV_DIR=%BUNDLE_DIR%\\.venv"
         set "VERIFY=%BUNDLE_DIR%\\{BUNDLE_VERIFIER_NAME}"
+        pushd "%SystemRoot%\\System32" || exit /b 1
+        if exist "%VENV_DIR%" goto existing_venv
+        for %%V in ("%VENV_DIR%") do if not "%%~aV"=="" goto existing_venv
 
-        if exist "%VENV_DIR%" (
-            if not exist "%VENV_DIR%\\Scripts\\python.exe" goto incompatible_venv
-            "%VENV_DIR%\\Scripts\\python.exe" -I "%VERIFY%" "%BUNDLE_DIR%" --target-only >nul 2>nul
-            if errorlevel 1 goto incompatible_venv
-            "%VENV_DIR%\\Scripts\\python.exe" -I "%VERIFY%" "%BUNDLE_DIR%" || exit /b 1
-            goto install
+        set "PY_OPTION=-{sys.version_info.major}.{sys.version_info.minor}"
+        for /f "delims=" %%P in ('.\\where.exe $PATH:py.exe 2^>nul') do (
+            set "PYTHON_EXE=%%P"
+            call :probe
+            if not errorlevel 1 goto selected
         )
-
-        where py >nul 2>nul
-        if not errorlevel 1 (
-            call py -{sys.version_info.major}.{sys.version_info.minor} -I "%VERIFY%" "%BUNDLE_DIR%" --target-only >nul 2>nul
-            if not errorlevel 1 goto selected_py
+        set "PY_OPTION="
+        for /f "delims=" %%P in ('.\\where.exe $PATH:python.exe 2^>nul') do (
+            set "PYTHON_EXE=%%P"
+            call :probe
+            if not errorlevel 1 goto selected
         )
-
-        where python >nul 2>nul
-        if errorlevel 1 goto wrong_python
-        call python -I "%VERIFY%" "%BUNDLE_DIR%" --target-only >nul 2>nul
-        if errorlevel 1 goto wrong_python
-        goto selected_python
-
-        :selected_py
-        call py -{sys.version_info.major}.{sys.version_info.minor} -I "%VERIFY%" "%BUNDLE_DIR%" || exit /b 1
-        call py -{sys.version_info.major}.{sys.version_info.minor} -I -m venv "%VENV_DIR%" || exit /b 1
-        goto install
-
-        :selected_python
-        call python -I "%VERIFY%" "%BUNDLE_DIR%" || exit /b 1
-        call python -I -m venv "%VENV_DIR%" || exit /b 1
-        goto install
-
-        :wrong_python
         echo No interpreter matches this bundle target.
-        exit /b 1
+        goto failed
 
-        :incompatible_venv
-        echo Existing .venv is incompatible or incomplete; refusing to modify or delete it.
-        exit /b 1
+        :probe
+        rem Reject candidates anywhere under the extracted directory, including PATH entries.
+        for %%D in ("%PYTHON_EXE%") do set "CHECK_DIR=%%~dpD."
+        :check_parent
+        for %%D in ("%CHECK_DIR%") do set "CHECK_DIR=%%~fD"
+        for %%D in ("%CHECK_DIR%") do if /i "%%~fsD"=="%BUNDLE_KEY%" exit /b 1
+        for %%D in ("%CHECK_DIR%\\..") do set "PARENT_DIR=%%~fD"
+        if /i "%CHECK_DIR%"=="%PARENT_DIR%" goto probe_target
+        set "CHECK_DIR=%PARENT_DIR%"
+        goto check_parent
+        :probe_target
+        "%PYTHON_EXE%" %PY_OPTION% -I -S "%VERIFY%" "%BUNDLE_DIR%" --target-only >nul 2>nul
+        exit /b %errorlevel%
 
-        :install
-        "%VENV_DIR%\\Scripts\\python.exe" -I -m pip --isolated --require-virtualenv install --no-index --find-links "%BUNDLE_DIR%\\{WHEELHOUSE_DIRNAME}" --upgrade pip=={PIP_VERSION} || exit /b 1
-        "%VENV_DIR%\\Scripts\\python.exe" -I -m pip --isolated --require-virtualenv install --no-index --find-links "%BUNDLE_DIR%\\{WHEELHOUSE_DIRNAME}" {package_name} || exit /b 1
+        :selected
+        "%PYTHON_EXE%" %PY_OPTION% -I -S "%VERIFY%" "%BUNDLE_DIR%" || goto failed
+        mkdir "%VENV_DIR%" || goto existing_venv
+        "%PYTHON_EXE%" %PY_OPTION% -I -m venv "%VENV_DIR%" || goto failed
+        "%VENV_DIR%\\Scripts\\python.exe" -I -m pip --isolated --require-virtualenv install --no-index --find-links "%BUNDLE_DIR%\\{WHEELHOUSE_DIRNAME}" --upgrade pip=={PIP_VERSION} || goto failed
+        "%VENV_DIR%\\Scripts\\python.exe" -I -m pip --isolated --require-virtualenv install --no-index --find-links "%BUNDLE_DIR%\\{WHEELHOUSE_DIRNAME}" {package_name} || goto failed
         echo Metor installed in "%VENV_DIR%"
         {verification_line}
-        endlocal
+        popd
         exit /b 0
+        :existing_venv
+        echo Existing .venv; extract the archive into a fresh directory. 1>&2
+        :failed
+        popd
+        exit /b 1
         """
     )
 

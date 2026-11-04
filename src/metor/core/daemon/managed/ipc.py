@@ -23,6 +23,7 @@ from metor.core.api import (
 )
 from metor.data import SettingKey
 from metor.data.profile import ProfileManager
+from metor.shared import recv_before
 from metor.utils import Constants
 from metor.core.daemon.managed.writer import BoundedSocketWriter, FrameQueueFull
 
@@ -66,7 +67,7 @@ class IpcServer:
     def __init__(
         self,
         pm: ProfileManager,
-        command_callback: Callable[[IpcCommand, socket.socket], None],
+        command_callback: Callable[[IpcCommand, socket.socket], bool | None],
         disconnect_callback: Optional[Callable[[socket.socket], None]] = None,
         error_callback: Optional[Callable[[str], None]] = None,
     ) -> None:
@@ -75,7 +76,7 @@ class IpcServer:
 
         Args:
             pm (ProfileManager): To store and retrieve the active daemon port.
-            command_callback (Callable): The function to call when a valid command arrives.
+            command_callback (Callable): Dispatch a typed command; only True admits persistent idle use.
             disconnect_callback (Optional[Callable]): Hook to clean up socket states externally.
             error_callback (Optional[Callable[[str], None]]): Hook to surface
                 unexpected runtime errors without terminating the acceptor.
@@ -84,7 +85,7 @@ class IpcServer:
             None
         """
         self._pm: ProfileManager = pm
-        self._command_callback: Callable[[IpcCommand, socket.socket], None] = (
+        self._command_callback: Callable[[IpcCommand, socket.socket], bool | None] = (
             command_callback
         )
         self._disconnect_callback: Optional[Callable[[socket.socket], None]] = (
@@ -552,7 +553,7 @@ class IpcServer:
                 try:
                     handler_thread: threading.Thread = threading.Thread(
                         target=self._handler,
-                        args=(conn,),
+                        args=(conn, time.monotonic()),
                         daemon=True,
                     )
                     with self._lock:
@@ -589,7 +590,7 @@ class IpcServer:
                 )
                 continue
 
-    def _handler(self, conn: socket.socket) -> None:
+    def _handler(self, conn: socket.socket, accepted_at: float | None = None) -> None:
         """
         Target loop for receiving and parsing commands from a specific UI.
         Enforces read timeouts to prevent hanging threads if the UI crashes abruptly.
@@ -597,23 +598,38 @@ class IpcServer:
 
         Args:
             conn (socket.socket): The established client socket connection.
+            accepted_at: Monotonic accept time, before the handler was scheduled.
 
         Returns:
             None
         """
         daemon_ipc_timeout = self._pm.config.get_float(SettingKey.DAEMON_IPC_TIMEOUT)
         conn.settimeout(daemon_ipc_timeout)
+        started = time.monotonic() if accepted_at is None else accepted_at
+        admission_deadline: float | None = started + daemon_ipc_timeout
+        prompted = False
         buffer: bytearray = bytearray()
         try:
             while not self._stop_flag.is_set():
                 try:
-                    data: bytes = conn.recv(Constants.TCP_BUFFER_SIZE)
+                    # Keep writer/stop polling bounded even during credential entry.
+                    read_deadline = (
+                        min(admission_deadline, time.monotonic() + daemon_ipc_timeout)
+                        if admission_deadline is not None
+                        else None
+                    )
+                    data = recv_before(conn, Constants.TCP_BUFFER_SIZE, read_deadline)
                     if not data:
                         break
 
                     buffer.extend(data)
 
                     while b'\n' in buffer:
+                        if (
+                            admission_deadline is not None
+                            and time.monotonic() >= admission_deadline
+                        ):
+                            return
                         line_bytes, _, rest = buffer.partition(b'\n')
                         buffer = bytearray(rest)
                         if len(line_bytes) + 1 > Constants.MAX_IPC_BYTES:
@@ -647,7 +663,18 @@ class IpcServer:
 
                         try:
                             with request_context(cmd.request_id):
-                                self._command_callback(cmd, conn)
+                                admitted = self._command_callback(cmd, conn)
+                            if admitted is True:
+                                admission_deadline = None
+                            elif admission_deadline is not None and not prompted:
+                                # Only the first complete typed exchange opens a
+                                # fixed window for the user to supply credentials.
+                                prompted = True
+                                admission_deadline = max(
+                                    admission_deadline,
+                                    started
+                                    + Constants.IPC_CREDENTIAL_PROMPT_TIMEOUT_SEC,
+                                )
                         except Exception:
                             self.send_to(
                                 conn,
@@ -662,6 +689,11 @@ class IpcServer:
                         self.send_to(conn, create_event(EventType.UNKNOWN_COMMAND))
                         break
                 except socket.timeout:
+                    if (
+                        admission_deadline is not None
+                        and time.monotonic() >= admission_deadline
+                    ):
+                        break
                     continue
         except Exception:
             pass

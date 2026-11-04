@@ -24,6 +24,13 @@ system model, then use the focused references when you need exact contracts.
   [contribution guide](docs/CONTRIBUTE.md).
 - Prepare a release with the [release and versioning guide](docs/RELEASING.md).
 
+**First release baseline.** The four Metor packages report `1.0.0`; IPC, peer
+and storage formats start at generation 1. A checkout reporting this version
+does not mean a release has been published. Until the first tagged bundle is
+available, use the [source installation](#3-install-from-a-source-checkout).
+For a profile created on an earlier development snapshot, keep the original
+data and create a fresh profile. Metor does not upgrade development databases.
+
 ## 🌟 Key Features
 
 - **Client-Daemon Architecture (Daemon-owned operational state):**
@@ -128,7 +135,9 @@ This path is intended for end users consuming an official release. If you cloned
 sh install.sh
 ```
 
-On Windows, run `install.cmd` from the extracted bundle folder.
+On Windows, run `install.cmd` from the extracted bundle folder. On both
+platforms, start with a fresh extraction and an installed Python outside
+that directory on PATH.
 
 Use the installed environment for the commands below. On Linux run
 `source .venv/bin/activate`; in Windows PowerShell run
@@ -139,8 +148,10 @@ Use the installed environment for the commands below. On Linux run
 
 The installer first checks the exact CPython minor/ABI, OS, architecture, and
 every file listed in `SHA256SUMS.txt`, including the pinned `pip` wheel. It then
-creates a local `.venv` and installs entirely from the bundled wheelhouse. An
-existing incompatible `.venv` is left untouched. Checksums detect incomplete
+creates a local `.venv` and installs entirely from the bundled wheelhouse. For
+a reinstall or a retry after a partial installation, extract the archive
+again into a new directory. The installer rejects any existing `.venv`
+without running it or changing its contents. Checksums detect incomplete
 or modified archive contents; they are not a signature or proof of publisher
 identity. This path requires neither a local C/C++ build toolchain nor package
 index access during installation.

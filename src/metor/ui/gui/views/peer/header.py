@@ -113,6 +113,7 @@ class PeerHeader(BoxLayout):
             size_hint_y=None, do_scroll_x=False, always_overscroll=False
         )
         self._title_line_height = self.name.font_size
+        self._height_budget: float | None = None
         self.name.bind(height=self._fit_expanded_name, text=self._reset_name_scroll)
         self._name_space = Widget()
         self.expanded_title = False
@@ -166,9 +167,33 @@ class PeerHeader(BoxLayout):
         self._divider.size = self.width, dp(1)
 
     def _fit_expanded_name(self, *_args: object) -> None:
-        """Keep up to three complete title lines above the fixed conversation actions."""
-        self.name_viewport.height = min(self.name.height, 3 * self._title_line_height)
+        """Keep complete title lines above the fixed conversation actions."""
+        lines = 3
+        if self._height_budget is not None:
+            controls = (
+                self.title_row.height
+                + self.controls.height
+                + 2 * self.spacing
+                + self.padding[1]
+                + self.padding[3]
+            )
+            lines = max(
+                1,
+                min(
+                    lines,
+                    int((self._height_budget - controls) / self._title_line_height),
+                ),
+            )
+        self.name_viewport.height = min(
+            self.name.height, lines * self._title_line_height
+        )
         self.name_viewport.do_scroll_y = self.name.height > self.name_viewport.height
+
+    def fit_height(self, budget: float) -> None:
+        """Leave the reserved history space available when the title is expanded."""
+        self._height_budget = budget
+        if self.expanded_title:
+            self._fit_expanded_name()
 
     def _reset_name_scroll(self, *_args: object) -> None:
         """Start a newly displayed identity at its first character."""

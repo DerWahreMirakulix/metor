@@ -35,15 +35,18 @@ def _regular(path: Path) -> Path:
 
 
 def bundle_payloads(bundle_dir: Path) -> Iterator[Path]:
-    """Walk the extracted tree without crossing links or entering its top-level virtualenv."""
+    """Walk a fresh extraction without crossing links or accepting a virtualenv."""
     pending = [bundle_dir]
     while pending:
         for path in pending.pop().iterdir():
+            if path == bundle_dir / '.venv':
+                raise ValueError(
+                    'Existing .venv; extract the archive into a fresh directory.'
+                )
             mode = _kind(path)
             if stat.S_ISDIR(mode):
-                if path != bundle_dir / '.venv':
-                    pending.append(path)
-            elif not stat.S_ISREG(mode) or path == bundle_dir / '.venv':
+                pending.append(path)
+            elif not stat.S_ISREG(mode):
                 raise ValueError(f'Unexpected bundle entry: {path.name}.')
             elif path != bundle_dir / CHECKSUM_FILE_NAME:
                 yield path
@@ -206,6 +209,12 @@ def verify_bundle(bundle_dir: Path, *, target_only: bool = False) -> None:
     Returns:
         None
     """
+    try:
+        (bundle_dir / '.venv').lstat()
+    except FileNotFoundError:
+        pass
+    else:
+        raise ValueError('Existing .venv; extract the archive into a fresh directory.')
     errors = target_errors(read_metadata(bundle_dir))
     if errors:
         raise ValueError('\n'.join(errors))
