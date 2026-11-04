@@ -1,0 +1,1105 @@
+<!-- GENERATED FILE. DO NOT EDIT MANUALLY. -->
+
+# Metor Settings Documentation
+
+This document is auto-generated from setting metadata in `metor.data.settings` and `metor.data.profile.models`.
+It is the canonical reference for supported user-facing settings and structural profile config keys.
+
+## Configuration Model
+
+- `metor settings ...` changes global defaults. `ui.*` keys are stored in the local client `settings.json`, while `daemon.*` keys are resolved on the targeted daemon host.
+- `metor config ...` writes profile-specific overrides in the active profile `config.json`.
+- `metor settings list` shows the current global UI settings plus the current global daemon settings for the targeted runtime.
+- `metor config list` shows the effective values for the active profile, including local UI overrides, daemon-side effective values, and structural profile metadata.
+- UI settings stay local to the client machine. Daemon settings are applied to the owning daemon runtime.
+- Structural profile config keys are special-case profile metadata, not regular cascading settings.
+
+## Table of Contents
+
+- [Configuration Model](#configuration-model)
+- [Cascading Settings](#cascading-settings)
+  - [Client](#client)
+  - [Core Daemon](#core-daemon)
+  - [Advanced Network Resilience](#advanced-network-resilience)
+- [Structural Profile Config](#structural-profile-config)
+
+## Cascading Settings
+
+### Client
+
+#### `client.default_profile`
+
+Selects the profile used when the CLI is started without `-p`.
+
+| Property         | Value                                                       |
+| ---------------- | ----------------------------------------------------------- |
+| Type             | `str`                                                       |
+| Default          | `default`                                                   |
+| Category         | `Client`                                                    |
+| Scope            | `UI client-local`                                           |
+| Profile Override | `No`                                                        |
+| Constraints      | Non-empty profile name using letters, numbers, `-`, or `_`. |
+
+**CLI Examples**
+
+- `metor settings get client.default_profile`
+- `metor settings set client.default_profile default`
+
+---
+
+#### `client.default_ui`
+
+Selects the interactive frontend used by `metor chat`.
+
+| Property         | Value                                    |
+| ---------------- | ---------------------------------------- |
+| Type             | `str`                                    |
+| Default          | `terminal`                               |
+| Category         | `Client`                                 |
+| Scope            | `UI client-local`                        |
+| Profile Override | `No`                                     |
+| Constraints      | Non-empty installed frontend identifier. |
+
+**CLI Examples**
+
+- `metor settings get client.default_ui`
+- `metor settings set client.default_ui terminal`
+
+---
+
+#### `client.ipc_timeout`
+
+Client-side timeout for CLI and chat IPC requests.
+
+| Property         | Value                 |
+| ---------------- | --------------------- |
+| Type             | `float`               |
+| Default          | `15.0`                |
+| Category         | `Client`              |
+| Scope            | `UI client-local`     |
+| Profile Override | `Yes`                 |
+| Constraints      | Float >= 0.1 seconds. |
+
+**CLI Examples**
+
+- `metor settings get client.ipc_timeout`
+- `metor settings set client.ipc_timeout 15.0`
+- `metor -p <profile> config get client.ipc_timeout`
+- `metor -p <profile> config set client.ipc_timeout 15.0`
+
+---
+
+#### `client.chat_daemon_autostart`
+
+Controls whether `metor chat` should refuse, confirm, or automatically perform local daemon startup when no local daemon is running.
+
+| Property         | Value                             |
+| ---------------- | --------------------------------- |
+| Type             | `str`                             |
+| Default          | `ask`                             |
+| Category         | `Client`                          |
+| Scope            | `UI client-local`                 |
+| Profile Override | `Yes`                             |
+| Constraints      | One of: `never`, `ask`, `always`. |
+
+**CLI Examples**
+
+- `metor settings get client.chat_daemon_autostart`
+- `metor settings set client.chat_daemon_autostart ask`
+- `metor -p <profile> config get client.chat_daemon_autostart`
+- `metor -p <profile> config set client.chat_daemon_autostart ask`
+
+---
+
+#### `client.history_limit`
+
+Default number of history events shown per request.
+
+| Property         | Value             |
+| ---------------- | ----------------- |
+| Type             | `int`             |
+| Default          | `50`              |
+| Category         | `Client`          |
+| Scope            | `UI client-local` |
+| Profile Override | `Yes`             |
+| Constraints      | Integer >= 1.     |
+
+**CLI Examples**
+
+- `metor settings get client.history_limit`
+- `metor settings set client.history_limit 50`
+- `metor -p <profile> config get client.history_limit`
+- `metor -p <profile> config set client.history_limit 50`
+
+---
+
+#### `client.messages_limit`
+
+Default number of stored messages shown per request.
+
+| Property         | Value             |
+| ---------------- | ----------------- |
+| Type             | `int`             |
+| Default          | `50`              |
+| Category         | `Client`          |
+| Scope            | `UI client-local` |
+| Profile Override | `Yes`             |
+| Constraints      | Integer >= 1.     |
+
+**CLI Examples**
+
+- `metor settings get client.messages_limit`
+- `metor settings set client.messages_limit 50`
+- `metor -p <profile> config get client.messages_limit`
+- `metor -p <profile> config set client.messages_limit 50`
+
+### Core Daemon
+
+#### `daemon.max_tor_retries`
+
+Controls how many times Tor launch is attempted before startup fails.
+
+| Property         | Value            |
+| ---------------- | ---------------- |
+| Type             | `int`            |
+| Default          | `3`              |
+| Category         | `Core Daemon`    |
+| Scope            | `Daemon runtime` |
+| Profile Override | `Yes`            |
+| Constraints      | Integer >= 1.    |
+
+**CLI Examples**
+
+- `metor settings get daemon.max_tor_retries`
+- `metor settings set daemon.max_tor_retries 3`
+- `metor -p <profile> config get daemon.max_tor_retries`
+- `metor -p <profile> config set daemon.max_tor_retries 3`
+
+---
+
+#### `daemon.max_connect_retries`
+
+Controls how many additional live connect retries run after the initial attempt.
+
+| Property         | Value            |
+| ---------------- | ---------------- |
+| Type             | `int`            |
+| Default          | `3`              |
+| Category         | `Core Daemon`    |
+| Scope            | `Daemon runtime` |
+| Profile Override | `Yes`            |
+| Constraints      | Integer >= 0.    |
+
+**CLI Examples**
+
+- `metor settings get daemon.max_connect_retries`
+- `metor settings set daemon.max_connect_retries 3`
+- `metor -p <profile> config get daemon.max_connect_retries`
+- `metor -p <profile> config set daemon.max_connect_retries 3`
+
+---
+
+#### `daemon.tor_timeout`
+
+Timeout for outbound Tor socket operations and readiness checks.
+
+| Property         | Value                 |
+| ---------------- | --------------------- |
+| Type             | `float`               |
+| Default          | `10.0`                |
+| Category         | `Core Daemon`         |
+| Scope            | `Daemon runtime`      |
+| Profile Override | `Yes`                 |
+| Constraints      | Float >= 0.1 seconds. |
+
+**CLI Examples**
+
+- `metor settings get daemon.tor_timeout`
+- `metor settings set daemon.tor_timeout 10.0`
+- `metor -p <profile> config get daemon.tor_timeout`
+- `metor -p <profile> config set daemon.tor_timeout 10.0`
+
+---
+
+#### `daemon.stream_idle_timeout`
+
+Socket read timeout for active live sessions and idle timeout for drop sockets. Active live chats stay connected across pure read timeouts.
+
+| Property         | Value                 |
+| ---------------- | --------------------- |
+| Type             | `float`               |
+| Default          | `60.0`                |
+| Category         | `Core Daemon`         |
+| Scope            | `Daemon runtime`      |
+| Profile Override | `Yes`                 |
+| Constraints      | Float >= 0.1 seconds. |
+
+**CLI Examples**
+
+- `metor settings get daemon.stream_idle_timeout`
+- `metor settings set daemon.stream_idle_timeout 60.0`
+- `metor -p <profile> config get daemon.stream_idle_timeout`
+- `metor -p <profile> config set daemon.stream_idle_timeout 60.0`
+
+---
+
+#### `daemon.late_acceptance_timeout`
+
+Window during which pending live sessions may still be accepted.
+
+| Property         | Value               |
+| ---------------- | ------------------- |
+| Type             | `float`             |
+| Default          | `60.0`              |
+| Category         | `Core Daemon`       |
+| Scope            | `Daemon runtime`    |
+| Profile Override | `Yes`               |
+| Constraints      | Float >= 0 seconds. |
+
+**CLI Examples**
+
+- `metor settings get daemon.late_acceptance_timeout`
+- `metor settings set daemon.late_acceptance_timeout 60.0`
+- `metor -p <profile> config get daemon.late_acceptance_timeout`
+- `metor -p <profile> config set daemon.late_acceptance_timeout 60.0`
+
+---
+
+#### `daemon.ipc_timeout`
+
+Server-side timeout for daemon IPC sockets.
+
+| Property         | Value                 |
+| ---------------- | --------------------- |
+| Type             | `float`               |
+| Default          | `15.0`                |
+| Category         | `Core Daemon`         |
+| Scope            | `Daemon runtime`      |
+| Profile Override | `Yes`                 |
+| Constraints      | Float >= 0.1 seconds. |
+
+**CLI Examples**
+
+- `metor settings get daemon.ipc_timeout`
+- `metor settings set daemon.ipc_timeout 15.0`
+- `metor -p <profile> config get daemon.ipc_timeout`
+- `metor -p <profile> config set daemon.ipc_timeout 15.0`
+
+---
+
+#### `daemon.max_ipc_clients`
+
+Limits concurrent local IPC client sessions attached to the daemon. Additional clients are rejected immediately.
+
+| Property         | Value                                                                                                         |
+| ---------------- | ------------------------------------------------------------------------------------------------------------- |
+| Type             | `int`                                                                                                         |
+| Default          | `8`                                                                                                           |
+| Category         | `Core Daemon`                                                                                                 |
+| Scope            | `Daemon runtime`                                                                                              |
+| Profile Override | `Yes`                                                                                                         |
+| Constraints      | Integer >= 1.                                                                                                 |
+| Security Note    | Caps localhost IPC fan-out so a local process cannot exhaust daemon threads or file descriptors indefinitely. |
+
+**CLI Examples**
+
+- `metor settings get daemon.max_ipc_clients`
+- `metor settings set daemon.max_ipc_clients 8`
+- `metor -p <profile> config get daemon.max_ipc_clients`
+- `metor -p <profile> config set daemon.max_ipc_clients 8`
+
+---
+
+#### `daemon.enable_tor_logging`
+
+Emits Tor process logs to the terminal.
+
+| Property         | Value                                                                         |
+| ---------------- | ----------------------------------------------------------------------------- |
+| Type             | `bool`                                                                        |
+| Default          | `False`                                                                       |
+| Category         | `Core Daemon`                                                                 |
+| Scope            | `Daemon runtime`                                                              |
+| Profile Override | `Yes`                                                                         |
+| Constraints      | Boolean.                                                                      |
+| Security Note    | Can reveal operational timing and local environment details in terminal logs. |
+
+**CLI Examples**
+
+- `metor settings get daemon.enable_tor_logging`
+- `metor settings set daemon.enable_tor_logging false`
+- `metor -p <profile> config get daemon.enable_tor_logging`
+- `metor -p <profile> config set daemon.enable_tor_logging false`
+
+---
+
+#### `daemon.enable_sql_logging`
+
+Emits SQLCipher and SQLite diagnostics to the terminal.
+
+| Property         | Value                                                          |
+| ---------------- | -------------------------------------------------------------- |
+| Type             | `bool`                                                         |
+| Default          | `False`                                                        |
+| Category         | `Core Daemon`                                                  |
+| Scope            | `Daemon runtime`                                               |
+| Profile Override | `Yes`                                                          |
+| Constraints      | Boolean.                                                       |
+| Security Note    | Can expose local schema, file, and corruption details in logs. |
+
+**CLI Examples**
+
+- `metor settings get daemon.enable_sql_logging`
+- `metor settings set daemon.enable_sql_logging false`
+- `metor -p <profile> config get daemon.enable_sql_logging`
+- `metor -p <profile> config set daemon.enable_sql_logging false`
+
+---
+
+#### `daemon.enable_runtime_db_mirror`
+
+DEBUG/DEVELOPMENT ONLY: exports a plaintext runtime copy of the encrypted database for local inspection tools.
+
+| Property         | Value                                                                                                                        |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Type             | `bool`                                                                                                                       |
+| Default          | `False`                                                                                                                      |
+| Category         | `Core Daemon`                                                                                                                |
+| Scope            | `Daemon runtime`                                                                                                             |
+| Profile Override | `Yes`                                                                                                                        |
+| Constraints      | Boolean.                                                                                                                     |
+| Security Note    | Creates plaintext data that PMK destruction cannot retroactively protect. Keep disabled and prohibit it on hardened devices. |
+
+**CLI Examples**
+
+- `metor settings get daemon.enable_runtime_db_mirror`
+- `metor settings set daemon.enable_runtime_db_mirror false`
+- `metor -p <profile> config get daemon.enable_runtime_db_mirror`
+- `metor -p <profile> config set daemon.enable_runtime_db_mirror false`
+
+---
+
+#### `daemon.allow_plaintext_profiles`
+
+DEVELOPMENT/DEBUG ONLY: permits creation or migration of local plaintext profiles without cryptographic at-rest protection.
+
+| Property         | Value                                                                                                                                    |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Type             | `bool`                                                                                                                                   |
+| Default          | `False`                                                                                                                                  |
+| Category         | `Core Daemon`                                                                                                                            |
+| Scope            | `Daemon runtime`                                                                                                                         |
+| Profile Override | `No`                                                                                                                                     |
+| Constraints      | Boolean.                                                                                                                                 |
+| Security Note    | Plaintext profiles have no at-rest confidentiality and no cryptographic erase guarantee. Hardened deployments should keep this disabled. |
+
+**CLI Examples**
+
+- `metor settings get daemon.allow_plaintext_profiles`
+- `metor settings set daemon.allow_plaintext_profiles false`
+
+---
+
+#### `daemon.auto_accept_contacts`
+
+Automatically accepts incoming live sessions from saved contacts.
+
+| Property         | Value                                                                               |
+| ---------------- | ----------------------------------------------------------------------------------- |
+| Type             | `bool`                                                                              |
+| Default          | `False`                                                                             |
+| Category         | `Core Daemon`                                                                       |
+| Scope            | `Daemon runtime`                                                                    |
+| Profile Override | `Yes`                                                                               |
+| Constraints      | Boolean.                                                                            |
+| Security Note    | Keep disabled when explicit confirmation of every inbound LIVE session is required. |
+
+**CLI Examples**
+
+- `metor settings get daemon.auto_accept_contacts`
+- `metor settings set daemon.auto_accept_contacts false`
+- `metor -p <profile> config get daemon.auto_accept_contacts`
+- `metor -p <profile> config set daemon.auto_accept_contacts false`
+
+---
+
+#### `daemon.require_local_auth`
+
+Requires every UI session to authenticate even when the daemon is already running.
+
+| Property         | Value                                                                                    |
+| ---------------- | ---------------------------------------------------------------------------------------- |
+| Type             | `bool`                                                                                   |
+| Default          | `True`                                                                                   |
+| Category         | `Core Daemon`                                                                            |
+| Scope            | `Daemon runtime`                                                                         |
+| Profile Override | `Yes`                                                                                    |
+| Constraints      | Boolean.                                                                                 |
+| Security Note    | Enabled by default for encrypted profiles. Disable it only on trusted single-user hosts. |
+
+**CLI Examples**
+
+- `metor settings get daemon.require_local_auth`
+- `metor settings set daemon.require_local_auth true`
+- `metor -p <profile> config get daemon.require_local_auth`
+- `metor -p <profile> config set daemon.require_local_auth true`
+
+---
+
+#### `daemon.self_destruct_requires_unlock`
+
+Requires normal client reauthorization before a restricted device-lifecycle session may request profile destruction.
+
+| Property         | Value                                                       |
+| ---------------- | ----------------------------------------------------------- |
+| Type             | `bool`                                                      |
+| Default          | `True`                                                      |
+| Category         | `Core Daemon`                                               |
+| Scope            | `Daemon runtime`                                            |
+| Profile Override | `Yes`                                                       |
+| Constraints      | Boolean. New and unauthenticated clients are always denied. |
+
+**CLI Examples**
+
+- `metor settings get daemon.self_destruct_requires_unlock`
+- `metor settings set daemon.self_destruct_requires_unlock true`
+- `metor -p <profile> config get daemon.self_destruct_requires_unlock`
+- `metor -p <profile> config set daemon.self_destruct_requires_unlock true`
+
+---
+
+#### `daemon.local_auth_failure_limit`
+
+Maximum invalid local unlock or session-auth attempts before the daemon disconnects the client. `1` disconnects immediately.
+
+| Property         | Value                                                                                                       |
+| ---------------- | ----------------------------------------------------------------------------------------------------------- |
+| Type             | `int`                                                                                                       |
+| Default          | `3`                                                                                                         |
+| Category         | `Core Daemon`                                                                                               |
+| Scope            | `Daemon runtime`                                                                                            |
+| Profile Override | `Yes`                                                                                                       |
+| Constraints      | Integer >= 1.                                                                                               |
+| Security Note    | Caps online local password guessing attempts per auth window before disconnect and optional cooldown apply. |
+
+**CLI Examples**
+
+- `metor settings get daemon.local_auth_failure_limit`
+- `metor settings set daemon.local_auth_failure_limit 3`
+- `metor -p <profile> config get daemon.local_auth_failure_limit`
+- `metor -p <profile> config set daemon.local_auth_failure_limit 3`
+
+---
+
+#### `daemon.local_auth_lockout_timeout`
+
+Temporarily blocks new local unlock or session-auth attempts after too many invalid passwords. `0` disables the cross-connection lockout window.
+
+| Property         | Value                                                                        |
+| ---------------- | ---------------------------------------------------------------------------- |
+| Type             | `float`                                                                      |
+| Default          | `30.0`                                                                       |
+| Category         | `Core Daemon`                                                                |
+| Scope            | `Daemon runtime`                                                             |
+| Profile Override | `Yes`                                                                        |
+| Constraints      | Float >= 0 seconds.                                                          |
+| Security Note    | Slows reconnect-based local password guessing against the daemon IPC socket. |
+
+**CLI Examples**
+
+- `metor settings get daemon.local_auth_lockout_timeout`
+- `metor settings set daemon.local_auth_lockout_timeout 30.0`
+- `metor -p <profile> config get daemon.local_auth_lockout_timeout`
+- `metor -p <profile> config set daemon.local_auth_lockout_timeout 30.0`
+
+---
+
+#### `daemon.allow_drops`
+
+Enables reception and processing of offline drop messages.
+
+| Property         | Value            |
+| ---------------- | ---------------- |
+| Type             | `bool`           |
+| Default          | `True`           |
+| Category         | `Core Daemon`    |
+| Scope            | `Daemon runtime` |
+| Profile Override | `Yes`            |
+| Constraints      | Boolean.         |
+
+**CLI Examples**
+
+- `metor settings get daemon.allow_drops`
+- `metor settings set daemon.allow_drops true`
+- `metor -p <profile> config get daemon.allow_drops`
+- `metor -p <profile> config set daemon.allow_drops true`
+
+---
+
+#### `daemon.ephemeral_messages`
+
+Shreds consumed drop-message payloads after they are read instead of retaining them in message history.
+
+| Property         | Value                                                                                                                      |
+| ---------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| Type             | `bool`                                                                                                                     |
+| Default          | `False`                                                                                                                    |
+| Category         | `Core Daemon`                                                                                                              |
+| Scope            | `Daemon runtime`                                                                                                           |
+| Profile Override | `Yes`                                                                                                                      |
+| Constraints      | Boolean.                                                                                                                   |
+| Security Note    | Improves local deniability by removing consumed drop content while preserving minimal delivery metadata for deduplication. |
+
+**CLI Examples**
+
+- `metor settings get daemon.ephemeral_messages`
+- `metor settings set daemon.ephemeral_messages false`
+- `metor -p <profile> config get daemon.ephemeral_messages`
+- `metor -p <profile> config set daemon.ephemeral_messages false`
+
+---
+
+#### `daemon.record_live_history`
+
+Persists raw live transport rows in the history ledger and projected summary history.
+
+| Property         | Value                                                         |
+| ---------------- | ------------------------------------------------------------- |
+| Type             | `bool`                                                        |
+| Default          | `True`                                                        |
+| Category         | `Core Daemon`                                                 |
+| Scope            | `Daemon runtime`                                              |
+| Profile Override | `Yes`                                                         |
+| Constraints      | Boolean.                                                      |
+| Security Note    | Disabling reduces local metadata retention for live sessions. |
+
+**CLI Examples**
+
+- `metor settings get daemon.record_live_history`
+- `metor settings set daemon.record_live_history true`
+- `metor -p <profile> config get daemon.record_live_history`
+- `metor -p <profile> config set daemon.record_live_history true`
+
+---
+
+#### `daemon.record_drop_history`
+
+Persists raw drop transport rows in the history ledger and projected summary history.
+
+| Property         | Value                                                                  |
+| ---------------- | ---------------------------------------------------------------------- |
+| Type             | `bool`                                                                 |
+| Default          | `True`                                                                 |
+| Category         | `Core Daemon`                                                          |
+| Scope            | `Daemon runtime`                                                       |
+| Profile Override | `Yes`                                                                  |
+| Constraints      | Boolean.                                                               |
+| Security Note    | Disabling reduces local metadata retention for drop delivery attempts. |
+
+**CLI Examples**
+
+- `metor settings get daemon.record_drop_history`
+- `metor settings set daemon.record_drop_history true`
+- `metor -p <profile> config get daemon.record_drop_history`
+- `metor -p <profile> config set daemon.record_drop_history true`
+
+---
+
+#### `daemon.fallback_to_drop`
+
+Falls back unacknowledged live messages into the offline drop queue when possible.
+
+| Property         | Value            |
+| ---------------- | ---------------- |
+| Type             | `bool`           |
+| Default          | `True`           |
+| Category         | `Core Daemon`    |
+| Scope            | `Daemon runtime` |
+| Profile Override | `Yes`            |
+| Constraints      | Boolean.         |
+
+**CLI Examples**
+
+- `metor settings get daemon.fallback_to_drop`
+- `metor settings set daemon.fallback_to_drop true`
+- `metor -p <profile> config get daemon.fallback_to_drop`
+- `metor -p <profile> config set daemon.fallback_to_drop true`
+
+---
+
+#### `daemon.send_read_receipts`
+
+Sends optional remote read receipts after local consume. Disabled by default.
+
+| Property         | Value                                                          |
+| ---------------- | -------------------------------------------------------------- |
+| Type             | `bool`                                                         |
+| Default          | `False`                                                        |
+| Category         | `Core Daemon`                                                  |
+| Scope            | `Daemon runtime`                                               |
+| Profile Override | `Yes`                                                          |
+| Constraints      | Boolean.                                                       |
+| Security Note    | Enabling reveals message-consumption metadata to remote peers. |
+
+**CLI Examples**
+
+- `metor settings get daemon.send_read_receipts`
+- `metor settings set daemon.send_read_receipts false`
+- `metor -p <profile> config get daemon.send_read_receipts`
+- `metor -p <profile> config set daemon.send_read_receipts false`
+
+---
+
+#### `daemon.max_pending_live_msgs`
+
+Caps retained outbound pending LIVE logical messages per profile. `0` refuses retention and `-1` removes this guard.
+
+| Property         | Value                                                                           |
+| ---------------- | ------------------------------------------------------------------------------- |
+| Type             | `int`                                                                           |
+| Default          | `100`                                                                           |
+| Category         | `Core Daemon`                                                                   |
+| Scope            | `Daemon runtime`                                                                |
+| Profile Override | `Yes`                                                                           |
+| Constraints      | Integer >= -1.                                                                  |
+| Security Note    | Bounds durable recovery state; existing pending messages are never overwritten. |
+
+**CLI Examples**
+
+- `metor settings get daemon.max_pending_live_msgs`
+- `metor settings set daemon.max_pending_live_msgs 100`
+- `metor -p <profile> config get daemon.max_pending_live_msgs`
+- `metor -p <profile> config set daemon.max_pending_live_msgs 100`
+
+---
+
+#### `daemon.max_pending_live_bytes`
+
+Caps retained outbound pending LIVE payload bytes per profile. `0` refuses retention and `-1` removes this guard.
+
+| Property         | Value                                                               |
+| ---------------- | ------------------------------------------------------------------- |
+| Type             | `int`                                                               |
+| Default          | `16777216`                                                          |
+| Category         | `Core Daemon`                                                       |
+| Scope            | `Daemon runtime`                                                    |
+| Profile Override | `Yes`                                                               |
+| Constraints      | Integer >= -1 bytes.                                                |
+| Security Note    | Bounds durable recovery storage, including retained media payloads. |
+
+**CLI Examples**
+
+- `metor settings get daemon.max_pending_live_bytes`
+- `metor settings set daemon.max_pending_live_bytes 16777216`
+- `metor -p <profile> config get daemon.max_pending_live_bytes`
+- `metor -p <profile> config set daemon.max_pending_live_bytes 16777216`
+
+---
+
+#### `daemon.max_live_voice_buffer_bytes`
+
+Caps retained local LIVE Voice bytes per profile at 64 MiB. `0` disables Voice retention and `-1` removes this guard.
+
+| Property         | Value                                                                                                        |
+| ---------------- | ------------------------------------------------------------------------------------------------------------ |
+| Type             | `int`                                                                                                        |
+| Default          | `67108864`                                                                                                   |
+| Category         | `Core Daemon`                                                                                                |
+| Scope            | `Daemon runtime`                                                                                             |
+| Profile Override | `Yes`                                                                                                        |
+| Constraints      | Integer >= -1 bytes.                                                                                         |
+| Security Note    | Finite by default to bound authenticated peer and local capture storage pressure; data is never overwritten. |
+
+**CLI Examples**
+
+- `metor settings get daemon.max_live_voice_buffer_bytes`
+- `metor settings set daemon.max_live_voice_buffer_bytes 67108864`
+- `metor -p <profile> config get daemon.max_live_voice_buffer_bytes`
+- `metor -p <profile> config set daemon.max_live_voice_buffer_bytes 67108864`
+
+---
+
+#### `daemon.max_unseen_drop_msgs`
+
+Caps unread crash-safe drop backlog per peer. `0` rejects new unread drops, while `-1` removes the limit entirely.
+
+| Property         | Value                                                                             |
+| ---------------- | --------------------------------------------------------------------------------- |
+| Type             | `int`                                                                             |
+| Default          | `20`                                                                              |
+| Category         | `Core Daemon`                                                                     |
+| Scope            | `Daemon runtime`                                                                  |
+| Profile Override | `Yes`                                                                             |
+| Constraints      | Integer >= -1.                                                                    |
+| Security Note    | Limits authenticated peers from growing local on-disk drop backlog without bound. |
+
+**CLI Examples**
+
+- `metor settings get daemon.max_unseen_drop_msgs`
+- `metor settings set daemon.max_unseen_drop_msgs 20`
+- `metor -p <profile> config get daemon.max_unseen_drop_msgs`
+- `metor -p <profile> config set daemon.max_unseen_drop_msgs 20`
+
+---
+
+#### `daemon.max_unseen_live_msgs`
+
+Caps unread crash-safe live backlog per peer. `0` disables headless live backlog, while `-1` removes the limit entirely.
+
+| Property         | Value            |
+| ---------------- | ---------------- |
+| Type             | `int`            |
+| Default          | `20`             |
+| Category         | `Core Daemon`    |
+| Scope            | `Daemon runtime` |
+| Profile Override | `Yes`            |
+| Constraints      | Integer >= -1.   |
+
+**CLI Examples**
+
+- `metor settings get daemon.max_unseen_live_msgs`
+- `metor settings set daemon.max_unseen_live_msgs 20`
+- `metor -p <profile> config get daemon.max_unseen_live_msgs`
+- `metor -p <profile> config set daemon.max_unseen_live_msgs 20`
+
+---
+
+#### `daemon.expose_drop_rejection`
+
+Sends a typed rejection reason when inbound drops are refused, instead of closing the socket silently. Disabled by default to avoid disclosing local policy to peers.
+
+| Property         | Value            |
+| ---------------- | ---------------- |
+| Type             | `bool`           |
+| Default          | `False`          |
+| Category         | `Core Daemon`    |
+| Scope            | `Daemon runtime` |
+| Profile Override | `Yes`            |
+| Constraints      | Boolean.         |
+
+**CLI Examples**
+
+- `metor settings get daemon.expose_drop_rejection`
+- `metor settings set daemon.expose_drop_rejection false`
+- `metor -p <profile> config get daemon.expose_drop_rejection`
+- `metor -p <profile> config set daemon.expose_drop_rejection false`
+
+---
+
+#### `daemon.notification_sink`
+
+Opt-in JSON sink configuration for detached notification metadata. `{"type": "file", "path": "/private/path/metor-notify.jsonl"}` appends plaintext peer metadata to an owner-private regular file. `{"type": "webhook", "url": "https://..."}` uses direct host networking, not Tor, and exposes host IP and notification metadata to the endpoint. Empty disables the notification sink.
+
+| Property         | Value                 |
+| ---------------- | --------------------- |
+| Type             | `str`                 |
+| Default          | ``                    |
+| Category         | `Core Daemon`         |
+| Scope            | `Daemon runtime`      |
+| Profile Override | `Yes`                 |
+| Constraints      | JSON string or empty. |
+
+**CLI Examples**
+
+- `metor settings get daemon.notification_sink`
+- `metor settings set daemon.notification_sink `
+- `metor -p <profile> config get daemon.notification_sink`
+- `metor -p <profile> config set daemon.notification_sink `
+
+### Advanced Network Resilience
+
+#### `daemon.max_concurrent_connections`
+
+Limits admission of incoming peer connections and outgoing LIVE connections. The capacity check counts all tracked handshakes and authenticated LIVE, DROP, and CALL transports once across ownership transitions.
+
+| Property         | Value                         |
+| ---------------- | ----------------------------- |
+| Type             | `int`                         |
+| Default          | `50`                          |
+| Category         | `Advanced Network Resilience` |
+| Scope            | `Daemon runtime`              |
+| Profile Override | `Yes`                         |
+| Constraints      | Integer >= 1.                 |
+
+**CLI Examples**
+
+- `metor settings get daemon.max_concurrent_connections`
+- `metor settings set daemon.max_concurrent_connections 50`
+- `metor -p <profile> config get daemon.max_concurrent_connections`
+- `metor -p <profile> config set daemon.max_concurrent_connections 50`
+
+---
+
+#### `daemon.drop_tunnel_idle_timeout`
+
+Controls cached drop tunnel lifetime. `0` disables caching completely.
+
+| Property         | Value                         |
+| ---------------- | ----------------------------- |
+| Type             | `float`                       |
+| Default          | `30.0`                        |
+| Category         | `Advanced Network Resilience` |
+| Scope            | `Daemon runtime`              |
+| Profile Override | `Yes`                         |
+| Constraints      | Float >= 0 seconds.           |
+
+**CLI Examples**
+
+- `metor settings get daemon.drop_tunnel_idle_timeout`
+- `metor settings set daemon.drop_tunnel_idle_timeout 30.0`
+- `metor -p <profile> config get daemon.drop_tunnel_idle_timeout`
+- `metor -p <profile> config set daemon.drop_tunnel_idle_timeout 30.0`
+
+---
+
+#### `daemon.allow_drop_standby_on_live`
+
+Keeps a cached drop tunnel warm while live remains the primary transport.
+
+| Property         | Value                         |
+| ---------------- | ----------------------------- |
+| Type             | `bool`                        |
+| Default          | `False`                       |
+| Category         | `Advanced Network Resilience` |
+| Scope            | `Daemon runtime`              |
+| Profile Override | `Yes`                         |
+| Constraints      | Boolean.                      |
+
+**CLI Examples**
+
+- `metor settings get daemon.allow_drop_standby_on_live`
+- `metor settings set daemon.allow_drop_standby_on_live false`
+- `metor -p <profile> config get daemon.allow_drop_standby_on_live`
+- `metor -p <profile> config set daemon.allow_drop_standby_on_live false`
+
+---
+
+#### `daemon.connect_retry_backoff_delay`
+
+Delay between explicit live connect retries after the initial attempt. `0` retries immediately.
+
+| Property         | Value                         |
+| ---------------- | ----------------------------- |
+| Type             | `float`                       |
+| Default          | `3.0`                         |
+| Category         | `Advanced Network Resilience` |
+| Scope            | `Daemon runtime`              |
+| Profile Override | `Yes`                         |
+| Constraints      | Float >= 0 seconds.           |
+
+**CLI Examples**
+
+- `metor settings get daemon.connect_retry_backoff_delay`
+- `metor settings set daemon.connect_retry_backoff_delay 3.0`
+- `metor -p <profile> config get daemon.connect_retry_backoff_delay`
+- `metor -p <profile> config set daemon.connect_retry_backoff_delay 3.0`
+
+---
+
+#### `daemon.live_reconnect_delay`
+
+Base delay before automatic live reconnect attempts. `0` disables automatic reconnect.
+
+| Property         | Value                         |
+| ---------------- | ----------------------------- |
+| Type             | `int`                         |
+| Default          | `15`                          |
+| Category         | `Advanced Network Resilience` |
+| Scope            | `Daemon runtime`              |
+| Profile Override | `Yes`                         |
+| Constraints      | Integer >= 0 seconds.         |
+
+**CLI Examples**
+
+- `metor settings get daemon.live_reconnect_delay`
+- `metor settings set daemon.live_reconnect_delay 15`
+- `metor -p <profile> config get daemon.live_reconnect_delay`
+- `metor -p <profile> config set daemon.live_reconnect_delay 15`
+
+---
+
+#### `daemon.live_reconnect_grace_timeout`
+
+Reconnect grace window for silently accepting a recent peer reconnect. `0` disables reconnect grace.
+
+| Property         | Value                         |
+| ---------------- | ----------------------------- |
+| Type             | `int`                         |
+| Default          | `15`                          |
+| Category         | `Advanced Network Resilience` |
+| Scope            | `Daemon runtime`              |
+| Profile Override | `Yes`                         |
+| Constraints      | Integer >= 0 seconds.         |
+
+**CLI Examples**
+
+- `metor settings get daemon.live_reconnect_grace_timeout`
+- `metor settings set daemon.live_reconnect_grace_timeout 15`
+- `metor -p <profile> config get daemon.live_reconnect_grace_timeout`
+- `metor -p <profile> config set daemon.live_reconnect_grace_timeout 15`
+
+---
+
+#### `daemon.live_disconnect_linger_timeout`
+
+Keeps a locally initiated live socket open briefly after sending `DISCONNECT` so the control frame can flush through Tor before shutdown. Higher values improve retunnel reliability on slower routes.
+
+| Property         | Value                         |
+| ---------------- | ----------------------------- |
+| Type             | `float`                       |
+| Default          | `2.0`                         |
+| Category         | `Advanced Network Resilience` |
+| Scope            | `Daemon runtime`              |
+| Profile Override | `Yes`                         |
+| Constraints      | Float >= 0 seconds.           |
+
+**CLI Examples**
+
+- `metor settings get daemon.live_disconnect_linger_timeout`
+- `metor settings set daemon.live_disconnect_linger_timeout 2.0`
+- `metor -p <profile> config get daemon.live_disconnect_linger_timeout`
+- `metor -p <profile> config set daemon.live_disconnect_linger_timeout 2.0`
+
+---
+
+#### `daemon.retunnel_reconnect_delay`
+
+Delay before reconnecting after a live retunnel disconnect. `0` reconnects immediately.
+
+| Property         | Value                         |
+| ---------------- | ----------------------------- |
+| Type             | `float`                       |
+| Default          | `1.0`                         |
+| Category         | `Advanced Network Resilience` |
+| Scope            | `Daemon runtime`              |
+| Profile Override | `Yes`                         |
+| Constraints      | Float >= 0 seconds.           |
+
+**CLI Examples**
+
+- `metor settings get daemon.retunnel_reconnect_delay`
+- `metor settings set daemon.retunnel_reconnect_delay 1.0`
+- `metor -p <profile> config get daemon.retunnel_reconnect_delay`
+- `metor -p <profile> config set daemon.retunnel_reconnect_delay 1.0`
+
+---
+
+#### `daemon.retunnel_recovery_retries`
+
+Additional delayed retunnel recovery retries after a transient reject or early close.
+
+| Property         | Value                         |
+| ---------------- | ----------------------------- |
+| Type             | `int`                         |
+| Default          | `2`                           |
+| Category         | `Advanced Network Resilience` |
+| Scope            | `Daemon runtime`              |
+| Profile Override | `Yes`                         |
+| Constraints      | Integer >= 0.                 |
+
+**CLI Examples**
+
+- `metor settings get daemon.retunnel_recovery_retries`
+- `metor settings set daemon.retunnel_recovery_retries 2`
+- `metor -p <profile> config get daemon.retunnel_recovery_retries`
+- `metor -p <profile> config set daemon.retunnel_recovery_retries 2`
+
+---
+
+#### `daemon.reuse_live_for_drops`
+
+Routes queued drop messages over an existing live session channel when available, avoiding a second circuit.
+
+| Property         | Value                         |
+| ---------------- | ----------------------------- |
+| Type             | `bool`                        |
+| Default          | `True`                        |
+| Category         | `Advanced Network Resilience` |
+| Scope            | `Daemon runtime`              |
+| Profile Override | `Yes`                         |
+| Constraints      | Boolean.                      |
+
+**CLI Examples**
+
+- `metor settings get daemon.reuse_live_for_drops`
+- `metor settings set daemon.reuse_live_for_drops true`
+- `metor -p <profile> config get daemon.reuse_live_for_drops`
+- `metor -p <profile> config set daemon.reuse_live_for_drops true`
+
+---
+
+#### `daemon.live_idle_timeout`
+
+Closes a live session automatically after it stays unfocused and idle for this many seconds. `0` disables idle closing.
+
+| Property         | Value                         |
+| ---------------- | ----------------------------- |
+| Type             | `float`                       |
+| Default          | `0.0`                         |
+| Category         | `Advanced Network Resilience` |
+| Scope            | `Daemon runtime`              |
+| Profile Override | `Yes`                         |
+| Constraints      | Float >= 0 seconds.           |
+
+**CLI Examples**
+
+- `metor settings get daemon.live_idle_timeout`
+- `metor settings set daemon.live_idle_timeout 0.0`
+- `metor -p <profile> config get daemon.live_idle_timeout`
+- `metor -p <profile> config set daemon.live_idle_timeout 0.0`
+
+## Structural Profile Config
+
+### `is_remote`
+
+Marks the profile as a remote client profile instead of a local daemon owner.
+
+| Property               | Value                                      |
+| ---------------------- | ------------------------------------------ |
+| Type                   | `bool`                                     |
+| Default                | `False`                                    |
+| Scope                  | `Profile structural config`                |
+| Mutable After Creation | `No`                                       |
+| Constraints            | Boolean. Immutable after profile creation. |
+
+**CLI Examples**
+
+- `metor profiles add <name> --remote --port <port>`
+
+---
+
+### `daemon_port`
+
+Stores the static IPC port for remote profiles or the current daemon port file value.
+
+| Property               | Value                                          |
+| ---------------------- | ---------------------------------------------- |
+| Type                   | `Optional[int]`                                |
+| Default                | `None`                                         |
+| Scope                  | `Profile structural config`                    |
+| Mutable After Creation | `Yes`                                          |
+| Constraints            | Positive integer between 1 and 65535, or null. |
+
+**CLI Examples**
+
+- `metor -p <profile> config get daemon_port`
+- `metor -p <profile> config set daemon_port 50051`
+
+---
+
+### `security_mode`
+
+Declares whether the local profile stores keys and the database encrypted or plaintext at rest.
+
+| Property               | Value                                                                                                                |
+| ---------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| Type                   | `Literal['encrypted', 'plaintext']`                                                                                  |
+| Default                | `encrypted`                                                                                                          |
+| Scope                  | `Profile structural config`                                                                                          |
+| Mutable After Creation | `No`                                                                                                                 |
+| Constraints            | One of 'encrypted' or 'plaintext'. Immutable after profile creation except through the dedicated migration workflow. |
+
+**CLI Examples**
+
+- `metor profiles add <name> --plaintext`
+- `metor profiles migrate <name> --to <encrypted|plaintext>`

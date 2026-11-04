@@ -1,0 +1,414 @@
+"""Measured plain text, rounded controls and focus feedback without reflow."""
+
+from collections.abc import Callable
+from typing import cast
+
+from kivy.core.window import Window
+from kivy.graphics import Canvas, Color, Line, RoundedRectangle
+from kivy.input.motionevent import MotionEvent
+from kivy.metrics import dp
+from kivy.uix.behaviors import ButtonBehavior, FocusBehavior
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.label import Label as KivyLabel
+from kivy.uix.scrollview import ScrollView
+
+from metor.ui.gui.constants import Geometry
+from metor.ui.gui.theme import TYPE, color, font_path
+
+from .layout import reveal_focus
+
+
+class Panel(BoxLayout):
+    """Layout-owned rounded surface with geometry-independent state feedback."""
+
+    def __init__(self, surface: str = 'surface', **kwargs: object) -> None:
+        """Creates a surface; its parent owns all outer geometry.
+
+        Args:
+            surface: Named palette role.
+            kwargs: Native layout arguments.
+        Returns:
+            None
+        """
+        super().__init__(**kwargs)
+        self.surface: str = surface
+        with cast(Canvas, self.canvas).before:
+            self._fill = Color(*color(surface))
+            self._rectangle = RoundedRectangle(
+                pos=self.pos, size=self.size, radius=[dp(16)]
+            )
+        self.bind(pos=self._paint, size=self._paint)
+
+    def _paint(self, *_args: object) -> None:
+        """Updates drawing bounds without affecting layout.
+
+        Args:
+            _args: Native property callback arguments.
+        Returns:
+            None
+        """
+        self._rectangle.pos = self.pos
+        self._rectangle.size = self.size
+
+
+class Label(KivyLabel):
+    """Locally rendered plain text with actual-font height measurement."""
+
+    def __init__(
+        self,
+        text: str = '',
+        role: str = 'body',
+        tone: str = 'text',
+        wrap: bool = True,
+        **kwargs: object,
+    ) -> None:
+        """Constructs text without markup, URLs or remote asset lookup.
+
+        Args:
+            text: Canonical display text.
+            role: Typography token.
+            tone: Palette token.
+            wrap: Whether height follows available-width wrapping.
+            kwargs: Native presentation properties.
+        Returns:
+            None
+        """
+        size, line, weight = TYPE[role]
+        super().__init__(
+            text=text,
+            font_name=font_path(weight, text),
+            font_size=f'{size}sp',
+            color=color(tone),
+            markup=False,
+            halign='left',
+            valign='middle',
+            size_hint_y=None,
+            **kwargs,
+        )
+        self._line_units = line
+        self._font_weight = weight
+        self.bind(text=self._font_coverage)
+        self.height = dp(line)
+        if wrap:
+            self.bind(
+                width=self._measure,
+                text=self._measure,
+                texture_size=self._height,
+                font_size=self._height,
+            )
+        else:
+            self.size_hint_y = 1
+            self.shorten = True
+            self.shorten_from = 'right'
+            self.bind(size=self._single)
+
+    def _font_coverage(self, *_args: object) -> None:
+        """Selects a packaged fallback without changing text or caching its contents.
+
+        Args:
+            _args: Native text change.
+        Returns:
+            None
+        """
+        self.font_name = font_path(self._font_weight, self.text)
+
+    def _measure(self, *_args: object) -> None:
+        """Measures width-constrained body text including unbroken runs.
+
+        Args:
+            _args: Property event.
+        Returns:
+            None
+        """
+        self.text_size = (self.width, None)
+
+    def _height(self, *_args: object) -> None:
+        """Grows the row using rendered font metrics.
+
+        Args:
+            _args: Texture event.
+        Returns:
+            None
+        """
+        self.height = max(dp(self._line_units), self.texture_size[1])
+
+    def _single(self, *_args: object) -> None:
+        """Constrains explicit single-line previews without reducing font size.
+
+        Args:
+            _args: Geometry event.
+        Returns:
+            None
+        """
+        self.text_size = self.size
+
+
+# Kivy's cooperative touch mixins infer incompatible return types for the same methods.
+class Action(FocusBehavior, ButtonBehavior, Panel):  # pyright: ignore[reportIncompatibleMethodOverride]
+    """Keyboard-operable action with readable measured text and a minimum hit target."""
+
+    focus: bool
+    state: str
+
+    def __init__(
+        self,
+        text: str | Label,
+        callback: Callable[[], object],
+        *,
+        surface: str = 'raised',
+        tone: str = 'text',
+        **kwargs: object,
+    ) -> None:
+        """Binds one explicit action; dynamic state never changes its target.
+
+        Args:
+            text: Safe label text or a prebuilt measured label.
+            callback: Explicit action invoked on release.
+            surface: Named fill.
+            tone: Named label color.
+            kwargs: Layout properties.
+        Returns:
+            None
+        """
+        super().__init__(
+            surface=surface,
+            size_hint_y=None,
+            height='48dp',
+            padding=('12dp', '8dp'),
+            **kwargs,
+        )
+        self._accessible_name: str | None = None
+        self._tone = tone
+        self._hovered = False
+        self._keyboard_armed = False
+        self.bind(focus=reveal_focus)
+        self.focus_group: tuple[Action, ...] = ()
+        self.focus_key: tuple[str, ...] = ()
+        self._rectangle.radius = [dp(12)]
+        self.is_focusable = True
+        self._activate: Callable[[], object] = callback
+        self.label = (
+            text if isinstance(text, Label) else Label(text, role='button', tone=tone)
+        )
+        self.label.halign = 'center'
+        self.label.pos_hint = {'center_y': 0.5}
+        self.add_widget(self.label)
+        with cast(Canvas, self.canvas).after:
+            self._focus_color = Color(*color('focus'), group='focus')
+            self._ring = Line(
+                rounded_rectangle=(*self.pos, *self.size, dp(12)), width=dp(2)
+            )
+        self.bind(
+            on_release=self._release,
+            focus=self._feedback,
+            state=self._feedback,
+            pos=self._feedback,
+            size=self._feedback,
+            disabled=self._feedback,
+            minimum_height=self._measure,
+        )
+        self._feedback()
+        Window.bind(mouse_pos=self._pointer)
+
+    @property
+    def accessible_name(self) -> str:
+        """Follows visible action text unless a control supplies a richer purpose."""
+        return (
+            self.label.text if self._accessible_name is None else self._accessible_name
+        )
+
+    @accessible_name.setter
+    def accessible_name(self, value: str) -> None:
+        """Preserves explicit icon, state and privacy-revocation descriptions."""
+        self._accessible_name = value
+
+    def _measure(self, *_args: object) -> None:
+        """Grows the control to contain its complete label at the current text scale."""
+        if self.label.parent is self:
+            self.height = max(dp(Geometry.TARGET), self.minimum_height)
+
+    def _pointer(self, _window: object, position: tuple[float, float]) -> None:
+        """Shows pointer feedback only while attached to the native window.
+
+        Args:
+            _window: Native window event source.
+            position: Pointer coordinates.
+        Returns:
+            None
+        """
+        hovered = self._pointer_hit(position)
+        if hovered == self._hovered:
+            return
+        self._hovered = hovered
+        self._feedback()
+
+    def _pointer_hit(self, position: tuple[float, float]) -> bool:
+        """Tests an attached target against each enclosing scrolling viewport.
+
+        Args:
+            position: Native pointer coordinates in the window.
+        Returns:
+            bool: Whether the visible portion of this control owns the pointer.
+        """
+        if self.get_root_window() is None or not self.collide_point(
+            *self.to_widget(*position, relative=False)
+        ):
+            return False
+        ancestor = self.parent
+        while ancestor is not None and ancestor is not Window:
+            if isinstance(ancestor, ScrollView):
+                left, bottom = ancestor.to_window(ancestor.x, ancestor.y)
+                right, top = ancestor.to_window(ancestor.right, ancestor.top)
+                if not (left <= position[0] <= right and bottom <= position[1] <= top):
+                    return False
+            ancestor = ancestor.parent
+        return True
+
+    def on_touch_down(  # pyright: ignore[reportIncompatibleMethodOverride]
+        self, touch: MotionEvent
+    ) -> bool:
+        """Dispatches pointer presses without replacing the current keyboard owner.
+
+        Args:
+            touch: Native pointer event; child actions receive it first.
+        Returns:
+            bool: Whether an enabled control owns the press.
+        """
+        if self.disabled:
+            return False
+        handled = bool(ButtonBehavior.on_touch_down(self, touch))
+        if handled and touch not in FocusBehavior.ignored_touch:
+            FocusBehavior.ignored_touch.append(touch)
+        return handled
+
+    def _release(self, *_args: object) -> None:
+        """Invokes only an enabled deliberate release on an attached target.
+
+        Args:
+            _args: Native release event.
+        Returns:
+            None
+        """
+        if self.get_root_window() is None:
+            self.cancel_input()
+            return
+        if not self.disabled:
+            self._activate()
+
+    def _feedback(self, *_args: object) -> None:
+        """Reserves focus stroke inside the target, avoiding hover/press reflow.
+
+        Args:
+            _args: Native feedback event.
+        Returns:
+            None
+        """
+        self._ring.rounded_rectangle = (
+            self.x + dp(2),
+            self.y + dp(2),
+            max(0, self.width - dp(4)),
+            max(0, self.height - dp(4)),
+            dp(12),
+        )
+        self._focus_color.a = 1 if self.focus else 0
+        if not self.focus or self.disabled:
+            self._keyboard_armed = False
+        base = color('raised' if self.disabled else self.surface)
+        overlay = (
+            0
+            if self.disabled
+            else 0.1
+            if self.state == 'down'
+            else 0.06
+            if self._hovered
+            else 0
+        )
+        target = 0 if self._tone in ('textSecondary', 'danger') else 1
+        self._fill.rgba = tuple(
+            channel + (target - channel) * overlay for channel in base[:3]
+        ) + (1,)
+        self.label.color = color('textDisabled' if self.disabled else self._tone)
+
+    def keyboard_on_key_down(
+        self, window: object, keycode: tuple[int, str], text: str, modifiers: list[str]
+    ) -> bool:
+        """Arms one focused ordinary action without accepting held-key repeats.
+
+        Args:
+            window: Native keyboard owner.
+            keycode: Native key identity.
+            text: Native text value.
+            modifiers: Held modifier keys.
+        Returns:
+            bool: Whether activation input was handled.
+        """
+        if self.get_root_window() is None:
+            self.cancel_input()
+            return False
+        if (
+            self.focus
+            and not self.disabled
+            and not modifiers
+            and keycode[1] in {'left', 'right', 'up', 'down'}
+            and self.focus_group
+        ):
+            choices = [
+                item
+                for item in self.focus_group
+                if not item.disabled
+                and item.is_focusable
+                and item.get_root_window() is not None
+            ]
+            if self in choices:
+                delta = -1 if keycode[1] in {'left', 'up'} else 1
+                selected = choices[
+                    max(0, min(len(choices) - 1, choices.index(self) + delta))
+                ]
+                self._keyboard_armed = False
+                selected.focus = True
+            return True
+        if keycode[1] in ('spacebar', 'enter') and self.focus and not self.disabled:
+            self._keyboard_armed = True
+            self.state = 'down'
+            return True
+        return bool(super().keyboard_on_key_down(window, keycode, text, modifiers))
+
+    def cancel_input(self) -> None:
+        """Releases local keyboard and pointer state without invoking an action."""
+        self._keyboard_armed = False
+        self.state = 'normal'
+        if self.last_touch is not None:
+            self.last_touch.ungrab(self)
+        self.focus = False
+
+    def keyboard_on_key_up(self, window: object, keycode: tuple[int, str]) -> bool:
+        """Activates ordinary controls only on focused Space/Enter release.
+
+        Args:
+            window: Keyboard owner.
+            keycode: Native key identity.
+        Returns:
+            bool: Whether the event was handled.
+        """
+        if self.get_root_window() is None:
+            self.cancel_input()
+            return False
+        if keycode[1] in ('spacebar', 'enter'):
+            armed, self._keyboard_armed = self._keyboard_armed, False
+            self.state = 'normal'
+            if armed and self.focus and not self.disabled:
+                self._activate()
+            return True
+        return bool(super().keyboard_on_key_up(window, keycode))
+
+    @staticmethod
+    def group(actions: tuple['Action', ...]) -> None:
+        """Defines a bounded selector/list's arrow order without activating a choice or trapping Tab.
+
+        Args:
+            actions: Native controls in meaningful visual order, supplied by the bounded view.
+        Returns:
+            None
+        """
+        for action in actions:
+            action.focus_group = actions

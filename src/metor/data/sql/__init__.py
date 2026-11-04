@@ -9,23 +9,39 @@ from metor.data.sql.backends import (
     _load_sqlcipher_dbapi,
 )
 from metor.data.sql.history import HistoryRepository
-from metor.data.sql.manager import DatabaseCorruptedError, SqlManager
+from metor.data.sql.errors import (
+    DatabaseCorruptedError,
+    DatabaseMigrationError,
+    LegacyDatabaseSchemaError,
+    NewerDatabaseSchemaError,
+    UnsupportedDatabaseSchemaError,
+)
+from metor.data.sql.manager import SqlManager
+from metor.data.sql.metadata import ProfileMetadataRepository
+from metor.data.sql.producers import VoiceProducerRepository, VoiceProducerItem
 from metor.data.sql.message import MessageReceiptRow, MessageRepository
 from metor.data.sql.peer import PeerRepository, PeerRow
 
 
 __all__ = [
     'DatabaseCorruptedError',
+    'DatabaseMigrationError',
     'HistoryRepository',
+    'LegacyDatabaseSchemaError',
     'MessageReceiptRow',
     'MessageRepository',
+    'NewerDatabaseSchemaError',
     'PeerRepository',
     'PeerRow',
+    'ProfileMetadataRepository',
+    'VoiceProducerRepository',
+    'VoiceProducerItem',
     'SQLCIPHER_BACKEND',
     'SqlCipherConnection',
     'SqlCipherCursor',
     'SqlCipherDbApi',
     'SqlManager',
     'SqlParam',
+    'UnsupportedDatabaseSchemaError',
     '_load_sqlcipher_dbapi',
 ]

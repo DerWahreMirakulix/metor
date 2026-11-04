@@ -3,8 +3,8 @@
 from pathlib import Path
 from typing import List, Optional
 
-from metor.data import SettingKey, Settings
-from metor.utils import Constants
+from metor.data import SettingKey, Settings, SettingValidationError
+from metor.utils import Constants, FileLock
 
 # Local Package Imports
 from metor.data.profile.models import (
@@ -12,7 +12,12 @@ from metor.data.profile.models import (
     ProfileOperationType,
     ProfileSummary,
 )
-from metor.data.profile.support import normalize_profile_name
+from metor.data.profile.paths import Paths
+from metor.data.profile.support import (
+    is_valid_profile_name,
+    normalize_profile_name,
+    validate_profile_directory,
+)
 
 
 def load_default_profile() -> str:
@@ -25,10 +30,77 @@ def load_default_profile() -> str:
     Returns:
         str: The configured default profile name.
     """
-    return Settings.get_str(SettingKey.DEFAULT_PROFILE)
+    return Settings.get_str(SettingKey.DEFAULT_PROFILE, persist_defaults=False)
+
+
+def resolve_initial_profile(explicit: str | None = None) -> str | None:
+    """Select a valid initial profile and repair a stale singleton default.
+
+    Args:
+        explicit: Optional requested name; a missing name remains recoverable by GUI.
+    Returns:
+        str | None: Explicit name, valid default, singleton, or no selection.
+    """
+    if explicit is not None:
+        return explicit
+    if not Constants.DATA.exists():
+        return _resolve_initial_profile_locked()
+    with FileLock(Constants.DATA / '.profile-catalog'):
+        return _resolve_initial_profile_locked()
+
+
+def _resolve_initial_profile_locked() -> str | None:
+    """Resolve and repair the default while holding the catalog-before-settings lock.
+
+    Args:
+        None
+    Returns:
+        str | None: Valid default, sole profile, or no unambiguous choice.
+    """
+    profiles = get_all_profiles()
+    default = load_default_profile()
+    if default in profiles:
+        return default
+    if len(profiles) != 1:
+        return None
+    try:
+        Settings.set(SettingKey.DEFAULT_PROFILE, profiles[0], expected_value=default)
+    except SettingValidationError:
+        current = load_default_profile()
+        if current in profiles:
+            return current
+        raise
+    return profiles[0]
+
+
+def valid_default_profile(profiles: list[str] | None = None) -> str | None:
+    """Return the configured default only when it belongs to the valid catalog.
+
+    Args:
+        profiles: Optional already scanned catalog names.
+    Returns:
+        str | None: Valid default identity, if any.
+    """
+    names = profiles if profiles is not None else get_all_profiles()
+    default = load_default_profile()
+    return default if default in names else None
 
 
 def set_default_profile(profile_name: str) -> ProfileOperationResult:
+    """Serialize an explicit default choice with catalog mutations.
+
+    Args:
+        profile_name: Requested default profile.
+    Returns:
+        ProfileOperationResult: Confirmed choice or validation outcome.
+    """
+    if not Constants.DATA.exists():
+        return _set_default_profile_locked(profile_name)
+    with FileLock(Constants.DATA / '.profile-catalog'):
+        return _set_default_profile_locked(profile_name)
+
+
+def _set_default_profile_locked(profile_name: str) -> ProfileOperationResult:
     """
     Sets one new default profile after strict name normalization.
 
@@ -42,7 +114,12 @@ def set_default_profile(profile_name: str) -> ProfileOperationResult:
     if not safe_name:
         return ProfileOperationResult(False, ProfileOperationType.INVALID_NAME, {})
 
-    if not (Constants.DATA / safe_name).exists():
+    try:
+        profile_path = Paths(safe_name)
+    except ValueError:
+        return ProfileOperationResult(False, ProfileOperationType.INVALID_NAME, {})
+
+    if not profile_path.exists():
         return ProfileOperationResult(
             False,
             ProfileOperationType.PROFILE_NOT_FOUND,
@@ -75,11 +152,37 @@ def get_all_profiles() -> List[str]:
         Constants.HIDDEN_SERVICE_DIR,
         Constants.TOR_DATA_DIR,
     }
-    return sorted(
-        d.name
-        for d in data_dir.iterdir()
-        if d.is_dir() and d.name not in ignored_folders
-    )
+    profiles: list[str] = []
+    for entry in data_dir.iterdir():
+        if entry.name in ignored_folders or not is_valid_profile_name(entry.name):
+            continue
+        try:
+            validate_profile_directory(entry)
+        except ValueError:
+            continue
+        profiles.append(entry.name)
+    return sorted(profiles)
+
+
+def get_unavailable_profile_names() -> list[str]:
+    """List syntactically valid local names whose storage path is unsafe.
+
+    Args:
+        None
+    Returns:
+        list[str]: Sorted names with inaccessible or invalid directory entries.
+    """
+    if not Constants.DATA.exists():
+        return []
+    unavailable: list[str] = []
+    for entry in Constants.DATA.iterdir():
+        if not is_valid_profile_name(entry.name):
+            continue
+        try:
+            validate_profile_directory(entry)
+        except (ValueError, OSError):
+            unavailable.append(entry.name)
+    return sorted(unavailable)
 
 
 def get_profile_summaries(

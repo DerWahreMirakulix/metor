@@ -21,6 +21,7 @@ def verify_master_password(km: KeyManager) -> None:
         InvalidMasterPasswordError: If the stored key material cannot be decrypted.
     """
     try:
+        km.unlock_profile_keys()
         if km.has_metor_key():
             km.get_metor_key()
     except Exception as exc:

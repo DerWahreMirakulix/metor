@@ -1,0 +1,654 @@
+"""Responsive root/master-detail composition preserving one foreground route."""
+
+from collections.abc import Callable
+
+from kivy.metrics import dp
+from kivy.graphics import Color, Rectangle
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.anchorlayout import AnchorLayout
+from kivy.uix.scrollview import ScrollView
+from kivy.uix.widget import Widget
+
+from metor.core.api import Delivery
+from metor.ui.gui.constants import Geometry
+from metor.ui.gui.runtime import GuiController, conversation_rows
+from metor.ui.gui.state import Route
+from metor.ui.gui.widgets import Action, Label, PointerTooltip, TextField
+from metor.ui.gui.theme import color
+
+# Local Package Imports
+from .entry import entry_view
+from .root import root_view, RootContinuity, RootPanel
+from .peer import PeerView, PeerProjections
+from .secondary import secondary_view
+from .contacts import ContactListView
+from .security import security_view, LockedActivity
+from .purge import purge_view
+from .device import device_view
+from .metric_continuity import (
+    ContactMetricContinuity,
+    PeerMetricContinuity,
+    SecondaryMetricContinuity,
+)
+
+
+class Shell(BoxLayout):
+    """Owns content edges and responsive panels without changing domain state."""
+
+    def __init__(
+        self, controller: GuiController, refresh: Callable[[], None], **kwargs: object
+    ) -> None:
+        """Creates the application shell after toolkit setup.
+
+        Args:
+            controller: Toolkit-independent state and public operations.
+            refresh: Native repaint request.
+            kwargs: Native layout properties.
+        Returns:
+            None
+        """
+        super().__init__(orientation='horizontal', **kwargs)
+        self.controller = controller
+        self.refresh = refresh
+        self._private_render_key: tuple[object, ...] | None = None
+        self._peer_key: tuple[object, ...] | None = None
+        self._peer_panel: PeerView | None = None
+        self._peer_projections = PeerProjections(controller, refresh)
+        self._contacts_panel: ContactListView | None = None
+        self._contacts_key: tuple[object, ...] | None = None
+        self._master: BoxLayout | None = None
+        self._root_panel: RootPanel | None = None
+        self._foreground_key: tuple[object, ...] | None = None
+        self._root_context: tuple[object, ...] | None = None
+        self._master_key: tuple[object, ...] | None = None
+        self._detail: BoxLayout | None = None
+        self._security_panel: AnchorLayout | None = None
+        self.keyboard_inset: float = 0
+        self.activity_inset: float = 0
+        self._pixel_scale = dp(1)
+        with self.canvas.before:
+            Color(*color('background'))
+            self._background = Rectangle(pos=self.pos, size=self.size)
+        self.bind(pos=self._bounds, size=self._bounds)
+
+    def _bounds(self, *_args: object) -> None:
+        """Keeps viewport pixels opaque in the window and exported fixtures.
+
+        Args:
+            _args: Native bounds callback.
+        Returns:
+            None
+        """
+        self._background.pos = self.pos
+        self._background.size = self.size
+
+    def render(self) -> None:
+        """Recomposes foreground panels from current authorized state.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        PointerTooltip.clear_all()
+        if self.controller.state.covered:
+            self.revoke_peer_views()
+            self._root_panel = None
+            self._root_context = None
+        if self.width < dp(
+            Geometry.MIN_WIDTH
+        ) or self.height + self.keyboard_inset + self.activity_inset < dp(
+            Geometry.MIN_HEIGHT
+        ):
+            self._private_render_key = None
+            self.revoke_peer_views()
+            self._peer_key = None
+            self._peer_panel = None
+            self._contacts_panel = None
+            self._contacts_key = None
+            self._master = None
+            self.controller.voice.depart()
+            self.controller.playback.stop()
+            self.clear_widgets()
+            self.add_widget(Label('Increase the window size or reduce display scaling'))
+            return
+        state = self.controller.state
+        pixel_scale = dp(1)
+        metrics_changed = pixel_scale != self._pixel_scale
+        if (
+            metrics_changed
+            and self._peer_panel is not None
+            and self._peer_panel.route == state.route
+            and self._peer_panel.composer.ptt.held
+            and not state.covered
+        ):
+            # Keep the native input owner attached until its matching release.
+            return
+        self._pixel_scale = pixel_scale
+        if self._security_panel is not None:
+            for widget in self._security_panel.walk():
+                if isinstance(widget, LockedActivity):
+                    widget.update()
+        prompt = self.controller.interactions.prompt
+        wide = self.width >= dp(Geometry.BREAKPOINT)
+        root_context = (
+            state.generation,
+            state.root_delivery,
+            state.root_pages.get(state.root_delivery, 0),
+        )
+        previous_route = (
+            self._foreground_key[:2] if self._foreground_key is not None else None
+        )
+        route_changed = previous_route is not None and previous_route != (
+            state.generation,
+            state.route,
+        )
+        root_continuity = (
+            RootContinuity(self._root_panel)
+            if self._root_panel is not None
+            and self._root_context == root_context
+            and (state.generation, state.route)
+            == (self._foreground_key[:2] if self._foreground_key is not None else None)
+            else None
+        )
+        peer_continuity = (
+            PeerMetricContinuity.capture(self._peer_panel, self.controller)
+            if metrics_changed
+            and not state.covered
+            and self._peer_panel is not None
+            and self._peer_panel.route == state.route
+            else None
+        )
+        contact_continuity = (
+            ContactMetricContinuity.capture(self._contacts_panel, self.controller)
+            if metrics_changed
+            and not state.covered
+            and self._contacts_panel is not None
+            and self._contacts_panel.route == state.route
+            else None
+        )
+        secondary_continuity = (
+            SecondaryMetricContinuity.capture(
+                self._detail,
+                self.controller,
+                preserve_scroll=metrics_changed or state.route.view != 'V18',
+            )
+            if not state.covered
+            and self._detail is not None
+            and previous_route == (state.generation, state.route)
+            and state.route.view not in {'V06', 'V07', 'V08', 'V09', 'V11', 'V12'}
+            and (
+                metrics_changed
+                or state.route.view
+                in {'V13', 'V14', 'V15', 'V16', 'V17', 'V18', 'V19', 'V20'}
+            )
+            else None
+        )
+        metric_rebuild = (
+            metrics_changed
+            and not state.covered
+            and self.controller.interactions.prompt is None
+            and state.route.view not in {'V02', 'V03', 'V04', 'V05', 'V21', 'V22'}
+        )
+        if (route_changed or metric_rebuild) and self._detail is not None:
+            for widget in self._detail.walk(restrict=True):
+                if isinstance(widget, TextField):
+                    widget.focus = False
+        if metric_rebuild:
+            self._private_render_key = None
+            self._foreground_key = None
+            self._peer_key = None
+            self._contacts_key = None
+            self._root_panel = None
+            self._root_context = None
+        self._peer_projections.reconcile(
+            allowed=not state.covered and prompt is None,
+            metrics_changed=metric_rebuild,
+        )
+        peer_key = (state.generation, state.route, wide)
+        if route_changed and self._root_panel is not None:
+            for widget in self._root_panel.walk(restrict=True):
+                if isinstance(widget, Action):
+                    widget.focus = False
+        if (
+            not state.covered
+            and prompt is None
+            and state.route.view in {'V06', 'V07'}
+            and peer_key == self._foreground_key
+            and self._root_context == root_context
+            and self._root_panel is not None
+            and self._root_panel.get_root_window() is not None
+        ):
+            master_key = self._root_key()
+            if master_key != self._master_key:
+                self._root_panel.update()
+                if root_continuity is not None:
+                    root_continuity.restore(self._root_panel, self.controller)
+                self._master_key = master_key
+            return
+
+        if (
+            not state.covered
+            and prompt is None
+            and state.route.view in {'V08', 'V09'}
+            and peer_key == self._peer_key
+            and self._peer_panel is not None
+        ):
+            self._peer_panel.update()
+            self._update_master(root_continuity)
+            return
+        if (
+            not state.covered
+            and prompt is None
+            and state.route.view in {'V11', 'V12'}
+            and peer_key == self._contacts_key
+            and self._contacts_panel is not None
+        ):
+            self._contacts_panel.update()
+            self._update_master(root_continuity)
+            return
+        private = (
+            state.covered
+            or state.route.view
+            in {
+                'V02',
+                'V03',
+                'V04',
+                'V12',
+                'V13',
+                'V14',
+                'V15',
+                'V16',
+                'V17',
+                'V18',
+                'V19',
+                'V20',
+                'V21',
+            }
+            or prompt is not None
+        )
+        if private:
+            view = state.route.view
+            settings_view = view in {'V17', 'V19'}
+            covered_view = state.covered or prompt is not None
+            notices = self.controller.notifications.store
+            if view == 'V16' and not covered_view:
+                notices.mark_seen()
+            key = (
+                self.controller.native_lifecycle_failed,
+                state.generation,
+                state.route,
+                state.snapshot.onion if view == 'V15' and state.snapshot else None,
+                (
+                    notices.revision,
+                    notices.selecting,
+                    frozenset(notices.selected),
+                    tuple(
+                        (notice.peer, self.controller.contacts.alias(notice.peer))
+                        for notice in notices.items.values()
+                    ),
+                )
+                if view == 'V16' and not covered_view
+                else None,
+                (
+                    controller_form.serial,
+                    controller_form.error,
+                    controller_form.unknown,
+                    controller_form.pending,
+                )
+                if view == 'V13' and (controller_form := self.controller.contacts.form)
+                else None,
+                state.busy if view not in {'V14', 'V15', 'V16'} else None,
+                state.status if covered_view else None,
+                id(prompt),
+                id(self.controller.security.restriction) if covered_view else None,
+                state.preferences.preferences_revision
+                if state.preferences
+                and (covered_view or settings_view or view == 'V04')
+                else None,
+                self.controller.preferences.last_error if settings_view else None,
+                state.capabilities if settings_view or view == 'V18' else None,
+                self.controller.core_settings.revision if settings_view else None,
+                self.controller.history.revision if view == 'V18' else None,
+                self.controller.profiles.revision
+                if covered_view or view in {'V02', 'V03', 'V20'}
+                else None,
+                (self.controller.purge.title, self.controller.purge.detail)
+                if view in {'V21', 'V22'} or self.controller.native_lifecycle_failed
+                else None,
+                (
+                    self.controller.device.phase,
+                    self.controller.device.title,
+                    self.controller.device.detail,
+                    self.controller.device.progress,
+                )
+                if view in {'V21', 'V22'}
+                else None,
+                self.controller.device.battery_status if view == 'V17' else None,
+                (
+                    self.controller.device.settings.loaded,
+                    self.controller.device.settings.pending,
+                    self.controller.device.settings.feedback,
+                    id(self.controller.device.settings.descriptors),
+                    id(self.controller.device.settings.values),
+                )
+                if view == 'V17'
+                else None,
+                wide
+                if not state.covered
+                and prompt is None
+                and state.route.view not in {'V02', 'V03', 'V04', 'V05', 'V21', 'V22'}
+                else None,
+            )
+            if key == self._private_render_key:
+                self._update_master(root_continuity)
+                return
+            self._private_render_key = key
+        else:
+            self._private_render_key = None
+        self._foreground_key = peer_key
+        contact_search_focused = bool(
+            self._contacts_panel is not None
+            and self._contacts_panel.search.focus
+            and self._contacts_panel.route == state.route
+            and not state.covered
+        )
+        retained_peer = (
+            self._peer_panel
+            if not state.covered
+            and prompt is None
+            and self._peer_key is not None
+            and self._peer_key[:2] == peer_key[:2]
+            else None
+        )
+        retained_contacts = (
+            self._contacts_panel
+            if not state.covered
+            and prompt is None
+            and self._contacts_key is not None
+            and self._contacts_key[:2] == peer_key[:2]
+            else None
+        )
+        for retained in (retained_peer, retained_contacts):
+            if retained is not None and retained.parent is not None:
+                retained.parent.remove_widget(retained)
+        if self._detail is not None:
+            for widget in self._detail.walk(restrict=True):
+                if isinstance(widget, Action):
+                    widget.cancel_input()
+                elif isinstance(widget, TextField):
+                    widget.focus = False
+        self.clear_widgets()
+        self._peer_key = None
+        self._peer_panel = None
+        self._contacts_panel = None
+        self._contacts_key = None
+        self._master = None
+        self._detail = None
+        self._security_panel = None
+        if (
+            self.controller.native_lifecycle_failed
+            or self.controller.interactions.prompt is not None
+        ):
+            self.add_widget(entry_view(self.controller, self.refresh))
+            return
+        if state.route.view == 'V22' and self.controller.purge.active:
+            self.add_widget(purge_view(self.controller))
+            return
+        if state.route.view in {'V21', 'V22'} and self.controller.device.active:
+            self.add_widget(device_view(self.controller, self.refresh))
+            return
+        if state.route.view in ('V04', 'V05'):
+            self._security_panel = security_view(self.controller, self.refresh)
+            self.add_widget(self._security_panel)
+            return
+        if state.covered:
+            self.add_widget(entry_view(self.controller, self.refresh))
+            return
+        wide = self.width >= dp(Geometry.BREAKPOINT)
+        root = state.route.view in ('V06', 'V07')
+        if wide or root:
+            master = self._root(root_continuity)
+            self._master_key = self._root_key()
+            if wide:
+                self._master = master
+                self._master_key = self._root_key()
+                master.size_hint_x = None
+                master.width = dp(Geometry.MASTER)
+            self.add_widget(
+                master if wide else self._center(master, Geometry.COMPACT_MAX)
+            )
+            if wide:
+                divider = Widget(size_hint_x=None, width=dp(Geometry.DIVIDER))
+                with divider.canvas:
+                    Color(*color('line'))
+                    line = Rectangle(pos=divider.pos, size=divider.size)
+                divider.bind(
+                    pos=lambda widget, value: setattr(line, 'pos', value),
+                    size=lambda widget, value: setattr(line, 'size', value),
+                )
+                self.add_widget(divider)
+        if wide or not root:
+            panel = BoxLayout(orientation='vertical', padding=dp(24), spacing=dp(16))
+            self._detail = panel
+            if self.keyboard_inset:
+                panel.padding[3] = dp(Geometry.KEYBOARD_GAP)
+            if root:
+                empty = BoxLayout(
+                    orientation='vertical', size_hint_y=None, spacing=dp(6)
+                )
+                empty.bind(minimum_height=empty.setter('height'))
+                title = Label('Choose a conversation', role='peer')
+                title.halign = 'center'
+                hint = Label(
+                    'Use New Drop to message a saved contact.'
+                    if state.root_delivery is Delivery.DROP
+                    else 'Use Start Live to invite a saved contact.',
+                    role='support',
+                    tone='textSecondary',
+                )
+                hint.halign = 'center'
+                empty.add_widget(title)
+                empty.add_widget(hint)
+                center = AnchorLayout()
+                center.add_widget(empty)
+                panel.add_widget(center)
+            elif state.route.view in ('V08', 'V09'):
+                self._peer_key = peer_key
+                self._peer_panel = self._peer_projections.current(wide=wide)
+                panel.add_widget(self._peer_panel)
+            else:
+                secondary = retained_contacts or secondary_view(
+                    self.controller, self.refresh
+                )
+                if retained_contacts is not None:
+                    retained_contacts.update()
+                panel.add_widget(secondary)
+                if isinstance(secondary, ContactListView):
+                    self._contacts_panel = secondary
+                    self._contacts_key = peer_key
+            self.add_widget(
+                self._center(panel, Geometry.WIDE_MAX if wide else Geometry.COMPACT_MAX)
+            )
+            if self._contacts_panel is not None and contact_search_focused:
+                self._contacts_panel.search.focus = True
+            if self._peer_panel is not None and peer_continuity is not None:
+                peer_continuity.restore(self._peer_panel, self.controller)
+            if self._contacts_panel is not None and contact_continuity is not None:
+                contact_continuity.restore(self._contacts_panel, self.controller)
+            if secondary_continuity is not None:
+                secondary_continuity.restore(panel, self.controller)
+
+    def revoke_peer_views(self) -> None:
+        """Revokes visible and detached peer data before a privacy cover returns."""
+        self._peer_projections.clear()
+        self._peer_panel = None
+        self._peer_key = None
+
+    def feedback_anchor(self) -> Widget | None:
+        """Returns foreground content bounds excluding fixed input and navigation.
+
+        The overlay follows the actual native viewport, including a keyboard
+        inset and wide master/detail allocation, without reserving layout space.
+
+        Returns:
+            Widget | None: Authorized content viewport for temporary feedback.
+        """
+        if self.controller.state.covered:
+            return None
+        if self._peer_panel is not None:
+            return self._peer_panel.timeline.scroll
+        if self._contacts_panel is not None:
+            return self._contacts_panel.scroll
+        if self._detail is not None and self.controller.state.route.view not in {
+            'V06',
+            'V07',
+        }:
+            return next(
+                (
+                    widget
+                    for widget in self._detail.walk(restrict=True)
+                    if isinstance(widget, ScrollView)
+                ),
+                None,
+            )
+        return self._root_panel.scroll if self._root_panel is not None else None
+
+    def set_input_inset(self, height: float) -> None:
+        """Reserves keyboard height without replacing focused peer controls.
+
+        Args:
+            height: Native logical-pixel dock inset; zero restores the ordinary edge.
+        Returns:
+            None
+        """
+        self.keyboard_inset = height
+        if self._detail is not None:
+            self._detail.padding[3] = dp(
+                Geometry.KEYBOARD_GAP if height else Geometry.EDGE
+            )
+
+    @staticmethod
+    def _center(panel: BoxLayout, content_width: int) -> AnchorLayout:
+        """Caps one foreground column while preserving its 24-unit inner edges.
+
+        Args:
+            panel: Foreground panel including its own edge padding.
+            content_width: Maximum usable content width.
+        Returns:
+            AnchorLayout: Centered native layout owner.
+        """
+        wrapper = AnchorLayout(anchor_x='center', anchor_y='center')
+        panel.size_hint_x = None
+        wrapper.bind(
+            width=lambda owner, width: setattr(
+                panel, 'width', min(width, dp(content_width + Geometry.EDGE * 2))
+            )
+        )
+        wrapper.add_widget(panel)
+        return wrapper
+
+    def inset_locked_call(self, bottom: float) -> None:
+        """Keeps unlock controls scrollable above the reduced accepted-call view.
+
+        Args:
+            bottom: Call controls' extent in native logical pixels.
+        """
+        if (
+            self._security_panel is not None
+            and self.controller.state.route.view == 'V05'
+        ):
+            self._security_panel.padding = (
+                dp(Geometry.EDGE),
+                dp(Geometry.EDGE),
+                dp(Geometry.EDGE),
+                max(dp(Geometry.EDGE), bottom - self.keyboard_inset),
+            )
+
+    def _go(self, route: Route) -> None:
+        """Navigates through the presentation boundary.
+
+        Args:
+            route: Explicit destination.
+        Returns:
+            None
+        """
+        self.controller.navigate(route, from_root=True)
+        self.refresh()
+
+    def _tab(self, delivery: Delivery) -> None:
+        """Changes only the root projection, preserving wide peer focus.
+
+        Args:
+            delivery: Selected root mode.
+        Returns:
+            None
+        """
+        state = self.controller.state
+        state.select_root_delivery(delivery)
+        self.refresh()
+
+    def _root_key(self) -> tuple[object, ...]:
+        """Invalidates root presentation for pins, page changes and current Core metadata.
+
+        Args:
+            None
+        Returns:
+            tuple[object, ...]: Root-only repaint identity, leaving peer input intact.
+        """
+        state = self.controller.state
+        return (
+            id(state.snapshot),
+            state.root_delivery,
+            self.controller.notifications.store.revision,
+            state.preferences.preferences_revision if state.preferences else None,
+            state.root_pages.get(state.root_delivery, 0),
+            state.ended_live_expanded,
+            state.ended_live_page,
+            tuple(conversation_rows(self.controller, state.root_delivery)),
+        )
+
+    def _update_master(self, continuity: RootContinuity | None) -> None:
+        """Refreshes wide master content independently of the foreground page.
+
+        Args:
+            continuity: Current master focus and scroll, if its context is unchanged.
+        """
+        if self._master is None:
+            return
+        key = self._root_key()
+        if key == self._master_key:
+            return
+        self.remove_widget(self._master)
+        self._master = self._root(continuity)
+        self._master.size_hint_x = None
+        self._master.width = dp(Geometry.MASTER)
+        self.add_widget(self._master, index=len(self.children))
+        self._master_key = key
+
+    def _root(self, continuity: RootContinuity | None = None) -> BoxLayout:
+        """Builds a bounded root page without replacing an existing wide peer pane.
+
+        Args:
+            continuity: State captured before native parent detachment.
+        Returns:
+            BoxLayout: Current DROP/LIVE root composition.
+        """
+        state = self.controller.state
+        context = (
+            state.generation,
+            state.root_delivery,
+            state.root_pages.get(state.root_delivery, 0),
+        )
+        if self._root_panel is not None and self._root_context == context:
+            if self._root_panel.parent is not None:
+                self._root_panel.parent.remove_widget(self._root_panel)
+            self._root_panel.update()
+        else:
+            self._root_panel = root_view(
+                self.controller, self._go, self._tab, self.refresh
+            )
+        self._root_context = context
+        if continuity is not None:
+            continuity.restore(self._root_panel, self.controller)
+        return self._root_panel

@@ -1,26 +1,89 @@
 """High-level endpoint-based reference client for interacting with a Metor daemon."""
 
-import socket
-from typing import Callable, Optional, Type, TypeVar
+from typing import Callable, Optional, Type, TypeVar, cast
+import time
+import secrets
 
+from metor.client.calls import CallClientMixin
 from metor.client.auth import (
     AuthProvider,
     IpcAuthExchange,
     IpcAuthResult,
 )
-from metor.client.ipc import IpcClient
+from metor.client.ipc import IpcClient, RequestLease
+from metor.client.outcomes import PROGRESS_EVENTS, REJECTION_EVENTS, MetorProtocolError
 from metor.core.api import (
+    AppendVoiceChunkCommand,
+    BeginVoiceCommand,
+    CancelVoiceCommand,
+    CommitVoiceCommand,
+    DaemonLockedEvent,
+    EventType,
+    FrontendLeaseCommand,
+    FrontendLeaseEvent,
+    Delivery,
     InitCommand,
     InitEvent,
     IpcCommand,
     IpcEvent,
+    LockCommand,
+    ListRetainedMessagesCommand,
+    GetRuntimeSnapshotCommand,
+    GetVoiceChunkCommand,
+    FinalizeVoiceCommand,
+    PrepareProfileExitCommand,
+    ProfileExitPreparedEvent,
     ProtocolMismatchEvent,
     RegisterLiveConsumerCommand,
+    ReleaseVoiceCommand,
+    SendMessageCommand,
+    RuntimeSnapshotEvent,
+    RuntimeSnapshotUnavailableEvent,
+    RetainedMessagesEvent,
+    MessageDirectionCode,
+    TextContent,
+    VoiceCancelledEvent,
+    VoiceChunkAcceptedEvent,
+    VoiceCommittedEvent,
+    VoiceDataEvent,
+    VoiceFinalizedEvent,
+    VoiceOperationRejectedEvent,
+    VoiceResourceLimitEvent,
+    VoiceReleasedEvent,
+    VoiceStartedEvent,
     ensure_request_id,
 )
-from metor.utils.constants import Constants
+from metor.shared.constants import Constants
+from metor.versioning import (
+    APP_VERSION,
+    IPC_PROTOCOL_MIN_SUPPORTED,
+    IPC_PROTOCOL_VERSION,
+    negotiate_protocol_generation,
+)
 
 T = TypeVar('T', bound=IpcEvent)
+VoiceAppendOutcome = (
+    VoiceChunkAcceptedEvent
+    | VoiceResourceLimitEvent
+    | VoiceFinalizedEvent
+    | VoiceOperationRejectedEvent
+)
+
+
+class MetorRequestRejectedError(RuntimeError):
+    """Carries a typed correlated command outcome that was not its success DTO."""
+
+    def __init__(self, event: IpcEvent) -> None:
+        """Initializes a request error retaining its typed daemon outcome.
+
+        Args:
+            event (IpcEvent): Correlated terminal event returned by the daemon.
+
+        Returns:
+            None
+        """
+        super().__init__(f'Request ended with {event.event_type.value}.')
+        self.event = event
 
 
 def parse_endpoint(endpoint: str | int) -> tuple[str, int]:
@@ -28,7 +91,7 @@ def parse_endpoint(endpoint: str | int) -> tuple[str, int]:
     Parses an endpoint definition into host and port.
 
     Args:
-        endpoint (str | int): Formatted as "host:port", "port", or integer port.
+        endpoint (str | int): IPv4/DNS "host:port", "port", or integer port.
 
     Raises:
         ValueError: If endpoint format is invalid or port is out of range.
@@ -36,19 +99,29 @@ def parse_endpoint(endpoint: str | int) -> tuple[str, int]:
     Returns:
         tuple[str, int]: Resolved host and integer port.
     """
-    if isinstance(endpoint, int):
-        return Constants.LOCALHOST, endpoint
+    resolved_host = Constants.LOCALHOST
+    if type(endpoint) is int:
+        port = endpoint
+    else:
+        if not isinstance(endpoint, str):
+            raise ValueError('IPC endpoint must be a host/port string or integer port.')
+        endpoint_str = endpoint.strip()
+        host, separator, port_str = endpoint_str.rpartition(':')
+        if separator:
+            if ':' in host or any(character.isspace() for character in host):
+                raise ValueError('IPC endpoint requires an IPv4 address or DNS host.')
+            resolved_host = host or Constants.LOCALHOST
+        else:
+            port_str = endpoint_str
+        if not port_str.isascii() or not port_str.isdecimal():
+            raise ValueError('IPC endpoint requires a decimal TCP port.')
+        port = int(port_str)
+    if not 0 < port <= Constants.TCP_PORT_MAX:
+        raise ValueError('IPC endpoint port is outside the TCP range.')
+    return resolved_host, port
 
-    endpoint_str: str = endpoint.strip()
-    if ':' in endpoint_str:
-        host, _, port_str = endpoint_str.rpartition(':')
-        resolved_host: str = host or Constants.LOCALHOST
-        return resolved_host, int(port_str)
 
-    return Constants.LOCALHOST, int(endpoint_str)
-
-
-class MetorClient:
+class MetorClient(CallClientMixin):
     """High-level client managing connection, auth, and event streaming with a Metor daemon."""
 
     def __init__(
@@ -59,7 +132,10 @@ class MetorClient:
         on_event: Optional[Callable[[IpcEvent], None]] = None,
         on_disconnect: Optional[Callable[[], None]] = None,
         timeout: float = Constants.DEFAULT_IPC_TIMEOUT,
-        client_version: str = '0.2.0',
+        unlock_timeout: float = Constants.MAX_UNLOCK_INITIALIZATION_WAIT_SEC,
+        client_version: str = APP_VERSION,
+        lifetime_token: str | None = None,
+        local_lifetime: bool = False,
     ) -> None:
         """
         Initializes one MetorClient.
@@ -70,6 +146,7 @@ class MetorClient:
             on_event (Optional[Callable[[IpcEvent], None]]): Callback for incoming async events.
             on_disconnect (Optional[Callable[[], None]]): Callback fired if socket connection drops.
             timeout (float): Socket connect and read timeout.
+            unlock_timeout: Bounded runtime initialization wait after unlock.
             client_version (str): Client application version reported in handshake.
 
         Returns:
@@ -82,7 +159,14 @@ class MetorClient:
         self._on_event: Callable[[IpcEvent], None] = on_event or (lambda _e: None)
         self._on_disconnect: Callable[[], None] = on_disconnect or (lambda: None)
         self._timeout: float = timeout
+        self._unlock_timeout: float = min(
+            unlock_timeout, Constants.MAX_UNLOCK_INITIALIZATION_WAIT_SEC
+        )
         self._client_version: str = client_version
+        self._lifetime_token = lifetime_token
+        self._local_lifetime = local_lifetime
+        self._frontend_id = secrets.token_hex(Constants.FRONTEND_LIFETIME_ID_BYTES)
+        self._lease_joined = False
 
         self._ipc: IpcClient = IpcClient(
             port=self._port,
@@ -129,7 +213,11 @@ class MetorClient:
         Returns:
             bool: True if connection succeeded, False otherwise.
         """
-        return self._ipc.connect(start_listener=False)
+        connected = self._ipc.connect(start_listener=False)
+        if connected or not self.is_connected:
+            self._init_event = None
+            self._lease_joined = False
+        return connected
 
     def disconnect(self) -> None:
         """
@@ -141,6 +229,19 @@ class MetorClient:
         Returns:
             None
         """
+        if self._lease_joined and self.is_connected:
+            try:
+                self._ipc.send_command(
+                    FrontendLeaseCommand(
+                        frontend_id=self._frontend_id,
+                        token=self._lifetime_token,
+                        release=True,
+                    )
+                )
+            except (OSError, ValueError):
+                pass
+        self._lease_joined = False
+        self._init_event = None
         self._ipc.stop()
 
     def send_command(self, cmd: IpcCommand) -> None:
@@ -155,6 +256,271 @@ class MetorClient:
         """
         self._ipc.send_command(cmd)
 
+    def send_text(
+        self, target: str, delivery: Delivery, text: str, msg_id: str
+    ) -> None:
+        """Sends text through the typed public message boundary.
+
+        Args:
+            target (str): Destination alias or onion.
+            delivery (Delivery): Requested delivery semantics.
+            text (str): UTF-8 text payload.
+            msg_id (str): Stable logical message identifier.
+
+        Returns:
+            None
+        """
+        self.send_command(
+            SendMessageCommand(
+                target=target,
+                delivery=delivery,
+                content=TextContent(text),
+                msg_id=msg_id,
+            )
+        )
+
+    def begin_voice(
+        self,
+        target: str,
+        delivery: Delivery,
+        msg_id: str,
+        codec: str,
+        *,
+        owner_token: Optional[str] = None,
+        context_generation: Optional[int] = None,
+    ) -> Optional[VoiceStartedEvent]:
+        """Begins one local-only Voice draft for explicit review and publication.
+
+        Args:
+            target (str): The target input.
+            delivery (Delivery): The delivery input.
+            msg_id (str): The msg id input.
+            codec (str): The codec input.
+            owner_token (Optional[str]): The owner token input.
+            context_generation (Optional[int]): The context generation input.
+
+        Returns:
+            Optional[VoiceStartedEvent]: The resulting value.
+        """
+        return self.request(
+            BeginVoiceCommand(
+                target, delivery, msg_id, codec, owner_token, context_generation
+            ),
+            VoiceStartedEvent,
+        )
+
+    def append_voice(
+        self,
+        msg_id: str,
+        offset: int,
+        data: str,
+        *,
+        owner_token: Optional[str] = None,
+    ) -> Optional[VoiceAppendOutcome]:
+        """Appends a local staging chunk and returns its bounded admission outcome.
+
+        Args:
+            msg_id (str): Stable Voice identity.
+            offset (int): Expected contiguous byte offset.
+            data (str): Strict Base64 chunk payload.
+            owner_token: Optional Core-issued protected staging qualification.
+
+        Returns:
+            Optional[VoiceAppendOutcome]: Accepted, finalized, or refused outcome.
+        """
+        return cast(
+            Optional[VoiceAppendOutcome],
+            self._request_types(
+                AppendVoiceChunkCommand(msg_id, offset, data, owner_token),
+                (
+                    VoiceChunkAcceptedEvent,
+                    VoiceResourceLimitEvent,
+                    VoiceFinalizedEvent,
+                    VoiceOperationRejectedEvent,
+                ),
+            ),
+        )
+
+    def finalize_voice(
+        self,
+        msg_id: str,
+        duration_ms: Optional[int] = None,
+        *,
+        owner_token: Optional[str] = None,
+    ) -> Optional[VoiceFinalizedEvent]:
+        """Finalizes local capture for review without publishing in either mode.
+
+        Args:
+            msg_id (str): The msg id input.
+            duration_ms (Optional[int]): The duration ms input.
+            owner_token (Optional[str]): The owner token input.
+
+        Returns:
+            Optional[VoiceFinalizedEvent]: The resulting value.
+        """
+        return self.request(
+            FinalizeVoiceCommand(msg_id, duration_ms, owner_token), VoiceFinalizedEvent
+        )
+
+    def commit_voice(
+        self,
+        target: str,
+        msg_id: str,
+        *,
+        owner_token: Optional[str] = None,
+        delivery: Optional[Delivery] = None,
+        context_generation: Optional[int] = None,
+    ) -> Optional[VoiceCommittedEvent]:
+        """Publishes one finalized draft; delivery=DROP explicitly converts a LIVE draft.
+
+        Args:
+            target (str): The target input.
+            msg_id (str): The msg id input.
+            owner_token (Optional[str]): The owner token input.
+
+        Returns:
+            Optional[VoiceCommittedEvent]: The resulting value.
+        """
+        return self.request(
+            CommitVoiceCommand(
+                target, msg_id, owner_token, delivery, context_generation
+            ),
+            VoiceCommittedEvent,
+        )
+
+    def cancel_voice(
+        self, target: str, msg_id: str, *, owner_token: Optional[str] = None
+    ) -> Optional[VoiceCancelledEvent]:
+        """Cancels one unpublished local Voice draft.
+
+        Args:
+            target (str): The target input.
+            msg_id (str): The msg id input.
+            owner_token (Optional[str]): The owner token input.
+
+        Returns:
+            Optional[VoiceCancelledEvent]: The resulting value.
+        """
+        return self.request(
+            CancelVoiceCommand(target, msg_id, owner_token), VoiceCancelledEvent
+        )
+
+    def get_voice_chunk(
+        self,
+        target: str,
+        msg_id: str,
+        direction: MessageDirectionCode,
+        offset: int,
+        max_bytes: int,
+        *,
+        owner_token: Optional[str] = None,
+    ) -> Optional[VoiceDataEvent]:
+        """Retrieves one authorized bounded range without exposing daemon storage.
+
+        Args:
+            target (str): The target input.
+            msg_id (str): The msg id input.
+            direction (MessageDirectionCode): The direction input.
+            offset (int): The offset input.
+            max_bytes (int): The max bytes input.
+            owner_token (Optional[str]): The owner token input.
+
+        Returns:
+            Optional[VoiceDataEvent]: The resulting value.
+        """
+        return self.request(
+            GetVoiceChunkCommand(
+                target, msg_id, direction, offset, max_bytes, owner_token
+            ),
+            VoiceDataEvent,
+        )
+
+    def release_voice(self, target: str, msg_id: str) -> Optional[VoiceReleasedEvent]:
+        """Consumes one finalized inbound Voice item after byte handoff.
+
+        Args:
+            target (str): The target input.
+            msg_id (str): The msg id input.
+
+        Returns:
+            Optional[VoiceReleasedEvent]: The resulting value.
+        """
+        return self.request(ReleaseVoiceCommand(target, msg_id), VoiceReleasedEvent)
+
+    def lock(self) -> bool:
+        """Securely locks the daemon while retaining the IPC connection.
+
+        Args:
+            None
+
+        Returns:
+            bool: True after the daemon confirms the locked state.
+        """
+        return self.request(LockCommand(), DaemonLockedEvent) is not None
+
+    def runtime_snapshot(self) -> Optional[RuntimeSnapshotEvent]:
+        """Returns the authoritative aggregate snapshot for the active runtime.
+
+        Args:
+            None
+
+        Returns:
+            Optional[RuntimeSnapshotEvent]: The resulting value.
+        """
+        return self.request(GetRuntimeSnapshotCommand(), RuntimeSnapshotEvent)
+
+    def list_retained_messages(
+        self,
+        *,
+        target: Optional[str] = None,
+        delivery: Optional[Delivery] = None,
+        direction: Optional[MessageDirectionCode] = None,
+        cursor: Optional[str] = None,
+        limit: int = Constants.DEFAULT_RETAINED_PAGE_SIZE,
+        owner_token: Optional[str] = None,
+        msg_id: Optional[str] = None,
+    ) -> Optional[RetainedMessagesEvent]:
+        """Discovers retained identities without reading or consuming content.
+
+        Args:
+            target (Optional[str]): The target input.
+            delivery (Optional[Delivery]): The delivery input.
+            direction (Optional[MessageDirectionCode]): The direction input.
+            cursor (Optional[str]): The cursor input.
+            limit (int): The limit input.
+            owner_token (Optional[str]): The owner token input.
+            msg_id (Optional[str]): The msg id input.
+
+        Returns:
+            Optional[RetainedMessagesEvent]: The resulting value.
+        """
+        return self.request(
+            ListRetainedMessagesCommand(
+                target=target,
+                delivery=delivery,
+                direction=direction,
+                cursor=cursor,
+                limit=limit,
+                owner_token=owner_token,
+                msg_id=msg_id,
+            ),
+            RetainedMessagesEvent,
+        )
+
+    def prepare_profile_exit(self) -> bool:
+        """Runs the normal reliability-preserving profile exit phase.
+
+        Args:
+            None
+
+        Returns:
+            bool: Whether the documented condition holds.
+        """
+        return (
+            self.request(PrepareProfileExitCommand(), ProfileExitPreparedEvent)
+            is not None
+        )
+
     def request(
         self,
         cmd: IpcCommand,
@@ -168,41 +534,93 @@ class MetorClient:
             expected_type (Type[T]): Expected response event DTO class.
 
         Returns:
-            Optional[T]: Decoded response event, or None if the request failed or was rejected.
+            Optional[T]: Decoded response event, or None for an incomplete auth gate
+                or unavailable protocol/runtime snapshot.
+
+        Raises:
+            IpcClientError: If transport loss, send failure, saturation, or timeout
+                prevents completion. A sent mutation may already have succeeded.
+            MetorRequestRejectedError: If Core returns a typed rejection outcome.
+            MetorProtocolError: If an unexpected correlated event ends the request.
+        """
+        return cast(Optional[T], self._request_types(cmd, (expected_type,)))
+
+    def _request_types(
+        self,
+        cmd: IpcCommand,
+        expected_types: tuple[type[IpcEvent], ...],
+    ) -> Optional[IpcEvent]:
+        """Executes an exchange with explicit terminal DTO outcomes.
+
+        Args:
+            cmd (IpcCommand): Typed command to send.
+            expected_types (tuple[type[IpcEvent], ...]): Accepted terminal types.
+
+        Returns:
+            Optional[IpcEvent]: Matching terminal event, or None for auth failure.
         """
         request_id: str = ensure_request_id(cmd)
-        self._ipc.send_command(cmd)
+        lease = self._ipc.begin_request(request_id)
+        try:
+            self._ipc.send_command(cmd, lease)
+            auth_exchange: IpcAuthExchange = self._create_auth_exchange(
+                request_id, lease
+            )
 
-        auth_exchange: IpcAuthExchange = self._create_auth_exchange(request_id)
+            unlock_deadline: float | None = None
+            while True:
+                remaining = (
+                    max(0.0, unlock_deadline - time.monotonic())
+                    if unlock_deadline is not None
+                    else None
+                )
+                event: Optional[IpcEvent] = self._ipc.wait_for_response(
+                    request_id, lease, timeout=remaining
+                )
 
-        while True:
-            try:
-                event: Optional[IpcEvent] = self._ipc.read_event()
-            except (socket.timeout, OSError, ValueError):
-                return None
-
-            if event is None:
-                return None
-
-            if event.request_id is not None and event.request_id != request_id:
-                continue
-
-            auth_result: IpcAuthResult = auth_exchange.handle(event)
-            if auth_result.handled:
-                if auth_result.resend_original_command:
-                    self._ipc.send_command(cmd)
-                    continue
-
-                if auth_result.auth_incomplete or auth_result.error_event is not None:
+                if event is None:
                     return None
 
-                continue
+                auth_result: IpcAuthResult = auth_exchange.handle(event)
+                if auth_result.handled:
+                    if event.event_type in (
+                        EventType.DAEMON_LOCKED,
+                        EventType.INVALID_PASSWORD,
+                    ):
+                        unlock_deadline = time.monotonic() + self._unlock_timeout
+                    elif event.event_type is EventType.DAEMON_UNLOCKED:
+                        unlock_deadline = None
+                    if auth_result.resend_original_command:
+                        self._ipc.send_command(cmd, lease)
+                        continue
 
-            if isinstance(event, expected_type):
-                return event
+                    if (
+                        auth_result.auth_incomplete
+                        or auth_result.error_event is not None
+                        or auth_result.error_message is not None
+                    ):
+                        return None
 
-            if isinstance(event, ProtocolMismatchEvent):
-                return None
+                    continue
+
+                if isinstance(event, expected_types):
+                    return event
+
+                if isinstance(
+                    event, (ProtocolMismatchEvent, RuntimeSnapshotUnavailableEvent)
+                ):
+                    return None
+                if isinstance(event, VoiceOperationRejectedEvent):
+                    raise MetorRequestRejectedError(event)
+                if event.event_type in PROGRESS_EVENTS:
+                    self._ipc.dispatch_async_event(event, lease)
+                    continue
+                self._ipc.dispatch_async_event(event, lease)
+                if event.event_type in REJECTION_EVENTS:
+                    raise MetorRequestRejectedError(event)
+                raise MetorProtocolError(event)
+        finally:
+            self._ipc.end_request(request_id, lease)
 
     def bootstrap(self) -> Optional[InitEvent]:
         """
@@ -218,13 +636,45 @@ class MetorClient:
             if not self.connect():
                 return None
 
+        if self._local_lifetime and self._lifetime_token is not None:
+            lease = self.request(
+                FrontendLeaseCommand(
+                    frontend_id=self._frontend_id,
+                    token=self._lifetime_token,
+                ),
+                FrontendLeaseEvent,
+            )
+            if lease is None or lease.state not in ('joined', 'independent'):
+                return None
+            self._lease_joined = lease.state == 'joined'
+
         init_cmd: InitCommand = InitCommand(
-            protocol_version=Constants.IPC_PROTOCOL_VERSION,
+            current_version=IPC_PROTOCOL_VERSION,
+            min_supported=IPC_PROTOCOL_MIN_SUPPORTED,
         )
         init_event: Optional[InitEvent] = self.request(init_cmd, InitEvent)
-        if init_event is not None:
+        if init_event is not None and self._accepts_init_event(init_event):
             self._init_event = init_event
-        return init_event
+            return init_event
+        return None
+
+    @staticmethod
+    def _accepts_init_event(event: InitEvent) -> bool:
+        """Validates the daemon range and negotiated IPC generation.
+
+        Args:
+            event (InitEvent): Candidate daemon initialization response.
+
+        Returns:
+            bool: True when the negotiated generation is the highest overlap.
+        """
+        negotiated: int | None = negotiate_protocol_generation(
+            IPC_PROTOCOL_VERSION,
+            IPC_PROTOCOL_MIN_SUPPORTED,
+            event.daemon_current_version,
+            event.daemon_min_supported,
+        )
+        return negotiated == event.negotiated_version
 
     def register_live_consumer(self) -> bool:
         """
@@ -243,7 +693,9 @@ class MetorClient:
         self._ipc.send_command(RegisterLiveConsumerCommand())
         return True
 
-    def _create_auth_exchange(self, request_id: str) -> IpcAuthExchange:
+    def _create_auth_exchange(
+        self, request_id: str, lease: RequestLease | None = None
+    ) -> IpcAuthExchange:
         """
         Creates an IpcAuthExchange configured with the active auth provider.
 
@@ -286,7 +738,7 @@ class MetorClient:
         return IpcAuthExchange(
             prompt_session_proof=_prompt_session,
             prompt_unlock_password=_prompt_unlock,
-            send_command=self._ipc.send_command,
+            send_command=lambda command: self._ipc.send_command(command, lease),
             request_id=request_id,
         )
 
@@ -312,4 +764,6 @@ class MetorClient:
         Returns:
             None
         """
+        self._lease_joined = False
+        self._init_event = None
         self._on_disconnect()

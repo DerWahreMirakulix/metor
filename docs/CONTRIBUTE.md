@@ -1,8 +1,193 @@
 # Contributing to Metor
 
-Metor is a highly critical, secure, Tor-based terminal messenger. Code quality, OPSEC, and cryptographic integrity are absolute priorities. There is zero tolerance for bad practices.
+Metor is a security-critical Tor messaging framework with independent graphical,
+Terminal and CLI frontends. Code quality, OPSEC, and cryptographic integrity are
+absolute priorities.
 
 When contributing to this repository, you MUST strictly adhere to the following rules:
+
+## Checkout installation
+
+From the repository root, in the Python environment selected for development,
+run `python -m pip install -r requirements/dev.txt`, then `python -m pip check`
+and `python -m metor chat --list-uis`. This manifest installs SDK, Base, Terminal
+and GUI from local editable projects while reusing the pinned third-party
+requirements. A plain `pip install .` selects only Base. For Base and SDK without
+GUI or Terminal, use the applicable `requirements/base.lock` pins and install
+`./packaging/sdk` and `.` together. Independent wheel and installed-consumer
+tests remain necessary: editable source imports do not prove wheel ownership.
+
+## Running tests
+
+Install the checkout once as described above. All jobs use `unittest` and the
+same test modules. New `tests/test_*.py` files join the complete suite through
+filename discovery; no module inventory or CI path planner needs an update.
+
+```sh
+python scripts/run_tests.py --suite fast
+python scripts/run_tests.py --suite integration
+python scripts/run_tests.py --suite all
+python scripts/run_tests.py --suite all --match test_profile_storage_security --failfast
+python scripts/run_tests.py --suite integration --module test_startup_selection --match test_selection_metadata
+python scripts/run_tests.py --suite all --durations 20
+```
+
+`all` is the required gate. `fast` is a small, explicitly selected, fixture-free
+subset for local feedback; `integration` contains the remaining discovered
+modules. `--module` selects an exact file stem, `--match` filters full unittest
+IDs, and `--list` prints the selected IDs without running them. An empty suite,
+failed import, duplicate ID, interrupted worker, incomplete test, unexpected
+success, or unconfirmed child cleanup fails the run. Direct
+`python -m unittest` remains available for one-case diagnosis. The supervised
+runner writes `build/test-report.txt` with case status and setup-to-cleanup
+runtime, bounded failure locations and categories, and skip counts. It never
+prints captured output or unreviewed exception values. Optional
+`--coverage` requires `coverage.py` installed separately; CI sets no coverage
+threshold.
+
+Tests use temporary profile roots and controlled dependencies. A missing local
+capability is a visible skip in the narrow fixture; a required CI GUI or security
+capability must fail its job. Unit/contract tests avoid a display, hardware, and
+public Tor. Integration tests exercise real IPC, temporary persistence,
+authorization, and process lifetimes. GUI acceptance runs the installed packages
+with a real Kivy event loop on a virtual Linux display or native Windows
+desktop. Physical device acceptance is a separate, explicit run on named
+hardware; the simulator does not establish physical support.
+
+Choose tests by the failure they detect. Prefer observable outcomes across an
+owned boundary: denied requests must leave state unchanged, committed messages
+must survive reopening, and a UI action must reach the expected Core command.
+Use narrow unit fixtures for malformed input, state transitions and failure
+cleanup; use IPC/process/native-window fixtures where serialization, concurrency
+or event-loop ordering is the actual risk. A second frontend is useful coverage
+when it exercises a different client path, not when it repeats the same mock.
+Static source checks are appropriate for dependency direction, packaging and
+release-write restrictions; do not use source substrings as proof of runtime
+behavior. Extend the nearest domain regression instead of creating a new
+audit-named collection or asserting private implementation order. Remove a
+duplicate gate only when its behavior and failure propagation remain covered.
+
+Positive protected-storage fixtures use `PrivateTemporaryDirectory` from
+[`tests/private_fixtures.py`](../tests/private_fixtures.py). It creates an
+explicitly user-owned private child: an elevated Windows process can create an
+ordinary temporary directory owned by the Administrators group, which production
+storage correctly refuses to adopt. Keep raw temporary directories for tests
+that deliberately exercise foreign ownership, unsafe permissions or links.
+
+### Python and platform policy
+
+All four distributions require CPython 3.11 through 3.13. The PR runtime matrix
+checks 3.11 and 3.13 on Linux x86-64 and Windows x86-64; 3.12 is allowed by
+metadata but is not a CI-tested combination. The offline delivery bundles are
+built and accepted on CPython 3.11 for each of those platforms and declare an
+exact OS, architecture, interpreter minor, and ABI. Linux under WSL counts as
+Linux, not Windows. Other operating systems, CPU architectures, and physical
+devices require separate evidence. The 3.13 bound follows the pinned
+[Kivy 2.3.1 wheels](https://pypi.org/project/Kivy/2.3.1/); the pinned
+[Linux SQLCipher wheel](https://pypi.org/project/sqlcipher3-binary/0.6.0/),
+[Windows SQLCipher wheel](https://pypi.org/project/sqlcipher3/0.6.2/), and
+[Windows pywin32 wheel](https://pypi.org/project/pywin32/312/) have matching
+3.11 and 3.13 x86-64 artifacts. Wheel presence establishes installability,
+while the native CI jobs establish the checked behavior.
+
+CI has four fixed jobs: `static` checks formatting, architecture, types on
+Linux 3.11 and Windows 3.13 branches, generated references, and versioning once;
+`runtime` runs the complete unittest suite on Linux and Windows with CPython
+3.11 and 3.13; `installed` builds and checks the 3.11 native offline bundles,
+SDK/Base/Frontend installation and removal, entry points, native GUI, and
+installers on each OS; `acceptance` requires every job to succeed. Pull requests
+from every feature branch, pushes to `main`, and manual dispatch use this same
+topology. The generated-document checker is nonmutating; run
+`npm run generate:docs` before committing an intentional API or settings change.
+
+`npm run check:gui-diagnostics` is the focused zero-baseline editor gate for the
+own-contact GUI path and native capture fixture. It checks those files with
+Basedpyright 1.40.1 in standard mode for Linux and Windows on Python 3.11 and
+3.13, plus additional Ruff import, broad-exception, duplicate-branch, and
+unused-suppression rules. Run `npm ci` first; the CI
+`static` job runs this gate after the project-wide Ruff and Mypy checks. The
+repository-wide Ruff rule selection is explicit in `pyproject.toml`, so a newer
+editor Ruff does not silently change the project's lint policy. Locally, the
+gate prefers a GUI-ready `.venv` over an unrelated `python` on `PATH`.
+
+### Editor formatting
+
+Run `npm ci` and install `requirements/dev.txt`, then select this checkout's
+`.venv` Python toolchain in both VS Code and Zed. Their project settings enable
+format-on-save with Ruff for Python and the locally pinned Prettier for Markdown,
+JSON, JSONC, and YAML. Ruff's lint and format options live in `pyproject.toml`;
+save-time formatting does not run `fix:py` or replace the static checks. VS
+Code's Pylance and Zed's Basedpyright are different type checkers, so identical
+type diagnostics are not implied by identical formatting. The focused
+Basedpyright CLI gate above is the reproducible check for its covered files.
+
+### Portable local environments
+
+The optional Docker image gives Linux and WSL users a clean, unprivileged
+headless environment for the **same** full unittest command. CI does not run a
+duplicate Linux 3.11 unittest job in a container:
+
+```sh
+docker build -f Dockerfile.tests --build-arg PYTHON_VERSION=3.11 -t metor-tests:py311 .
+docker run --rm metor-tests:py311
+```
+
+For Linux GUI acceptance, install Xvfb, `xauth`, `libegl1`,
+`libegl-mesa0`, and `libgl1-mesa-dri`, plus the pinned checkout. No private
+desktop display, WSLg, or public Tor connection is needed:
+
+```sh
+python scripts/build_release_wheelhouse.py --variant all --skip-pip-upgrade --output-dir closure-bundles
+xvfb-run -a --server-args='-screen 0 1280x1024x24' python scripts/validate_installed_artifacts.py closure-bundles --gui-smoke
+```
+
+On a native Windows desktop, use the same bundle build command followed by
+`python scripts/validate_installed_artifacts.py closure-bundles --gui-smoke
+--windows-launch`. The latter exercises both installed `metor.exe` and
+`metor-gui.exe` windows and checks for an extra console. The validator creates
+one visible console for this fixture before launching either entry point, so
+the same terminal-preservation checks apply to interactive shells and hosted
+runners. That console must stay attached and visible throughout; any additional
+console fails acceptance. It also starts the
+installed graphical entry point without standard streams, checks the bounded
+native startup-error dialog, and exercises `--start-daemon` with a disposable
+encrypted profile through native UI Automation. The resulting daemon remains
+locked; the fixture cancels the password prompt and verifies orderly daemon
+exit while the original terminal stays visible. `--gui-smoke` separately checks
+the locked profile path on the actual Kivy loop. A fixed console-executable
+fixture checks the installed Windows Tor child-creation path from a process
+without a console and without a public Tor connection. The locked GUI startup
+does not start Tor. WSL and Linux cannot verify this native Windows
+behavior. The native rendering and synthetic stream fixtures are explicit CI
+commands outside unittest discovery; they require a working graphical display
+and are not silently skipped.
+
+The hosted Windows CI and release gates select `KIVY_GL_BACKEND=angle_sdl2`
+because the VM's desktop OpenGL context is below Kivy's required version.
+To reproduce that acceptance environment in PowerShell, set
+`$env:KIVY_GL_BACKEND = 'angle_sdl2'` before running the validation command.
+The pinned Windows GUI dependencies include ANGLE. This selection is scoped
+to the native Windows validation steps; installed applications retain Kivy's
+default backend selection.
+
+The complete suite also includes actual CLI subprocess and POSIX Terminal PTY
+tests against disposable encrypted Core runtimes. They verify command outcomes,
+argument rejection, authentication, input editing, asynchronous rendering and
+process/terminal cleanup. The shared fixture routes signed production peer
+traffic over loopback TCP instead of starting Tor. These tests do not require a
+display or audio hardware; POSIX PTY cases are explicitly skipped on Windows.
+The Linux native-window gate additionally runs
+[`gui_native_core.py`](../tests/gui_native_core.py) at compact and desktop sizes,
+with XTest mouse/keyboard events and the actual GUI/SDK/Core path. See the
+[GUI contract](contracts/GUI.md#installation-and-startup) for invocation and
+capability limits. No injected request result or offscreen rendering is counted
+as this Core-backed window gate.
+
+The optional native Tor acceptance additionally requires an installed Tor
+binary and a network on which it can complete bootstrap. It is not a
+deterministic PR gate. After building the platform bundles, run
+`python scripts/validate_installed_artifacts.py closure-bundles
+--with-public-tor` on the named native host and record the result separately.
 
 ## 1. Language & Naming
 
@@ -20,15 +205,15 @@ When contributing to this repository, you MUST strictly adhere to the following 
 - **Module Headers:** Every Python file MUST start with a top-level module docstring (triple double quotes `"""`) explaining the purpose of the file.
 - **Google Style:** Use Google-style docstrings for every class and method.
 - **Meaningful Descriptions:** Explain _what_ the function does and _why_.
-- **Input/Output (STRICT):** Every method docstring MUST have an `Args:` and `Returns:` block. If a function takes no arguments, write `Args:\n    None`. If it returns nothing, write `Returns:\n    None`.
+- **Contracts:** Document public inputs, returned results, side effects, failure modes, concurrency, and security assumptions where relevant. Do not add empty `Args:` or `Returns:` blocks merely to satisfy a format rule.
 - **Comments:** Keep comments strictly objective. No conversational filler, no changelog notes. Write comments for a production codebase. Don't remove comments which fulfill a purpose (e.g. guiding auto completion models or agents).
 
 ## 4. Architecture & Design Principles
 
-- **Domain-Driven Design (DDD) & IPC:** The UI (Client) is strictly stateless. It MUST NEVER access the database, Tor network, or cryptographic keys directly. All communication with the Core (Daemon) MUST happen via strictly typed Data Transfer Objects (DTOs).
+- **State ownership & IPC:** Frontends may retain interaction/presentation state. Transport, durable delivery, cryptographic lifecycle and authorization truth belong to the daemon. Frontends MUST NOT access databases, Tor, keys or profile runtime files; use typed DTOs and the public narrow host/settings services.
 - **Configuration Cascade:** Metor uses a strict configuration hierarchy. Global settings apply to all profiles. Profile-specific overrides apply only locally. Maintain the boundary between client-side configs (`ui.*`) and server-side configs (`daemon.*`).
 - **No Magic Numbers:** Do not use raw numeric or string literals for system parameters (e.g., `10.0`, `4096`). Define them as constants in a centralized utility file or as user-configurable settings. This applies globally to timeouts, buffer limits, retry counts, etc.
-- **Import Architecture (Facade Pattern & PEP 420 Namespaces):** Metor uses PEP 420 namespace packages at the root (`metor`) and core (`metor.core`) levels to support modular distribution splits (`metor-sdk`, `metor-daemon`, `metor`) without namespace collisions. Namespace directories do not have an `__init__.py`. When importing from an _external_ or _parent_ functional domain, you MUST use that package's public `__init__.py` Facade. This rule is package-first: importing `metor.client`, `metor.core.api`, `metor.core.daemon`, `metor.core.daemon.managed`, or `metor.core.daemon.headless` is valid when those packages expose their public API via `__init__.py`. Core transport and key modules are imported directly from their respective domain modules (`metor.core.key`, `metor.core.tor`). Use `metor.core.daemon` only for daemon-shared bootstrap helpers, `metor.core.daemon.managed` for the full managed runtime facade plus managed-only subpackages, and `metor.core.daemon.headless` for the ephemeral offline runtime facade. The shared handler facade `metor.core.daemon.handlers` is limited to config/system/db handlers, while managed-only transport handlers belong under `metor.core.daemon.managed.handlers`. Importing implementation files such as `metor.core.daemon.managed.engine`, `metor.core.daemon.managed.bootstrap`, `metor.core.daemon.managed.factory`, `metor.core.daemon.managed.local_auth`, or `metor.core.daemon.headless.manager` from outside the package boundary is forbidden. When importing from a sibling module within the _same_ domain/directory (horizontal imports), you MUST explicitly bypass the Facade and import directly from the file to prevent circular dependencies.
+- **Import Architecture (Facade Pattern & PEP 420 Namespaces):** Metor uses PEP 420 namespace packages at the root (`metor`) and core (`metor.core`) levels so `metor-sdk`, `metor`, `metor-ui-terminal`, and `metor-ui-gui` can own disjoint files in one namespace. Namespace directories do not have an `__init__.py`. The SDK owns `metor.client`, `metor.core.api`, proof helpers, and lightweight shared helpers; base owns `metor.cli`, application/daemon/storage/Tor code; Terminal and GUI own only their respective `metor.ui` subpackages. Base and SDK MUST NOT import a frontend implementation. Frontends launch only through the versioned `metor.client` contract and MUST NOT access storage or transport internals. When importing from an _external_ or _parent_ functional domain, use that package's public `__init__.py` Facade. Core transport and key modules are imported directly from their respective domain modules (`metor.core.key`, `metor.core.tor`). Use `metor.core.daemon` only for daemon-shared bootstrap helpers, `metor.core.daemon.managed` for the full managed runtime facade plus managed-only subpackages, and `metor.core.daemon.headless` for the ephemeral offline runtime facade. The shared handler facade `metor.core.daemon.handlers` is limited to config/system/db handlers, while managed-only transport handlers belong under `metor.core.daemon.managed.handlers`. Importing implementation files such as `metor.core.daemon.managed.engine`, `metor.core.daemon.managed.bootstrap`, `metor.core.daemon.managed.factory`, `metor.core.daemon.managed.local_auth`, or `metor.core.daemon.headless.manager` from outside the package boundary is forbidden. When importing from a sibling module within the _same_ domain/directory (horizontal imports), explicitly bypass the Facade and import directly from the file to prevent circular dependencies.
 - **Context Managers:** Always use `with` statements for file operations, databases, sockets, and locks to ensure proper resource cleanup.
 - **Modern Path Handling:** Use Python's `pathlib.Path` strictly over the legacy `os.path` module for all filesystem operations.
 
@@ -38,19 +223,225 @@ When contributing to this repository, you MUST strictly adhere to the following 
 - **Cryptography:** Never use `os.urandom` or `random` for key generation; exclusively use a cryptographically secure module (like `secrets`).
 - **Data-at-Rest (SQL Integrity):** Always use parameterized queries (`?`) for user data operations. Because SQL engines (like SQLite) do not support parameterization for structural commands (like `PRAGMA` or table names), f-strings may only be used there if the injected value is deeply sanitized, mathematically escaped, or a strict system constant. Under no circumstances may raw user input be formatted directly into an SQL string.
 
-## 6. Code Formatting (Ruff)
+## 6. Module Cohesion & Size
+
+- **One Primary Responsibility:** Every production module MUST have one cohesive primary responsibility. God Modules that mix unrelated orchestration, persistence, crypto, validation, migration, recovery, or filesystem concerns are prohibited.
+- **Size as a Guardrail:** Prefer modules below approximately 400 logical lines. Line count alone is never a reason for artificial splitting: extraction boundaries MUST represent real architectural or domain boundaries.
+- **Mandatory Review:** When substantial functionality is added to a production module already above approximately 500 logical lines, contributors MUST proactively evaluate and document a cohesive extraction. Modules above approximately 800 logical lines are unacceptable except for clearly justified generated or declarative exceptional files.
+- **Thin Facades:** Package facades expose intended public symbols only; they MUST remain thin and MUST NOT accumulate implementation behavior.
+- **Oversized Modules:** Substantially modifying an already oversized module requires proactive decomposition review, even when the requested feature itself is small.
+
+### Package Structure & Subsystem Boundaries
+
+- **Packages Represent Subsystems:** When a cohesive feature or domain grows into multiple implementation modules, group those modules in a dedicated subpackage instead of adding prefixed siblings to a broad parent package.
+- **Package Promotion:** If two or more closely related modules share one domain concept and are expected to evolve together, contributors MUST evaluate promoting that concept to a subpackage. Three or more `<concept>_*.py` siblings are a strong signal for promotion, not an automatic rule.
+- **Avoid Flat Module Sprawl:** For one migration subsystem, `migration.py`, `migration_journal.py`, `migration_validation.py`, and `migration_blobs.py` should normally become `migration/orchestrator.py`, `migration/journal.py`, `migration/validation.py`, and `migration/blobs.py`.
+- **Name by Local Ownership:** Inside a focused package, avoid repeating package context: prefer `migration/journal.py` over `migration/migration_journal.py` unless repetition is genuinely needed for clarity.
+- **Thin Package Facades:** A package `__init__.py` may expose the intentional subsystem API, but MUST remain free of implementation and orchestration behavior.
+- **Private Names Have Meaning:** A leading underscore denotes genuine implementation privacy. Do not alias ordinary cross-module or facade imports to underscore-prefixed names merely to make them appear internal.
+- **No Generic Extraction Buckets:** Do not use vague modules such as `helpers.py`, `misc.py`, or `common.py` to satisfy size rules. Each extraction must name a stable, concrete responsibility.
+- **Meaningful Depth:** One additional meaningful subsystem directory is preferable to a broad flat directory of prefixed sibling modules. Do not introduce arbitrary nesting.
+
+## 7. Code Formatting (Ruff)
 
 - **Imports First:** All `import` statements MUST (unless a runtime import is absolutely necessary) be located at the very top of the file (immediately following the module docstring).
 - **Import Delimiters:** Standard library and external domain imports MUST be separated from same-domain internal imports using exactly the `# Local Package Imports` comment. This comment MUST NOT be placed above imports from higher-level Metor domains.
 - **Single Quotes:** Always use single quotes (`'`) for strings unless the string itself contains a single quote. Double quotes are strictly for docstrings (`"""`).
 
-## 7. IPC Contract Evolution & Glossary
+## 8. IPC Contract Evolution & Glossary
 
-The IPC contract is versioned and additive-only within a major version. Follow these rules whenever the wire contract changes:
+The IPC contract is versioned and additive-only within one IPC protocol generation. Follow these rules whenever the wire contract changes:
 
-- **Additive-Only Within a Major Version:** New commands, events, and payload fields are allowed, but every new field MUST have a default so writers from older versions stay valid. Removing or renaming a field, event, or command is a major-version bump.
+- **Additive-Only Within an IPC Generation:** New commands, events, and payload fields are allowed, but every new field MUST have a default so writers from older versions stay valid. Removing or renaming a field, event, or command requires an incompatible IPC protocol generation bump.
 - **No Aliases:** Renamed symbols are never kept as aliases or compatibility shims; every caller migrates in the same release.
-- **Version Bumps:** When the wire contract changes incompatibly, bump `Constants.IPC_PROTOCOL_VERSION` (IPC socket) or `Constants.PEER_PROTOCOL_VERSION` (Tor peer handshake) and keep the matching `*_MIN_SUPPORTED` constant honest. Never reuse a retired wire value.
+- **Independent Versions:** Application releases and compatibility generations are independent. Version values come only from `src/metor/versioning/__init__.py`; application SemVer changes during releases, while compatibility-breaking changes require an explicit, semantically reviewed axis bump. Keep each `*_MIN_SUPPORTED` claim honest and never reuse or automatically bump a retired wire or storage value. Follow [RELEASING.md](./RELEASING.md).
 - **Unknown Fields Stay Strict:** Payloads with unknown fields are rejected, never silently ignored. Drift is surfaced as the typed `ProtocolMismatchEvent` via the `InitCommand`/`InitEvent` handshake.
-- **Generated References:** Every command/event DTO must be registered through `register_command` / `register_event` so `scripts/generate_api_docs.py` picks it up. Never hand-edit the generated [API.md](./API.md) or [api.schema.json](./api.schema.json).
+- **Generated References:** Every command/event DTO must be registered through `register_command` / `register_event` so `scripts/generate_api_docs.py` picks it up. Never hand-edit the generated [API.md](./generated/API.md) or [api.schema.json](./generated/api.schema.json).
 - **Glossary Obligation:** New or renamed symbols (settings keys, events, enums, fields, IPC payloads) MUST follow the canonical terminology in [GLOSSARY.md](./GLOSSARY.md). When in doubt, extend that file instead of inventing a parallel term. Settings keys MUST use one of the three namespaces (`client.*`, `daemon.*`, `ui.<frontend>.*`) documented there.
+
+## 9. Documentation Ownership
+
+The root `README.md` is the human entry point and root `AGENTS.md` routes coding
+agents to the canonical `docs/AGENTS.md`; do not create `docs/README.md`. Global canonical docs
+stay at `docs/` root. Frontend contracts, generated references and runnable
+examples have their own subdirectories. Keep dated reviews, handoffs, screenshots
+and machine-specific test logs out of repository documentation. Put the
+applicable results in the PR or release record.
+
+Files under `docs/generated/` are valuable, first-class references whose source
+ownership is code and generators. Never edit them manually: update the source
+definition or generator, regenerate, and commit the result. Authored documents
+should link readers to deeper generated references instead of duplicating them,
+and relevant links must remain reachable from the existing human or agent entry
+point.
+
+CI checks all public Python and npm pins against the OSV advisory database,
+including dependencies specific to the other operating system. To run the same
+online check separately from the offline tests: `python -m scripts.check_dependency_advisories`.
+
+## 10. Security and Architecture Review
+
+Every change is reviewed against the risks it can actually affect. Record the
+relevant checks and evidence; do not claim a platform, hardware, or destructive
+path that was not exercised. Use the areas below to select checks and record
+their results in the PR or release record.
+
+### Ownership and isolation
+
+- Frontends access Core through typed IPC and the narrow public host/settings and
+  platform contracts. They never read SQL, Tor state, keys, or profile runtime
+  files directly.
+- Daemon DTOs carry domain codes and structured data, not preformatted UI text.
+- Client and `ui.*` settings remain local; `daemon.*` settings are routed to the
+  daemon host. Genuinely shared behavior has one explicit owner.
+- New platform adapters keep observation, ordered input, and controlling actions
+  separate. Hardware input or actuator success never grants Core authorization.
+
+### Cryptography, credentials, and retention
+
+- Generate seeds, UUIDs, nonces, and tokens with cryptographically secure
+  primitives; never use `random` for security material.
+- Validate signatures and challenge-response proofs without timing-sensitive
+  comparisons or replayable authorization.
+- Passwords derive only the KEK that unwraps a random PMK. Keyslot permissions
+  and sensitive directories remain owner-only where supported.
+- Lock clears runtime key references; purge destroys protected PMK access before
+  best-effort file cleanup. Never describe software overwrite as guaranteed
+  physical erasure.
+- Apply explicit read/release and retention rules. A placeholder, download,
+  delivery ACK, or UI observation is not proof that content was read or safely
+  consumed.
+
+### Network, IPC, and resource safety
+
+- Reassemble TCP/IPC streams with their declared framing. One `recv()` is never
+  assumed to contain one complete frame.
+- Bound frames, queues, callbacks, connections, buffers, retries, and timeouts.
+  Saturation and loss are explicit outcomes rather than silent drops or
+  unbounded growth.
+- Serialize socket writers, keep physical I/O outside canonical state locks, and
+  ensure stale callbacks cannot tear down a replacement generation.
+- Treat request correlation as routing, not authorization. Revalidate exact
+  identity, generation, scope, and eligibility at mutation time.
+
+### Concurrency and process lifecycle
+
+- Protect shared iteration and mutation with the owning lock and preserve the
+  documented lock order across domain, state, store, and writer boundaries.
+- Cross-process file locks must survive crashed owners safely. Spawned Tor and
+  managed child processes must be tracked and terminated on failed startup or
+  shutdown.
+- Isolate optional callback and malformed-input failures while keeping release,
+  authorization, persistence, and cleanup failures observable.
+- Test races at enclosing production boundaries: reconnect replacement, unknown
+  operation outcome, owner loss, finalization, restriction, profile switch, and
+  purge fencing.
+
+### Persistence and local data
+
+- Parameterize all SQL data values. Structural SQL may interpolate only strict
+  constants or mathematically constructed placeholders, never raw user input.
+- Keep secrets short-lived and remove payloads, credentials, keys, and peer
+  identities from exceptions and logs.
+- Preserve the random PMK and domain-separated DB, secret, and blob keys. A
+  future `KeyProtector` must remain replaceable without changing consumers.
+- Blob IDs remain opaque and path-independent; formats are versioned and
+  authenticated; temporary and persistent ownership is explicit.
+- Test partial transactions, staged migration recovery, commit uncertainty, and
+  cleanup failure without deleting the only recoverable copy.
+
+### Versioning and release integrity
+
+- All application and compatibility values come from
+  `src/metor/versioning/__init__.py`.
+- SQL, IPC, peer, keyslot, blob, and derivation changes receive the semantic
+  review and version treatment described in [RELEASING.md](./RELEASING.md).
+  Additive defaulted fields do not justify an automatic generation bump;
+  incompatible changes do.
+- `*_MIN_SUPPORTED` claims require actual reader/negotiation coverage. Application
+  SemVer changes only in the explicit release process.
+- Regenerate and validate code-owned API, settings, schema, and compatibility
+  references through their generators. Never edit `docs/generated/*` manually.
+
+### Documentation and evidence
+
+- Update the one owning document for each rule and repair every path consumer.
+  Put GUI operation, behavior, device configuration, and visual rules in
+  `docs/contracts/GUI.md`; shared frontend contracts belong in
+  `docs/contracts/FRONTENDS.md`. Record dated acceptance results with the
+  relevant release evidence, not in a maintained project-status database.
+- Preserve stable requirement/test identifiers when they remain useful. Remove
+  implementation diaries and copied run counts from maintained explanations.
+- Verify local links and anchors, JSON/schema consumers, generated-reference
+  determinism, and any packaging/resource relocation. Build installed consumers
+  outside the checkout when package contents change.
+- Evidence must state revision, platform/capability, scope, result, and durable
+  reference. Mock, offscreen, or typed-adapter evidence is never promoted to
+  native, acoustic, accessibility-product, or appliance acceptance.
+
+## 11. Native GUI Acceptance Gates
+
+Native media and OS-lifecycle acceptance is capability-selected and separately
+authorized. Never encode a headset brand, GPU, board model, or developer-machine
+path as a requirement.
+Use a fresh installed GUI outside the checkout for an installed gate, record the
+exact source/artifact revision, and keep microphone bytes and temporary profiles
+out of durable artifacts.
+
+After building the current wheelhouse, run the installed consumer validator to
+exercise the independent SDK, Base, Terminal and GUI consumers. It also creates
+a fresh SDK + Base + Terminal environment without GUI or audio frontend packages
+and checks Terminal discovery and a Voice metadata path:
+
+```sh
+python scripts/validate_installed_artifacts.py dist/release
+```
+
+The optional installed GUI start-and-close smoke uses the same validator with
+`--gui-smoke` and requires a working native display provider. On Linux CI, run
+it with the generic X11/SDL2 software display used by the workflow; an EGL/GLX
+failure leaves this native gate open.
+
+Enumerate audio endpoints without opening a stream:
+
+```sh
+python tests/gui_native_voice.py --mode source --list-devices
+```
+
+After an operator explicitly selects compatible input/output endpoints and
+confirms a headset route, run the full GUI/Core duplex gate:
+
+```sh
+python tests/gui_native_voice.py \
+  --mode source \
+  --input-device INPUT_INDEX \
+  --output-device OUTPUT_INDEX \
+  --headset-confirmed \
+  --revision COMMIT_OR_TREE \
+  --result native-gui-voice.json
+```
+
+For installed acceptance, invoke the script from outside the checkout with the
+wheel-installed interpreter and `--mode installed`; the harness rejects a GUI
+loaded from the checkout. `tests/gui_native_audio.py` is the narrower PortAudio
+diagnostic and does not replace the full GUI/Core gate.
+
+On a supported installed Linux desktop, observe real provider events while an
+operator performs only the authorized actions:
+
+```sh
+python tests/gui_native_lifecycle.py --expect lock,suspend,resume
+```
+
+The acceptance run must also verify the enclosing GUI privacy/media behavior:
+private accessibility/tooltips are revoked before cover, capture and playback
+stop safely, held input requires release, resume stays covered, and no input,
+microphone, playback, or unlock is reconstructed. Windows acceptance exercises
+the corresponding installed WTS Lock/Unlock and power suspend/resume path on an
+actual native session. Structural/unit message tests are necessary but do not
+replace either native run.
+
+A release dry run is a separate owner-authorized procedure under
+[RELEASING.md](./RELEASING.md). Preserve genuine revision-qualified evidence
+with the release record; update the GUI contract only when supported behavior
+or capability changes.

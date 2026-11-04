@@ -12,6 +12,7 @@ class MessageStatus(str, Enum):
     DELIVERED = 'delivered'
     UNREAD = 'unread'
     READ = 'read'
+    DRAFT = 'draft'
 
 
 class MessageDirection(str, Enum):
@@ -19,14 +20,6 @@ class MessageDirection(str, Enum):
 
     IN = 'in'
     OUT = 'out'
-
-
-class MessageType(str, Enum):
-    """Represents the transport role of a persisted message payload."""
-
-    TEXT = 'text'
-    DROP_TEXT = 'drop_text'
-    LIVE_TEXT = 'live_text'
 
 
 @dataclass(frozen=True)
@@ -45,6 +38,102 @@ class StoredMessageRecord:
     status: str
     payload: str
     timestamp: str
+    msg_id: str
+    content_type: str
+
+
+@dataclass(frozen=True)
+class PendingLiveRecord:
+    """Represents one durable outbound LIVE item eligible for replay/fallback."""
+
+    receipt_id: int
+    peer_onion: str
+    content_type: str
+    payload: str
+    msg_id: str
+    timestamp: str
+
+
+@dataclass(frozen=True)
+class InboundVoiceRecord:
+    """Represents one crash-safe inbound Voice spool item."""
+
+    receipt_id: int
+    peer_onion: str
+    delivery: str
+    payload: str
+    msg_id: str
+    timestamp: str
+    retained_bytes: int
+    status: str
+
+
+@dataclass(frozen=True)
+class VoicePayloadRecord:
+    """Represents one exact-direction Voice payload ownership record."""
+
+    peer_onion: str
+    direction: MessageDirection
+    delivery: str
+    payload: str
+    msg_id: str
+    status: str
+
+
+@dataclass(frozen=True)
+class RetainedMessageRecord:
+    """Content-free descriptor for one durably retained logical message."""
+
+    peer_onion: str
+    direction: MessageDirection
+    delivery: str
+    content_type: str
+    msg_id: str
+    status: str
+    finalized: bool
+    retained_bytes: int
+    codec: Optional[str] = None
+    duration_ms: Optional[int] = None
+    producer_interrupted: bool = False
+    context_generation: Optional[int] = None
+
+
+@dataclass(frozen=True)
+class RetainedMessagePage:
+    """One stable page of retained-message descriptors."""
+
+    messages: list[RetainedMessageRecord]
+    next_cursor: Optional[str]
+    inventory_version: str
+
+
+class MessageDeleteOutcome(str, Enum):
+    """Domain outcomes for local single-message deletion."""
+
+    DELETED = 'deleted'
+    NOT_FOUND = 'not_found'
+    NOT_DROP = 'not_drop'
+    PENDING_DELIVERY = 'pending_delivery'
+    AMBIGUOUS_IDENTITY = 'ambiguous_identity'
+
+
+class InboundDropOutcome(str, Enum):
+    """Results for same-identity inbound DROP durability transitions."""
+
+    CREATED = 'created'
+    DUPLICATE = 'duplicate'
+    PROMOTED = 'promoted'
+    CONFLICT = 'conflict'
+    LIMIT = 'limit'
+
+
+class PendingLiveAdmission(str, Enum):
+    """Atomic profile-wide admission results for outbound LIVE content."""
+
+    ACCEPTED = 'accepted'
+    DUPLICATE = 'duplicate'
+    COUNT_LIMIT = 'count_limit'
+    BYTE_LIMIT = 'byte_limit'
 
 
 @dataclass(frozen=True)
@@ -75,3 +164,4 @@ class MessageClearResult:
     operation_type: MessageClearOperationType
     target_onion: Optional[str] = None
     profile: Optional[str] = None
+    cancelled_drop_ids: tuple[tuple[str, str], ...] = ()

@@ -4,25 +4,29 @@ import contextlib
 import contextvars
 import dataclasses
 import json
+import math
 import secrets
+from collections.abc import Mapping as MappingABC
+from collections.abc import Sequence as SequenceABC
 from dataclasses import asdict, dataclass
 from enum import Enum
+from types import UnionType
 from typing import (
     Callable,
     Dict,
+    ForwardRef,
     Iterator,
+    List,
     Mapping,
     Optional,
-    Type,
     Set,
-    Union,
-    List,
-    Tuple,
-    get_type_hints,
-    get_origin,
-    get_args,
+    Type,
     TypeVar,
+    Union,
     cast,
+    get_args,
+    get_origin,
+    get_type_hints,
 )
 
 # Local Package Imports
@@ -88,67 +92,170 @@ def _coerce_and_validate(
         Dict[str, object]: The validated and coerced dictionary ready for instantiation.
     """
     hints: Dict[str, object] = get_type_hints(cls)
-    coerced: Dict[str, object] = {}
+    return {
+        key: _validate_value(hints[key], value, key)
+        for key, value in kwargs.items()
+        if key in hints
+    }
 
-    for key, value in kwargs.items():
-        if key not in hints:
-            continue
 
-        expected_type: object = hints[key]
-        origin: object = get_origin(expected_type)
-        args: Tuple[object, ...] = get_args(expected_type) or ()
+def _validate_value(expected_type: object, value: object, path: str) -> object:
+    """Recursively validates and hydrates one JSON-shaped DTO field value.
 
-        if origin is Union:
-            is_optional: bool = type(None) in args
-            if value is None:
-                if not is_optional:
-                    raise ValueError(f"Field '{key}' cannot be null.")
-                coerced[key] = None
-                continue
+    Args:
+        expected_type (object): Resolved annotation describing the accepted value.
+        value (object): Decoded JSON value to validate.
+        path (str): Human-readable location used in validation errors.
 
-            valid: bool = False
-            for arg in args:
-                if arg is type(None):
-                    continue
-                try:
-                    if isinstance(arg, type) and issubclass(arg, Enum):
-                        coerced[key] = arg(value)
-                        valid = True
-                        break
-                    elif isinstance(arg, type) and isinstance(value, arg):
-                        coerced[key] = value
-                        valid = True
-                        break
-                except (ValueError, TypeError):
-                    pass
+    Raises:
+        TypeError: If the value does not conform to the declared IPC type.
 
-            if not valid:
-                raise TypeError(
-                    f"Field '{key}' expected {expected_type}, got {type(value)}."
-                )
+    Returns:
+        object: The validated primitive, container, enum, or nested dataclass.
+    """
+    if isinstance(expected_type, ForwardRef):
+        if expected_type.__forward_arg__ != 'JsonValue':
+            raise TypeError(f"Field '{path}' has an unsupported forward reference.")
+        return _validate_value(JsonValue, value, path)
 
-        else:
-            if value is None:
-                raise ValueError(f"Field '{key}' cannot be null.")
+    origin: object = get_origin(expected_type)
+    args: tuple[object, ...] = get_args(expected_type)
+
+    if origin in (Union, UnionType):
+        for union_type in args:
             try:
-                if isinstance(expected_type, type) and issubclass(expected_type, Enum):
-                    coerced[key] = expected_type(value)
-                elif origin in (list, dict):
-                    if not isinstance(value, (list, dict)):
-                        raise TypeError()
-                    coerced[key] = value
-                elif isinstance(expected_type, type) and not isinstance(
-                    value, expected_type
-                ):
-                    raise TypeError()
-                else:
-                    coerced[key] = value
-            except (ValueError, TypeError) as e:
-                raise TypeError(
-                    f"Field '{key}' expected {expected_type}, got {type(value)}."
-                ) from e
+                return _validate_value(union_type, value, path)
+            except (TypeError, ValueError):
+                continue
+        raise TypeError(
+            f"Field '{path}' expected {expected_type}, got {type(value).__name__}."
+        )
 
-    return coerced
+    if expected_type is type(None):
+        if value is None:
+            return None
+        raise TypeError(f"Field '{path}' expected null, got {type(value).__name__}.")
+
+    if origin is list:
+        if not isinstance(value, list) or len(args) != 1:
+            raise TypeError(f"Field '{path}' expected a typed JSON array.")
+        return [
+            _validate_value(args[0], item, f'{path}[{index}]')
+            for index, item in enumerate(value)
+        ]
+
+    if origin is SequenceABC:
+        if not isinstance(value, list) or len(args) != 1:
+            raise TypeError(f"Field '{path}' expected a typed JSON array.")
+        return [
+            _validate_value(args[0], item, f'{path}[{index}]')
+            for index, item in enumerate(value)
+        ]
+
+    if origin in (dict, MappingABC):
+        if not isinstance(value, dict) or len(args) != 2:
+            raise TypeError(f"Field '{path}' expected a typed JSON object.")
+        return {
+            _validate_value(args[0], key, f'{path}.<key>'): _validate_value(
+                args[1], item, f'{path}[{key!r}]'
+            )
+            for key, item in value.items()
+        }
+
+    if isinstance(expected_type, type) and issubclass(expected_type, Enum):
+        try:
+            return expected_type(value)
+        except (TypeError, ValueError) as exc:
+            raise TypeError(
+                f"Field '{path}' expected {expected_type.__name__}."
+            ) from exc
+
+    if isinstance(expected_type, type) and dataclasses.is_dataclass(expected_type):
+        return _validate_dataclass(expected_type, value, path)
+
+    if expected_type is int:
+        if type(value) is int:
+            return value
+    elif expected_type is bool:
+        if type(value) is bool:
+            return value
+    elif expected_type is float:
+        # JSON has one number type; other language encoders may spell 1.0 as 1.
+        # Booleans remain distinct, and conversion must not admit infinity.
+        if type(value) in (int, float):
+            try:
+                number = float(cast(int | float, value))
+            except OverflowError:
+                pass
+            else:
+                if math.isfinite(number):
+                    return number
+    elif expected_type is str:
+        if type(value) is str:
+            return value
+    else:
+        raise TypeError(f"Field '{path}' uses unsupported type {expected_type!r}.")
+
+    raise TypeError(
+        f"Field '{path}' expected {expected_type}, got {type(value).__name__}."
+    )
+
+
+def _validate_dataclass(expected_type: Type[T], value: object, path: str) -> T:
+    """Validates and hydrates one nested dataclass payload.
+
+    Args:
+        expected_type (Type[T]): Concrete nested DTO class.
+        value (object): JSON object or an already hydrated instance.
+        path (str): Human-readable location used in validation errors.
+
+    Raises:
+        TypeError: If the nested value or discriminator violates the DTO schema.
+
+    Returns:
+        T: The validated nested DTO instance.
+    """
+    if isinstance(value, expected_type):
+        return value
+    if not isinstance(value, dict):
+        raise TypeError(f"Field '{path}' expected {expected_type.__name__}.")
+
+    fields: tuple[dataclasses.Field[object], ...] = dataclasses.fields(
+        expected_type  # type: ignore[arg-type]
+    )
+    valid_keys: Set[str] = {field.name for field in fields}
+    _reject_unknown_fields(
+        expected_type,
+        cast(Dict[str, JsonValue], value),
+        valid_keys,
+        '',
+    )
+    for field in fields:
+        if field.init or field.default is dataclasses.MISSING:
+            continue
+        expected_discriminator: object = field.default
+        if isinstance(expected_discriminator, Enum):
+            expected_discriminator = expected_discriminator.value
+        if value.get(field.name) != expected_discriminator:
+            raise TypeError(
+                f"Field '{path}.{field.name}' has an invalid discriminator."
+            )
+
+    nested_kwargs: Dict[str, JsonValue] = {
+        key: cast(JsonValue, item)
+        for key, item in value.items()
+        if key in valid_keys
+        and next(field for field in fields if field.name == key).init
+    }
+    try:
+        return _instantiate_validated_message(
+            expected_type,
+            _coerce_and_validate(expected_type, nested_kwargs),
+        )
+    except (TypeError, ValueError) as exc:
+        raise TypeError(
+            f"Field '{path}' is not a valid {expected_type.__name__}."
+        ) from exc
 
 
 def _instantiate_validated_message(cls: Type[T], kwargs: Dict[str, object]) -> T:
@@ -190,7 +297,7 @@ class IpcMessage:
         data: Dict[str, JsonValue] = {
             k: v for k, v in asdict(self).items() if v is not None
         }
-        return json.dumps(data)
+        return json.dumps(data, allow_nan=False)
 
 
 @dataclass
@@ -233,6 +340,8 @@ class IpcCommand(IpcMessage):
 class IpcEvent(IpcMessage):
     """Base class for all events emitted by the daemon."""
 
+    revision: Optional[int] = dataclasses.field(default=None, kw_only=True)
+    epoch: Optional[str] = dataclasses.field(default=None, kw_only=True)
     event_type: EventType = dataclasses.field(init=False)
 
     @classmethod

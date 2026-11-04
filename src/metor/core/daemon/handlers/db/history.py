@@ -13,6 +13,7 @@ from metor.core.api import (
     create_event,
 )
 from metor.data.history import HistoryClearOperationType, HistoryClearResult
+from metor.data import SettingKey
 
 # Local Package Imports
 from metor.core.daemon.handlers.db.support import DatabaseCommandHandlerSupportMixin
@@ -50,6 +51,9 @@ class DatabaseCommandHistoryMixin(DatabaseCommandHandlerSupportMixin):
                 return create_event(EventType.INVALID_TARGET, {'target': cmd.target})
             alias, onion = resolved
 
+        if cmd.page_size is not None:
+            return self._history_page(cmd, alias, onion)
+
         if isinstance(cmd, GetRawHistoryCommand):
             raw_entries = self._hm.get_raw_history(onion, cmd.limit)
             return HistoryRawDataEvent(
@@ -68,6 +72,51 @@ class DatabaseCommandHistoryMixin(DatabaseCommandHandlerSupportMixin):
             alias=alias,
             peer_onion=onion,
         )
+
+    def _history_page(
+        self,
+        cmd: GetHistoryCommand | GetRawHistoryCommand,
+        alias: Optional[str],
+        onion: Optional[str],
+    ) -> IpcEvent:
+        """Projects Core-owned bounded activity metadata and effective retention.
+
+        Args:
+            cmd: Validated opt-in page request.
+            alias: Resolved optional contact alias.
+            onion: Resolved optional canonical peer identity.
+        Returns:
+            IpcEvent: Metadata-only page, including a truthful expired cursor result.
+        """
+        assert cmd.page_size is not None
+        event: HistoryDataEvent | HistoryRawDataEvent
+        if isinstance(cmd, GetRawHistoryCommand):
+            raw, next_id, older, available = self._hm.get_raw_page(
+                onion, cmd.page_size, cmd.before_id
+            )
+            event = HistoryRawDataEvent(
+                entries=[self._build_raw_history_entry(entry) for entry in raw],
+                profile=self._pm.profile_name,
+                alias=alias,
+                peer_onion=onion,
+            )
+        else:
+            summary, next_id, older, available = self._hm.get_summary_page(
+                onion, cmd.page_size, cmd.before_id
+            )
+            event = HistoryDataEvent(
+                entries=[self._build_summary_history_entry(entry) for entry in summary],
+                profile=self._pm.profile_name,
+                alias=alias,
+                peer_onion=onion,
+            )
+        event.next_before_id = next_id
+        event.has_older = older
+        event.page_available = available
+        event.metadata_only = True
+        event.record_live = self._pm.config.get_bool(SettingKey.RECORD_LIVE_HISTORY)
+        event.record_drop = self._pm.config.get_bool(SettingKey.RECORD_DROP_HISTORY)
+        return event
 
     def _handle_clear_history(self, cmd: ClearHistoryCommand) -> IpcEvent:
         """

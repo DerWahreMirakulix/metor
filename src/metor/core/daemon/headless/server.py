@@ -2,39 +2,15 @@
 
 import json
 import socket
+import time
 from typing import Dict
 
 from metor.core.api import EventType, IpcCommand, JsonValue, create_event
 from metor.data import SettingKey
+from metor.shared import recv_before
 from metor.utils import Constants
 
 from metor.core.daemon.headless.protocols import HeadlessDaemonProtocol
-
-
-def run_acceptor(daemon: HeadlessDaemonProtocol) -> None:
-    """
-    Waits for a single local client and delegates socket processing.
-
-    Args:
-        daemon (HeadlessDaemonProtocol): The owning headless daemon instance.
-
-    Returns:
-        None
-    """
-    if not daemon._server:
-        return
-
-    daemon._server.settimeout(Constants.THREAD_POLL_TIMEOUT)
-    while not daemon._stop_event.is_set():
-        try:
-            conn, _ = daemon._server.accept()
-        except socket.timeout:
-            continue
-        except OSError:
-            break
-
-        daemon._handle_client(conn)
-        break
 
 
 def handle_client(daemon: HeadlessDaemonProtocol, conn: socket.socket) -> None:
@@ -51,12 +27,13 @@ def handle_client(daemon: HeadlessDaemonProtocol, conn: socket.socket) -> None:
     try:
         daemon_ipc_timeout = daemon._pm.config.get_float(SettingKey.DAEMON_IPC_TIMEOUT)
         conn.settimeout(daemon_ipc_timeout)
+        deadline = time.monotonic() + daemon_ipc_timeout
         buffer: bytearray = bytearray()
         while not daemon._stop_event.is_set():
             try:
-                data: bytes = conn.recv(Constants.TCP_BUFFER_SIZE)
+                data = recv_before(conn, Constants.TCP_BUFFER_SIZE, deadline)
             except socket.timeout:
-                continue
+                break
             except OSError:
                 break
 
@@ -64,14 +41,18 @@ def handle_client(daemon: HeadlessDaemonProtocol, conn: socket.socket) -> None:
                 break
 
             buffer.extend(data)
-            if len(buffer) > Constants.MAX_IPC_BYTES:
+            frame_end: int = buffer.find(b'\n')
+            if frame_end < 0:
+                if len(buffer) > Constants.MAX_IPC_BYTES:
+                    daemon._send(conn, create_event(EventType.UNKNOWN_COMMAND))
+                    break
+                continue
+
+            if frame_end + 1 > Constants.MAX_IPC_BYTES:
                 daemon._send(conn, create_event(EventType.UNKNOWN_COMMAND))
                 break
 
-            if b'\n' not in buffer:
-                continue
-
-            line_bytes, _, _ = buffer.partition(b'\n')
+            line_bytes = buffer[:frame_end]
             try:
                 line: str = line_bytes.decode('utf-8').strip()
             except UnicodeDecodeError:

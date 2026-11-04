@@ -1,0 +1,614 @@
+"""Native SDL/Kivy application lifecycle and generation-safe GUI polling."""
+
+from contextlib import ExitStack
+from typing import Literal
+
+from kivy.app import App
+from kivy.clock import Clock
+from kivy.config import Config
+from kivy.core.window import Window
+from kivy.input.motionevent import MotionEvent
+from kivy.metrics import Metrics, dp
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.floatlayout import FloatLayout
+from kivy.uix.widget import Widget
+
+from metor.client import FrontendLaunchContext
+from metor.ui.gui.accessibility import AccessibilityBridge
+from metor.ui.gui.constants import Geometry, GuiLimits
+from metor.ui.gui.platform import DeviceConfiguration
+from metor.ui.gui.platform.lifecycle import (
+    DesktopLifecycleEvent,
+    DesktopLifecycleSource,
+    LifecycleCoordinator,
+    LifecycleHandoff,
+    create_desktop_lifecycle_source,
+)
+from metor.ui.gui.runtime import GuiController
+from metor.ui.gui.runtime.voice import PressSource
+from metor.ui.gui.theme import color
+from metor.ui.gui.views import Shell
+from metor.ui.gui.views.calls import CallBar, CallOverlay
+from metor.ui.gui.views.feedback import FeedbackOverlay
+from metor.ui.gui.views.input import InputDock
+from metor.ui.gui.views.live_invitation import LiveInvitationOverlay
+from metor.ui.gui.views.profiles import request_exit
+from metor.ui.gui.widgets import Label, PointerTooltip, TextField
+from metor.ui.gui.widgets.sheet import ActionSheet
+
+
+class MetorApp(App):
+    """One shared desktop/simulator GUI; no platform action implies host shutdown."""
+
+    def __init__(
+        self,
+        context: FrontendLaunchContext,
+        configuration: DeviceConfiguration,
+        **kwargs: object,
+    ) -> None:
+        """Creates an app without starting a profile or probing capture devices.
+
+        Args:
+            context: Typed public launch context.
+            configuration: Validated deployment mode.
+            kwargs: Native application arguments.
+        Returns:
+            None
+        """
+        super().__init__(**kwargs)
+        self.configuration = configuration
+        self.controller = GuiController(
+            context,
+            configuration.mode == 'simulator',
+            clipboard_own_address=configuration.clipboard_own_address,
+            native_audio=configuration.mode == 'desktop',
+        )
+        self.title = 'Metor · Simulator' if self.controller.simulator else 'Metor'
+        self.exit_status: int = 0
+        self._stopped = False
+        self.shell: Shell | None = None
+        self.stage: FloatLayout | None = None
+        self.viewport: BoxLayout | None = None
+        self.input_dock: InputDock | None = None
+        self.call_overlay: CallOverlay | None = None
+        self.call_bar: CallBar | None = None
+        self.feedback_overlay: FeedbackOverlay | None = None
+        self.invitation_overlay: LiveInvitationOverlay | None = None
+        self.invitation_slot: BoxLayout | None = None
+        self.invitation_anchor: Widget | None = None
+        self._prompt_identity: object = None
+        self._native_unit_scale = (1.0, 1.0)
+        self.accessibility: AccessibilityBridge | None = None
+        self._lifecycle_source: DesktopLifecycleSource | None = None
+        self._render_trigger = Clock.create_trigger(self._render, 0)
+        self._metrics_trigger = Clock.create_trigger(self._reflow_metrics, 0)
+        self._lifecycle = LifecycleCoordinator(
+            self._revoke_native_privacy,
+            self.controller.suspend,
+            self.controller.resume,
+            self.refresh,
+            self._lifecycle_source_failed,
+            screen_lock=self.controller.screen_lock,
+        )
+        self._lifecycle_handoff = LifecycleHandoff(
+            lambda callback: Clock.schedule_once(callback, 0),
+            self._apply_lifecycle,
+        )
+
+    def build(self) -> BoxLayout:
+        """Configures one native window and its responsive inner application viewport.
+
+        Args:
+            None
+        Returns:
+            BoxLayout: Native application root.
+        """
+        Config.set('kivy', 'exit_on_escape', '0')
+        Config.set('input', 'mouse', 'mouse,disable_multitouch')
+        self.accessibility = AccessibilityBridge(
+            self.controller.state,
+            self.controller.security.activity,
+            simulator=self.controller.simulator,
+        )
+        self._lifecycle_source = create_desktop_lifecycle_source(self._queue_lifecycle)
+        if self._lifecycle_source is not None:
+            try:
+                self._lifecycle_source.start()
+            except Exception:
+                self.accessibility.close()
+                self.accessibility = None
+                raise
+        Window.clearcolor = color('background')
+        width, height = self.configuration.native_size
+        if self.configuration.mode != 'desktop':
+            Metrics.density = self.configuration.scale
+        target_size = self._window_units(
+            width, height + (dp(24) if self.controller.simulator else 0)
+        )
+        # SDL can enlarge the drawable immediately when its minimum changes;
+        # system_size still describes the old window until the next resize event.
+        self._set_window_minimum()
+        Window.size = target_size
+        root = BoxLayout(orientation='vertical')
+        if self.controller.simulator:
+            simulator_bar = BoxLayout(size_hint_y=None, height='24dp')
+            simulator_bar.add_widget(
+                Label(
+                    'SIMULATOR · no hardware or production profile actions',
+                    role='support',
+                    tone='live',
+                    wrap=False,
+                )
+            )
+            root.add_widget(simulator_bar)
+        self.shell = Shell(self.controller, self.refresh)
+        self.viewport = BoxLayout(orientation='vertical')
+        self.viewport.add_widget(self.shell)
+        self.invitation_slot = BoxLayout(
+            size_hint_y=None, height=0, padding=(dp(Geometry.EDGE), 0)
+        )
+        self.invitation_anchor = Widget()
+        self.invitation_slot.add_widget(self.invitation_anchor)
+        self.viewport.add_widget(self.invitation_slot, index=1)
+        self.call_bar = CallBar(self.controller, self.refresh)
+        self.call_bar.bind(height=lambda *_args: self.refresh())
+        self.viewport.add_widget(self.call_bar, index=2)
+        stage = FloatLayout()
+        self.stage = stage
+        stage.add_widget(self.viewport)
+        self.feedback_overlay = FeedbackOverlay(self.controller, self.refresh)
+        stage.add_widget(self.feedback_overlay)
+        self.controller.state.privacy_fence = self._revoke_native_privacy
+        self.invitation_overlay = LiveInvitationOverlay(self.controller, self.refresh)
+        stage.add_widget(self.invitation_overlay)
+        self.call_overlay = CallOverlay(self.controller, self.refresh)
+        stage.add_widget(self.call_overlay)
+        root.add_widget(stage)
+        self.input_dock = InputDock(self, self.viewport)
+        TextField.keyboard_owner = self.input_dock
+        self.shell.bind(size=lambda *_args: self.refresh())
+        Window.bind(dpi=self._metrics_changed, _density=self._metrics_changed)
+        Window.bind(on_request_close=self._close, on_keyboard=self._keyboard)
+        Window.bind(
+            on_key_down=self._key_down,
+            on_key_up=self._key_up,
+            on_touch_down=self._activity,
+            on_touch_up=self._touch_up,
+            focus=self._focus,
+        )
+        Clock.schedule_interval(self._poll, GuiLimits.UI_TICK_SECONDS)
+        self.controller.device.start()
+        self.refresh()
+        return root
+
+    def on_start(self) -> None:
+        """Settle nested native layout after App attaches its root to Window.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        self._settle_viewport_layout()
+
+    def _settle_viewport_layout(self) -> None:
+        """Measure the outer responsive chain at the current drawable size.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        if (
+            self.root is not None
+            and self.stage is not None
+            and self.viewport is not None
+        ):
+            self.root.do_layout()
+            self.stage.do_layout()
+            self.viewport.do_layout()
+
+    def refresh(self) -> None:
+        """Coalesces redundant presentation updates into one native frame.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        self._render_trigger()
+
+    def _metrics_changed(self, *_args: object) -> None:
+        """Coalesces DPI and drawable-density updates from the native window.
+
+        Args:
+            _args: Kivy property-change fields.
+        Returns:
+            None
+        """
+        self._metrics_trigger()
+
+    def _window_units(self, width: float, height: float) -> tuple[int, int]:
+        """Map configured drawable pixels into SDL's native window coordinate units.
+
+        Kivy reads ``Window.size`` in drawable pixels but writes it in system
+        units on HiDPI hosts. Desktop sizing retains its native host policy.
+        """
+        if self.configuration.mode != 'desktop':
+            system_width, system_height = Window.system_size
+            if min(system_width, system_height, Window.width, Window.height) > 0:
+                self._native_unit_scale = (
+                    system_width / Window.width,
+                    system_height / Window.height,
+                )
+            width *= self._native_unit_scale[0]
+            height *= self._native_unit_scale[1]
+        return round(width), round(height)
+
+    def _set_window_minimum(self) -> None:
+        """Keep minimum geometry in the same coordinate domain as native sizing."""
+        scale = self.configuration.scale
+        minimum = self._window_units(
+            Geometry.MIN_WIDTH * scale,
+            scale * (Geometry.MIN_HEIGHT + (24 if self.controller.simulator else 0)),
+        )
+        Window.minimum_width, Window.minimum_height = minimum
+
+    def _reflow_metrics(self, _elapsed: float) -> None:
+        """Applies the current pixel scale without discarding editor or cover input.
+
+        Args:
+            _elapsed: Native scheduling delay after a monitor transition.
+        Returns:
+            None
+        """
+        self._set_window_minimum()
+        if ActionSheet.current is not None:
+            ActionSheet.current._resize()
+        self._settle_viewport_layout()
+        self.refresh()
+
+    def _render(self, _elapsed: float) -> None:
+        """Paints only UI-thread state after layout updates settle.
+
+        Args:
+            _elapsed: Toolkit scheduling delta.
+        Returns:
+            None
+        """
+        ActionSheet.reconcile()
+        call_height = 0.0
+        if self.call_bar is not None:
+            self.call_bar.render()
+            call_height = self.call_bar.height
+        if self.invitation_overlay is not None and self.invitation_slot is not None:
+            reserved = self.invitation_overlay.reserved_height()
+            if self.shell is not None:
+                self.shell.activity_inset = reserved + call_height
+            if self.invitation_slot.height != reserved:
+                self.invitation_slot.height = reserved
+                self._settle_viewport_layout()
+                self.invitation_slot.do_layout()
+        if self.shell is not None:
+            self.shell.render()
+        keyboard_height = (
+            self.input_dock.keyboard.height
+            if self.input_dock and self.input_dock.keyboard
+            else 0
+        )
+        if self.feedback_overlay is not None:
+            self.feedback_overlay.anchor_to(
+                self.shell.feedback_anchor() if self.shell is not None else None
+            )
+            self.feedback_overlay.render()
+        if self.invitation_overlay is not None:
+            self.invitation_overlay.anchor_to(self.invitation_anchor)
+            self.invitation_overlay.bottom_inset = keyboard_height
+            self.invitation_overlay.render()
+        if self.call_overlay is not None:
+            self.call_overlay.bottom_inset = keyboard_height
+            self.call_overlay.render()
+            if self.shell is not None:
+                self.shell.inset_locked_call(self.call_overlay.occupied_height)
+        if self.accessibility is not None and self.root is not None:
+            self.accessibility.rendered(self.root)
+
+    def _poll(self, _elapsed: float) -> None:
+        """Drains bounded SDK work while retaining responsive native input.
+
+        Args:
+            _elapsed: Toolkit scheduling delta.
+        Returns:
+            None
+        """
+        changed = self.controller.poll()
+        if changed and self.controller.state.covered and self.accessibility is not None:
+            self.accessibility.revoke()
+        if self.accessibility is not None:
+            self.accessibility.poll()
+        if self.controller.lifecycle.exit_ready:
+            self.stop()
+            return
+        if self.input_dock is not None:
+            self.input_dock.poll()
+        if self.call_bar is not None:
+            self.call_bar.render()
+        prompt = self.controller.interactions.prompt
+        if prompt is not self._prompt_identity:
+            self._prompt_identity = prompt
+            changed = True
+        if changed:
+            self.refresh()
+
+    def _activity(self, *_args: object) -> None:
+        """Records deliberate native input for the application idle timer.
+
+        Args:
+            _args: Native input event fields.
+        Returns:
+            None
+        """
+        PointerTooltip.clear_all()
+        self.controller.security.activity()
+
+    def _keyboard(self, _window: object, key: int, *_args: object) -> bool:
+        """Provides safe Back without dismissing authorization covers.
+
+        Args:
+            _window: Native event source.
+            key: Native key code.
+            _args: Remaining event fields.
+        Returns:
+            bool: Whether the event was handled.
+        """
+        if (
+            key == 27
+            and self.input_dock is not None
+            and self.input_dock.keyboard is not None
+        ):
+            self.input_dock.hide()
+            return True
+        if key == 27 and not self.controller.state.covered:
+            self.controller.back()
+            self.refresh()
+            return True
+        return False
+
+    def _key_down(
+        self,
+        _window: object,
+        key: int,
+        _scan: int | None = None,
+        _text: str | None = None,
+        modifiers: list[str] | None = None,
+    ) -> bool:
+        """Observes key ownership while the focused composer owns Enter behavior.
+
+        Args:
+            _window: Native window.
+            key: Native key code.
+            _scan: Native scancode.
+            _text: Native text representation.
+            modifiers: Current modifier names.
+        Returns:
+            bool: False preserves dispatch to the focused editor or action.
+        """
+        self.controller.inputs.observe_key_down(str(key))
+        self.controller.security.activity()
+        return False
+
+    def _key_up(self, _window: object, key: int, *_args: object) -> bool:
+        """Releases the original PTT owner even after its widget/profile disappeared.
+
+        Args:
+            _window: Native window.
+            key: Released native key code.
+            _args: Remaining native key metadata.
+        Returns:
+            bool: False preserves ordinary keyboard dispatch.
+        """
+        if self.controller.inputs.observe_key_up(str(key)):
+            self.refresh()
+        return False
+
+    def _touch_up(self, _window: object, touch: MotionEvent) -> bool:
+        """Routes a captured pointer release independently of the current view tree.
+
+        Args:
+            _window: Native window.
+            touch: Released pointer identity.
+        Returns:
+            bool: False permits native button feedback to finish.
+        """
+        if self.controller.inputs.up(PressSource.POINTER, str(touch.uid)):
+            self.refresh()
+        return False
+
+    def _focus(self, _window: object, focused: bool) -> None:
+        """Stops capture on application focus loss without synthesizing release.
+
+        Args:
+            _window: Native window.
+            focused: Current foreground focus.
+        Returns:
+            None
+        """
+        if self.accessibility is not None:
+            self.accessibility.native.focus(focused)
+        if not focused:
+            self._native_departure()
+
+    def _native_departure(self) -> None:
+        """Revokes focus-owned interaction and media on focus or session departure.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        PointerTooltip.clear_all()
+        if self.feedback_overlay is not None:
+            self.feedback_overlay.revoke()
+        self.controller.calls.cover()
+        if self.call_bar is not None:
+            self.call_bar.revoke()
+        if self.call_overlay is not None:
+            self.call_overlay.revoke()
+        if self.invitation_overlay is not None:
+            self.invitation_overlay.revoke()
+        if self.invitation_slot is not None:
+            self.invitation_slot.height = 0
+        self.controller.native_departure()
+        self.refresh()
+
+    def _queue_lifecycle(self, event: DesktopLifecycleEvent) -> None:
+        """Admit one native-thread transition and wake the GUI loop promptly.
+
+        Args:
+            event (DesktopLifecycleEvent): The event input.
+
+        Returns:
+            None
+        """
+        self._lifecycle_handoff.publish(event)
+
+    def _drain_lifecycle(self, _elapsed: float) -> None:
+        """Apply bounded native lifecycle work on the sole GUI thread.
+
+        Args:
+            _elapsed (float): The  elapsed input.
+
+        Returns:
+            None
+        """
+        self._lifecycle_handoff.drain(_elapsed)
+
+    def _apply_lifecycle(self, event: DesktopLifecycleEvent) -> None:
+        """Synchronously fence privacy before scheduling any replacement frame.
+
+        Args:
+            event (DesktopLifecycleEvent): The event input.
+
+        Returns:
+            None
+        """
+        self._lifecycle.apply(event)
+
+    def _revoke_native_privacy(self) -> None:
+        """Remove native and in-window auxiliary text before applying a cover.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        if self.accessibility is not None:
+            self.accessibility.native.focus(False)
+            self.accessibility.revoke()
+        PointerTooltip.clear_all()
+        if self.feedback_overlay is not None:
+            self.feedback_overlay.revoke()
+        self.controller.calls.cover()
+        if self.call_bar is not None:
+            self.call_bar.revoke()
+        if self.call_overlay is not None:
+            self.call_overlay.revoke()
+        if self.invitation_overlay is not None:
+            self.invitation_overlay.revoke()
+        if self.invitation_slot is not None:
+            self.invitation_slot.height = 0
+        if self.shell is not None:
+            self.shell.revoke_peer_views()
+
+    def _lifecycle_source_failed(self) -> None:
+        """Permanently detach this GUI after losing native security monitoring.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        self.exit_status = 1
+        self.controller.fail_native_lifecycle()
+        if self.input_dock is not None:
+            self.input_dock.hide()
+
+    def on_pause(self) -> Literal[True]:
+        """Covers and safely stops capture on supported native suspend notifications.
+
+        Args:
+            None
+        Returns:
+            bool: True retains the application behind its authorization cover.
+        """
+        self._apply_lifecycle(DesktopLifecycleEvent.SUSPEND)
+        return True
+
+    def on_resume(self) -> None:
+        """Repaints the retained privacy cover without restoring input or authorization.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        self._apply_lifecycle(DesktopLifecycleEvent.RESUME)
+
+    def _close(self, *_args: object, **_kwargs: object) -> bool:
+        """Keeps the window responsive until this GUI's local finalization and detach finish.
+
+        Args:
+            _args: Native window event.
+            _kwargs: Native event metadata.
+        Returns:
+            bool: True intercepts native closure until local lifecycle handling completes.
+        """
+        request_exit(self.controller)
+        self.refresh()
+        return True
+
+    def on_stop(self) -> None:
+        """Cancels pending prompts and releases this GUI's client on exit.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        if self._stopped:
+            return
+        self._stopped = True
+        with ExitStack() as cleanup:
+            cleanup.callback(ActionSheet.reconcile)
+            cleanup.callback(self.controller.close)
+            if Window is not None:
+                cleanup.callback(
+                    Window.unbind,
+                    on_request_close=self._close,
+                    on_keyboard=self._keyboard,
+                    on_key_down=self._key_down,
+                    on_key_up=self._key_up,
+                    on_touch_down=self._activity,
+                    on_touch_up=self._touch_up,
+                    focus=self._focus,
+                    dpi=self._metrics_changed,
+                    _density=self._metrics_changed,
+                )
+            cleanup.callback(self.controller.device.close)
+            cleanup.callback(setattr, TextField, 'keyboard_owner', None)
+            if self.input_dock is not None:
+                cleanup.callback(self.input_dock.hide)
+            if self.accessibility is not None:
+                accessibility, self.accessibility = self.accessibility, None
+                cleanup.callback(accessibility.close)
+            if self._lifecycle_source is not None:
+                source, self._lifecycle_source = self._lifecycle_source, None
+                cleanup.callback(source.close)
+            cleanup.callback(self._lifecycle_handoff.close)
+            cleanup.callback(PointerTooltip.clear_all)
+            if self.feedback_overlay is not None:
+                cleanup.callback(self.feedback_overlay.revoke)
+            cleanup.callback(self.controller.lifecycle.cancel)
+            cleanup.callback(self.controller.interactions.cancel)

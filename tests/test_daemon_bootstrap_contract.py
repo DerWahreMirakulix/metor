@@ -1,0 +1,556 @@
+"""Regression coverage for the canonical daemon bootstrap path."""
+
+# ruff: noqa: E402
+
+import io
+from contextlib import nullcontext
+import os
+import subprocess
+import sys
+import threading
+import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from typing import cast
+from unittest.mock import Mock, patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
+
+from link_fixtures import create_directory_alias
+from metor.data import ProfileManager, SettingKey
+from metor.data.profile.paths import Paths
+from metor.utils import Constants, FileLock
+
+
+class DaemonBootstrapContractTests(unittest.TestCase):
+    """Covers argument gates, secret transport, and failed-child ownership."""
+
+    def test_canonical_parser_does_not_resolve_default_profile(self) -> None:
+        from metor.cli.parser import CliParser
+
+        with patch.object(
+            ProfileManager,
+            'load_default_profile',
+            side_effect=AssertionError('profile I/O during parser construction'),
+        ):
+            args, extra = CliParser.parse(['daemon', '--non-interactive'])
+
+        self.assertIsNone(args.profile)
+        self.assertTrue(args.non_interactive)
+        self.assertEqual(extra, [])
+
+    def test_autostart_uses_exact_interpreter_and_canonical_module(self) -> None:
+        from metor.application.runtime.daemon import _build_daemon_launch_command
+
+        profile = Mock(spec=ProfileManager)
+        profile.profile_name = 'alpha'
+
+        command = _build_daemon_launch_command(
+            cast(ProfileManager, profile),
+            start_locked=True,
+            startup_session_auth_stdin=True,
+        )
+
+        self.assertEqual(command[0], sys.executable)
+        self.assertEqual(command[1:4], ['-I', '-m', 'metor'])
+        self.assertNotIn('metor.daemon_main', command)
+        self.assertNotIn('--daemon-child', command)
+        self.assertIn('--non-interactive', command)
+        self.assertIn('daemon', command)
+
+    def test_autostart_preserves_an_aliased_virtualenv_interpreter(self) -> None:
+        """The child invocation retains venv selection without canonicalizing it.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        from metor.application.runtime.daemon import _build_daemon_launch_command
+
+        profile = Mock(spec=ProfileManager)
+        profile.profile_name = 'alpha'
+        with TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            physical_bin = root / 'physical' / 'bin'
+            physical_bin.mkdir(parents=True)
+            (physical_bin / 'python').touch()
+            create_directory_alias(root / 'venv', root / 'physical')
+            interpreter = root / 'venv' / 'bin' / 'python'
+            resolved_interpreter = interpreter.resolve()
+            with patch('sys.executable', str(interpreter)):
+                command = _build_daemon_launch_command(
+                    cast(ProfileManager, profile),
+                    start_locked=True,
+                    startup_session_auth_stdin=False,
+                )
+
+        self.assertEqual(command[0], str(interpreter))
+        self.assertNotEqual(command[0], str(resolved_interpreter))
+
+    def test_importing_cli_definition_is_runtime_side_effect_free(self) -> None:
+        env = os.environ.copy()
+        env['PYTHONPATH'] = str(Path(__file__).resolve().parents[1] / 'src')
+        result = subprocess.run(
+            [
+                sys.executable,
+                '-c',
+                (
+                    'import sys; import metor.cli; '
+                    "print(any(name.startswith(('metor.application', 'metor.data', "
+                    "'metor.ui')) for name in sys.modules))"
+                ),
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), 'False')
+
+    def test_daemon_help_uses_canonical_cli_without_runtime_imports(self) -> None:
+        env = os.environ.copy()
+        env['PYTHONPATH'] = str(Path(__file__).resolve().parents[1] / 'src')
+        result = subprocess.run(
+            [sys.executable, '-m', 'metor', 'daemon', '--help'],
+            check=False,
+            capture_output=True,
+            text=True,
+            env=env,
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('metor daemon', result.stdout)
+
+    def test_environment_data_path_is_loaded_before_profile_resolution(self) -> None:
+        from metor.application import environment
+
+        old_data = Constants.DATA
+        old_loaded = environment._loaded
+        try:
+            with TemporaryDirectory() as temp_dir:
+                root = Path(temp_dir)
+                data_parent = root / 'state'
+                (root / '.env').write_text(
+                    f'METOR_DATA_DIR_PARENT={data_parent}\n',
+                    encoding='utf-8',
+                )
+                with (
+                    patch.dict(
+                        os.environ,
+                        {'METOR_DATA_DIR_PARENT': ''},
+                        clear=False,
+                    ),
+                    patch('pathlib.Path.cwd', return_value=root),
+                    patch('metor.application.environment.load_dotenv') as load_dotenv,
+                ):
+                    load_dotenv.side_effect = lambda: os.environ.__setitem__(
+                        'METOR_DATA_DIR_PARENT', str(data_parent)
+                    )
+                    environment._loaded = False
+                    environment.initialize_runtime_environment()
+
+                self.assertEqual(Constants.DATA, data_parent / Constants.DATA_DIR)
+        finally:
+            Constants.DATA = old_data
+            environment._loaded = old_loaded
+
+    def test_shared_preparation_rejects_remote_and_locked_plaintext(self) -> None:
+        from metor.application.runtime.daemon import (
+            PlaintextLockedDaemonError,
+            RemoteDaemonProfileError,
+            prepare_managed_daemon_start,
+        )
+
+        profile = self._spawn_profile()
+        cast(Mock, profile.is_remote).return_value = True
+        with (
+            patch('metor.application.runtime.daemon.Settings.validate_integrity'),
+            self.assertRaises(RemoteDaemonProfileError),
+        ):
+            prepare_managed_daemon_start(profile, start_locked=False)
+
+        cast(Mock, profile.is_remote).return_value = False
+        with (
+            patch('metor.application.runtime.daemon.Settings.validate_integrity'),
+            self.assertRaises(PlaintextLockedDaemonError),
+        ):
+            prepare_managed_daemon_start(profile, start_locked=True)
+
+    def test_startup_secret_reader_rejects_empty_and_overlong_input(self) -> None:
+        from metor.application.runtime.daemon import read_startup_secret
+
+        self.assertIsNone(read_startup_secret(io.StringIO('')))
+        self.assertEqual(read_startup_secret(io.StringIO('Grüße\n')), 'Grüße')
+        with self.assertRaisesRegex(ValueError, 'too long'):
+            read_startup_secret(io.StringIO('x' * 4097 + '\n'))
+
+    def test_noninteractive_daemon_never_falls_back_to_a_prompt(self) -> None:
+        from metor.application import DaemonStartPreparation
+        from metor.cli.handlers import CommandHandlers
+
+        profile = self._spawn_profile()
+        with (
+            patch(
+                'metor.cli.handlers.prepare_managed_daemon_start',
+                return_value=DaemonStartPreparation(False, False, True),
+            ),
+            patch(
+                'metor.cli.handlers.prompt_hidden',
+                side_effect=AssertionError('interactive prompt'),
+            ),
+            patch('metor.cli.handlers.run_managed_daemon') as run_daemon,
+            patch('sys.stderr', io.StringIO()) as errors,
+        ):
+            result = CommandHandlers.handle_daemon(
+                profile,
+                non_interactive=True,
+            )
+
+        self.assertEqual(result, 1)
+        run_daemon.assert_not_called()
+        self.assertIn('--startup-session-auth-stdin', errors.getvalue())
+
+    @staticmethod
+    def _spawn_profile() -> ProfileManager:
+        profile = Mock(spec=ProfileManager)
+        profile.profile_name = 'alpha'
+        profile.config = Mock()
+        profile.config.get_float.side_effect = lambda key: {
+            SettingKey.IPC_TIMEOUT: 0.1,
+            SettingKey.TOR_TIMEOUT: 0.1,
+        }[key]
+        profile.config.get_bool.return_value = False
+        profile.config.get_int.return_value = 3
+        profile.exists.return_value = True
+        profile.validate_integrity.return_value = None
+        profile.is_remote.return_value = False
+        profile.is_daemon_running.return_value = False
+        profile.uses_plaintext_storage.return_value = True
+        profile.uses_encrypted_storage.return_value = False
+        profile.get_daemon_port.return_value = None
+        profile.paths = Mock()
+        profile.paths.get_daemon_start_lock_file.return_value = Path(
+            'unused-daemon-start'
+        )
+        return cast(ProfileManager, profile)
+
+    def test_secret_write_failure_terminates_owned_child(self) -> None:
+        from metor.application.runtime.daemon import start_managed_daemon_process
+
+        process = Mock()
+        process.stdin = Mock()
+        process.stdin.write.side_effect = BrokenPipeError('closed')
+        process.poll.return_value = None
+        profile = self._spawn_profile()
+
+        with (
+            patch('metor.application.runtime.daemon.Settings.validate_integrity'),
+            patch(
+                'metor.application.runtime.daemon.FileLock', return_value=nullcontext()
+            ),
+            patch(
+                'metor.application.runtime.daemon.subprocess.Popen',
+                return_value=process,
+            ),
+        ):
+            self.assertFalse(
+                start_managed_daemon_process(
+                    profile,
+                    session_auth_password='secret',
+                )
+            )
+
+        process.terminate.assert_called_once_with()
+        process.wait.assert_called()
+
+    def test_child_exit_records_bounded_startup_phase_and_return_code(self) -> None:
+        """Acceptance diagnostics identify an early child exit without environment data."""
+        from metor.application.runtime.daemon import (
+            DaemonStartDiagnostics,
+            start_managed_daemon_process,
+        )
+
+        process = Mock()
+        process.pid = 1234
+        process.stdin = None
+        process.poll.return_value = 17
+        profile = self._spawn_profile()
+        diagnostics = DaemonStartDiagnostics()
+
+        with (
+            patch('metor.application.runtime.daemon.Settings.validate_integrity'),
+            patch(
+                'metor.application.runtime.daemon.FileLock', return_value=nullcontext()
+            ),
+            patch(
+                'metor.application.runtime.daemon.subprocess.Popen',
+                return_value=process,
+            ),
+        ):
+            self.assertFalse(
+                start_managed_daemon_process(profile, diagnostics=diagnostics)
+            )
+
+        self.assertEqual(diagnostics.phase, 'child-exited-before-ipc')
+        self.assertEqual(diagnostics.child_pid, 1234)
+        self.assertEqual(diagnostics.return_code, 17)
+
+    def test_readiness_timeout_terminates_owned_child_with_bounded_wait(self) -> None:
+        from metor.application.runtime.daemon import start_managed_daemon_process
+
+        process = Mock()
+        process.stdin = None
+        process.poll.return_value = None
+        process.wait.side_effect = subprocess.TimeoutExpired('metor', 2.0)
+        profile = self._spawn_profile()
+
+        with (
+            patch('metor.application.runtime.daemon.Settings.validate_integrity'),
+            patch(
+                'metor.application.runtime.daemon.FileLock', return_value=nullcontext()
+            ),
+            patch(
+                'metor.application.runtime.daemon.subprocess.Popen',
+                return_value=process,
+            ),
+            patch(
+                'metor.application.runtime.daemon.time.monotonic',
+                side_effect=[0.0, 1000.0],
+            ),
+        ):
+            self.assertFalse(start_managed_daemon_process(profile))
+
+        process.terminate.assert_called_once_with()
+        process.kill.assert_called_once_with()
+        process.wait.assert_called()
+
+    def test_unlocked_spawn_accepts_ipc_readiness_after_tor_launch_window(self) -> None:
+        """An unlocked child may publish IPC after Tor's 45-second launch window.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        from metor.application.runtime.daemon import (
+            DaemonStartDiagnostics,
+            start_managed_daemon_process,
+        )
+
+        process = Mock()
+        process.stdin = None
+        process.poll.return_value = None
+        profile = self._spawn_profile()
+        profile.config.get_float.side_effect = lambda key: {
+            SettingKey.IPC_TIMEOUT: 45.0,
+            SettingKey.TOR_TIMEOUT: 10.0,
+        }[key]
+        profile.get_daemon_port.side_effect = [None, 43111]
+        diagnostics = DaemonStartDiagnostics()
+
+        with (
+            patch('metor.application.runtime.daemon.Settings.validate_integrity'),
+            patch(
+                'metor.application.runtime.daemon.FileLock', return_value=nullcontext()
+            ),
+            patch(
+                'metor.application.runtime.daemon.subprocess.Popen',
+                return_value=process,
+            ),
+            patch(
+                'metor.application.runtime.daemon.time.monotonic',
+                side_effect=[0.0, 46.0, 46.0],
+            ),
+            patch('metor.application.runtime.daemon.time.sleep'),
+        ):
+            self.assertTrue(
+                start_managed_daemon_process(profile, diagnostics=diagnostics)
+            )
+
+        self.assertEqual(diagnostics.phase, 'ready')
+        process.terminate.assert_not_called()
+        process.kill.assert_not_called()
+
+    def test_spawn_gate_survives_profile_directory_replacement(self) -> None:
+        """A migration cannot replace the lock identity held through child readiness."""
+        from metor.application.runtime.daemon import start_managed_daemon_process
+
+        with (
+            TemporaryDirectory() as temporary,
+            patch.object(Constants, 'DATA', Path(temporary)),
+        ):
+            profile = self._spawn_profile()
+            profile.paths = Paths('alpha')
+            profile.paths.base_dir.mkdir()
+            target = profile.paths.get_daemon_start_lock_file()
+
+            def during_start(*_args: object, **_kwargs: object) -> bool:
+                """Replace the profile root while the parent's real lock is held."""
+                profile.paths.base_dir.rename(Path(temporary) / 'previous')
+                profile.paths.base_dir.mkdir()
+                with self.assertRaises(TimeoutError):
+                    with FileLock(target, timeout=0.05):
+                        self.fail('Profile replacement changed launch ownership.')
+                return True
+
+            with patch(
+                'metor.application.runtime.daemon._start_managed_daemon_process_unlocked',
+                side_effect=during_start,
+            ):
+                self.assertTrue(start_managed_daemon_process(profile))
+            with FileLock(target, timeout=0.05):
+                pass
+            self.assertEqual(target.parent, Path(temporary))
+
+    def test_foreground_start_releases_external_gate_only_after_publication(
+        self,
+    ) -> None:
+        """Foreground launch excludes mutation until Core publishes ready IPC."""
+        from metor.application.runtime.daemon import DaemonStatus, run_managed_daemon
+
+        with (
+            TemporaryDirectory() as temporary,
+            patch.object(Constants, 'DATA', Path(temporary)),
+        ):
+            profile = self._spawn_profile()
+            profile.paths = Paths('alpha')
+            profile.paths.base_dir.mkdir()
+            target = profile.paths.get_daemon_start_lock_file()
+
+            def factory(*_args: object, **kwargs: object) -> Mock:
+                """Assert exclusion before construction and release after ready."""
+                with self.assertRaises(TimeoutError):
+                    with FileLock(target, timeout=0.05):
+                        self.fail('Foreground construction lacks startup ownership.')
+                status = kwargs['status_callback']
+                assert callable(status)
+
+                def run() -> None:
+                    """Publish Core readiness before exposing the lock to mutation."""
+                    status(DaemonStatus.ACTIVE, {})
+                    with FileLock(target, timeout=0.05):
+                        pass
+                    with self.assertRaises(TimeoutError):
+                        with FileLock(
+                            profile.paths.get_daemon_instance_lock_file(), timeout=0.05
+                        ):
+                            self.fail('Ready daemon lost lifetime ownership.')
+
+                return Mock(run=run)
+
+            with (
+                patch('metor.application.runtime.daemon.Settings.validate_integrity'),
+                patch(
+                    'metor.application.runtime.daemon.create_managed_daemon',
+                    side_effect=factory,
+                ),
+            ):
+                run_managed_daemon(profile)
+            with FileLock(profile.paths.get_daemon_instance_lock_file(), timeout=0.05):
+                pass
+
+    def test_start_lock_path_bounds_and_windows_alias_identity(self) -> None:
+        """Long accepted names and Windows case aliases keep one stable lock."""
+        with (
+            TemporaryDirectory() as temporary,
+            patch.object(Constants, 'DATA', Path(temporary)),
+        ):
+            longest = Paths('a' * Constants.FRONTEND_PROFILE_NAME_CHARACTERS)
+            self.assertLess(len(longest.get_daemon_start_lock_file().name) + 5, 255)
+            upper, lower = Paths('Alpha'), Paths('alpha')
+            with patch('metor.data.profile.support.os.name', 'nt'):
+                self.assertEqual(
+                    upper.get_daemon_start_lock_file(),
+                    lower.get_daemon_start_lock_file(),
+                )
+
+    def test_foreground_start_cannot_recreate_removed_profile(self) -> None:
+        """A lifecycle winner invalidates preflight without creating an empty root."""
+        from metor.application.runtime.daemon import (
+            DaemonProfileMissingError,
+            run_managed_daemon,
+        )
+
+        with (
+            TemporaryDirectory() as temporary,
+            patch.object(Constants, 'DATA', Path(temporary)),
+        ):
+            profile = self._spawn_profile()
+            profile.paths = Paths('alpha')
+            profile.exists.side_effect = profile.paths.exists
+            with self.assertRaises(DaemonProfileMissingError):
+                run_managed_daemon(profile)
+            self.assertFalse(profile.paths.base_dir.exists())
+
+    def test_detached_child_keeps_lifetime_gate_after_parent_gate_loss(self) -> None:
+        """A child initializing before IPC excludes mutation after parent loss."""
+        from metor.application.runtime.daemon import run_managed_daemon
+
+        entered, release = threading.Event(), threading.Event()
+        failures: list[BaseException] = []
+        with (
+            TemporaryDirectory() as temporary,
+            patch.object(Constants, 'DATA', Path(temporary)),
+        ):
+            profile = self._spawn_profile()
+            profile.paths = Paths('alpha')
+            profile.paths.base_dir.mkdir()
+
+            def factory(*_args: object, **_kwargs: object) -> Mock:
+                """Pause daemon construction before any PID or IPC publication."""
+                entered.set()
+                if not release.wait(5):
+                    raise TimeoutError('Fixture did not release daemon construction.')
+                return Mock()
+
+            def child() -> None:
+                """Run the production child path while collecting thread failures."""
+                try:
+                    run_managed_daemon(profile, parent_start_lock_held=True)
+                except BaseException as exc:
+                    failures.append(exc)
+
+            with (
+                patch('metor.application.runtime.daemon.Settings.validate_integrity'),
+                patch(
+                    'metor.application.runtime.daemon.create_managed_daemon',
+                    side_effect=factory,
+                ),
+            ):
+                worker = threading.Thread(target=child)
+                try:
+                    with FileLock(profile.paths.get_daemon_start_lock_file()):
+                        worker.start()
+                        self.assertTrue(entered.wait(2))
+                    # Releasing parent ownership models its death; the separate
+                    # cross-process FileLock tests verify kernel crash release.
+                    with FileLock(
+                        profile.paths.get_daemon_start_lock_file(), timeout=0.05
+                    ):
+                        with self.assertRaises(TimeoutError):
+                            with FileLock(
+                                profile.paths.get_daemon_instance_lock_file(),
+                                timeout=0.05,
+                            ):
+                                self.fail('Parent loss exposed an initializing child.')
+                        other = Paths('beta')
+                        with (
+                            FileLock(other.get_daemon_start_lock_file(), timeout=0.05),
+                            FileLock(
+                                other.get_daemon_instance_lock_file(), timeout=0.05
+                            ),
+                        ):
+                            pass
+                finally:
+                    release.set()
+                    worker.join(5)
+                self.assertFalse(worker.is_alive())
+                self.assertEqual(failures, [])
+
+
+if __name__ == '__main__':
+    unittest.main()

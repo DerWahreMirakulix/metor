@@ -1,0 +1,439 @@
+{
+  "revisions": {
+    "google/fonts": "809e4d8b8d7e9364a914909bb777679606c178b8",
+    "lucide-icons/lucide": "f12b0de177fbc2a6795e99be065887e72b237123",
+    "dejavu-fonts": "2.37 (Ubuntu fonts-dejavu-core)"
+  },
+  "assets": [
+    {
+      "path": "fonts/InterTight-variable.ttf",
+      "source": "https://raw.githubusercontent.com/google/fonts/809e4d8b8d7e9364a914909bb777679606c178b8/ofl/intertight/InterTight%5Bwght%5D.ttf",
+      "sha256": "b81b73dcb64df3c230cabade7df6c5773bf863233f24c9ee51087519f1f88b6f"
+    },
+    {
+      "path": "fonts/OFL.txt",
+      "source": "https://raw.githubusercontent.com/google/fonts/809e4d8b8d7e9364a914909bb777679606c178b8/ofl/intertight/OFL.txt",
+      "sha256": "50240ab035cf1b6b3307940235481d515c4b6de3ab1fa843dbe59e7892cb9d58"
+    },
+    {
+      "path": "icons/LICENSE",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/LICENSE",
+      "sha256": "1e7290b35280a048667bbf0ebabac1c7fd52a75300e8b2946ac165715997f2bc"
+    },
+    {
+      "path": "icons/chevron-left.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/chevron-left.svg",
+      "sha256": "83b0681aa38bf55e9d52a1e4b4cced624abe1fe7678ecafda133a574f1161d93"
+    },
+    {
+      "path": "icons/chevron-right.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/chevron-right.svg",
+      "sha256": "2758143d7b2434e4aa7307dfd34405c87909ff4052f21b5f3f40d45224b4f19b"
+    },
+    {
+      "path": "icons/bell.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/bell.svg",
+      "sha256": "394889e9631fe3a9a63be9a479a95b451b708e432d895978d21d9130b5ee5dbe"
+    },
+    {
+      "path": "icons/users.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/users.svg",
+      "sha256": "c94a3781b154ab2716e1696c25c50d37b4b5634f26cb80ae1cdea20cfafc49c1"
+    },
+    {
+      "path": "icons/settings.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/settings.svg",
+      "sha256": "3c7bee2696ce0c2d48d34e813f4fcda31f0ad21ab9309aee3751cde4280ad737"
+    },
+    {
+      "path": "icons/ellipsis.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/ellipsis.svg",
+      "sha256": "4f495cc72013ffdfec677f03b33a150f7b4dd741979283fd6853a09024bca112"
+    },
+    {
+      "path": "icons/plus.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/plus.svg",
+      "sha256": "7f6af73bf1ff6c4bca3f18351c8d1bdec6749c0c2530c4de5da85d520c21df17"
+    },
+    {
+      "path": "icons/search.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/search.svg",
+      "sha256": "9322d964b61cf729b3a81210568d5a97eaf4a1f3239f25a056fda3013bf35611"
+    },
+    {
+      "path": "icons/mic.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/mic.svg",
+      "sha256": "2db62a8268f7a16f0bd0f062ccd21ec4a3733d19a9d88f5332798b4ce437b757"
+    },
+    {
+      "path": "icons/mic-off.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/mic-off.svg",
+      "sha256": "d1ab9ea1f638142a61fab3510d39629a862a4f18812b7642933d5466dd09429a"
+    },
+    {
+      "path": "icons/play.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/play.svg",
+      "sha256": "e646902a5a8ba055ce573c6f51d10bb6eb9d230e7d6e84a9e6c81f599778ffc1"
+    },
+    {
+      "path": "icons/pause.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/pause.svg",
+      "sha256": "0f4280e6dcc1047551bbc6ef8a9f1a34959de13c7f077d9667d12ab90c8fbca7"
+    },
+    {
+      "path": "icons/volume-2.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/volume-2.svg",
+      "sha256": "fb404f9c128a0579de67b399177631e5edb3502fdc247ceb30e8b15754b46071"
+    },
+    {
+      "path": "icons/volume-x.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/volume-x.svg",
+      "sha256": "59b3477f34d36b7bdccde4ca162f4c93808d5c052c5aafd3e909b031c29201c5"
+    },
+    {
+      "path": "icons/rotate-cw.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/rotate-cw.svg",
+      "sha256": "ddcfe6d87240475946935e77411cd4d15a06f3d28a9b921bafed224ebe953668"
+    },
+    {
+      "path": "icons/refresh-cw.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/refresh-cw.svg",
+      "sha256": "2e10dd403c85a24f163d59fc6151aa21147fe9402e1305dfc8979208caee8944"
+    },
+    {
+      "path": "icons/send.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/send.svg",
+      "sha256": "a489257f447b808ab6b258ae888fa49686885bbc30a7a2774d97a01f11f9cd5e"
+    },
+    {
+      "path": "icons/trash-2.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/trash-2.svg",
+      "sha256": "e63698acf757d3043fcb4a9ea6ffceff9dd84708707eafc879c86b34a6ff2786"
+    },
+    {
+      "path": "icons/lock.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/lock.svg",
+      "sha256": "d2cfe60cac8deaef36442b5c8218c1e61abe18222784b2a370ea090d13fca840"
+    },
+    {
+      "path": "icons/key-round.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/key-round.svg",
+      "sha256": "f8cdea843754ed360e36b04bf6aa2c2b3610935dd39ffc685a36c4d0a05be248"
+    },
+    {
+      "path": "icons/user-round.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/user-round.svg",
+      "sha256": "84870f26f3faf8da45da84174517519e81b9e8f00319c78954fcbb74f50038a1"
+    },
+    {
+      "path": "icons/camera.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/camera.svg",
+      "sha256": "f48b4e6cb69c736630202728ed0fd41d8dbe3f2b743a644eaf58a69099dcb6d2"
+    },
+    {
+      "path": "icons/qr-code.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/qr-code.svg",
+      "sha256": "920cb79ab4b2fd23c36a16de3ca533c4896cb989adb823eb7dec97fd840d30f5"
+    },
+    {
+      "path": "icons/copy.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/copy.svg",
+      "sha256": "ea80e566c7a12628a447cb53179b19aea4f60b9143e2becd0d0f20bf260e5718"
+    },
+    {
+      "path": "icons/pin.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/pin.svg",
+      "sha256": "55e8e5e04bcb671179fc1dd589abf09cf6a1e71301ff14eb739419cfab6011e7"
+    },
+    {
+      "path": "icons/keyboard.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/keyboard.svg",
+      "sha256": "f509925ca81964ed06251ad4702e989bb81a566ffc74d15c2226b4f07ded67be"
+    },
+    {
+      "path": "icons/x.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/x.svg",
+      "sha256": "4a9cdab38fbb96162e7dace28e33f4ca0e49d8963a6162abc3d4691b7d675117"
+    },
+    {
+      "path": "icons/triangle-alert.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/triangle-alert.svg",
+      "sha256": "4866f38b8560d410f21e3226413e0b77997b6dfbb6931fadfe0a0d5aef9ffeb4"
+    },
+    {
+      "path": "icons/info.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/info.svg",
+      "sha256": "bc977a64eb96f3e9c1041ffd09a3fceb70e3e65c02b571f76064062ed31f3cb9"
+    },
+    {
+      "path": "icons/history.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/history.svg",
+      "sha256": "a98ff758157910b9fc9d42d5d5dc80c2f4e037afa5f8ea4dee5f5649f03d438d"
+    },
+    {
+      "path": "icons/log-out.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/log-out.svg",
+      "sha256": "ef5acaea068568b087096ca3da84f41982e7518860de199305dc28f0928ff75a"
+    },
+    {
+      "path": "icons/power.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/power.svg",
+      "sha256": "1e6b84a659aa43f826cdd8df0a63d349720004e2ccb10c33e415a990a311aa05"
+    },
+    {
+      "path": "icons/check.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/check.svg",
+      "sha256": "7f33acc9a77a61659531044525fc008edebe215bf4dcf1c789c8674ad3277db0"
+    },
+    {
+      "path": "icons/square.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/square.svg",
+      "sha256": "bd979354f0ab184b95cecf03eedefe40c2dc65830ac6d7e60017b2b25a354acb"
+    },
+    {
+      "path": "icons/square-check.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/square-check.svg",
+      "sha256": "929cdff3bf27aeaff13260d4acf9d1afe62997e0ca88222032fb568dfc93005c"
+    },
+    {
+      "path": "fonts/InterTight-400.ttf",
+      "source": "InterTight-variable.ttf; fonttools 4.59.2 instancer",
+      "sha256": "a6f1990c74a8b7207e33fee27471b6490ca666c68e55b765cc0baab81a0e7550"
+    },
+    {
+      "path": "fonts/InterTight-500.ttf",
+      "source": "InterTight-variable.ttf; fonttools 4.59.2 instancer",
+      "sha256": "951693b65f088c9f92fdb52020c5cf96b4453d784a80c7efb677a6d3877bebf8"
+    },
+    {
+      "path": "fonts/InterTight-600.ttf",
+      "source": "InterTight-variable.ttf; fonttools 4.59.2 instancer",
+      "sha256": "e5019989a06653aa59b22c9319c10cc35c30cc93976f66037e2cb7b36a2cd4db"
+    },
+    {
+      "path": "fonts/InterTight-700.ttf",
+      "source": "InterTight-variable.ttf; fonttools 4.59.2 instancer",
+      "sha256": "aa8e55aa7400d711f2861c73ec65351f5b1c99a33219d90bdc9b2be8385e828e"
+    },
+    {
+      "path": "icons/users-native.svg",
+      "source": "icons/users.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "410b7483fb70f7f9caf4ac1c6145af4e86b272aabfd6b4c4b341a79b7fa46fc1"
+    },
+    {
+      "path": "icons/lock-native.svg",
+      "source": "icons/lock.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "6dc94d5b613c41c4418aca40e540f3285b6de5567f072468f5e1208f65c9e7bb"
+    },
+    {
+      "path": "icons/pin-native.svg",
+      "source": "icons/pin.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "cca8279eb145bcf9e3e39b88fdfb4129f30a2467c22b24c077c9238fb74a5d03"
+    },
+    {
+      "path": "icons/volume-2-native.svg",
+      "source": "icons/volume-2.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "794a77700d1bfa33238bfc8c35239a0f0973371d4dadcc470a7dc4e00af212ea"
+    },
+    {
+      "path": "icons/refresh-cw-native.svg",
+      "source": "icons/refresh-cw.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "5bcecf2ffc510f5019a8a96c388bb06f2944186d2e7df3a4219689d382a4fed9"
+    },
+    {
+      "path": "icons/volume-x-native.svg",
+      "source": "icons/volume-x.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "d9894cc5282dfd2ef726be6d1202467472e32760a7bb8c1b8a95d988a656d00d"
+    },
+    {
+      "path": "icons/trash-2-native.svg",
+      "source": "icons/trash-2.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "4a9b40f0c62d2ab7b190bb5d366041bcb37c12cea8d853941082107710995417"
+    },
+    {
+      "path": "icons/info-native.svg",
+      "source": "icons/info.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "0c9c65e965d1574ef0a3c4c91fc9a6155aaac466879c4e2c804824db46a6434f"
+    },
+    {
+      "path": "icons/keyboard-native.svg",
+      "source": "icons/keyboard.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "eab08723bd1be761bcb11d87befabfc6f8877efa896b70e471be78dfa63b6b66"
+    },
+    {
+      "path": "icons/key-round-native.svg",
+      "source": "icons/key-round.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "ca870f0416425bf3c20144c383c392a368aa39b3ea9b8334f0019ad9db3ad247"
+    },
+    {
+      "path": "icons/history-native.svg",
+      "source": "icons/history.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "764221dc19a865c35e9445ae2537dbd1cd73bbae592401e47e3559504e8294df"
+    },
+    {
+      "path": "icons/pause-native.svg",
+      "source": "icons/pause.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "d5961d68844dda0104f398bfcaee7c0770ee5789dca8543907ad8747de582690"
+    },
+    {
+      "path": "icons/triangle-alert-native.svg",
+      "source": "icons/triangle-alert.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "1ef9a66965c056e66dbb7e9e8fa32893accc84c25fad800afd08eb8270839454"
+    },
+    {
+      "path": "icons/square-native.svg",
+      "source": "icons/square.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "c437f9cd472a55572d678c9612d57cf2f8d9c18dd847a731fc346bd827ed20db"
+    },
+    {
+      "path": "icons/chevron-left-native.svg",
+      "source": "icons/chevron-left.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "b288bbfd8d1b7451d1dfcd4a7ea27b3d45b8a12c0881fca9ccfc5f637e99e587"
+    },
+    {
+      "path": "icons/search-native.svg",
+      "source": "icons/search.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "52cfdde0d0d7103c5af0ad5ba8ac3fea55cb7d35d525f1fa59fbe66c0681bf27"
+    },
+    {
+      "path": "icons/user-round-native.svg",
+      "source": "icons/user-round.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "2d250c2c916db7b49afc6744ab792005eee858d269c9460945324a0a18f11e8c"
+    },
+    {
+      "path": "icons/mic-native.svg",
+      "source": "icons/mic.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "0f3561f40c9f51ecd67588de2bd3d58413327d916eb65890d9dad841688e83e6"
+    },
+    {
+      "path": "icons/power-native.svg",
+      "source": "icons/power.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "614b950ffc4b1d7874a6f2f84ddf89d64c34168c60740a77e6dc65551ac5b065"
+    },
+    {
+      "path": "icons/x-native.svg",
+      "source": "icons/x.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "d72f939b36bcbd8778f72dc352a3c0d5a26f91804d5d3843852b9952b5065c06"
+    },
+    {
+      "path": "icons/qr-code-native.svg",
+      "source": "icons/qr-code.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "63e218ee1919cfdaef13da625dbb374333cb80350e5553b1b4a9c03552f09b62"
+    },
+    {
+      "path": "icons/chevron-right-native.svg",
+      "source": "icons/chevron-right.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "671cc8f5c37c05f825de021985fd6e1beb1792284e363ae56dd796b0a26c74b2"
+    },
+    {
+      "path": "icons/bell-native.svg",
+      "source": "icons/bell.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "99cddfc689eff28a5aef852322f02c83a2f02de143b065b3e3dc10e53853cb2e"
+    },
+    {
+      "path": "icons/copy-native.svg",
+      "source": "icons/copy.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "8cfe84ec5ce742daf6cca7509c18fb9d1bf53653cbe2dd9834c0c7980601e1c3"
+    },
+    {
+      "path": "icons/rotate-cw-native.svg",
+      "source": "icons/rotate-cw.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "287cfd4bc69654067836226088b987f021a2fd80be878849b52dc554cb550263"
+    },
+    {
+      "path": "icons/check-native.svg",
+      "source": "icons/check.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "e423f2981efba50cc42a9cd78c054d106aa514f5ae6a9ce5ab85f77a4d10b3f7"
+    },
+    {
+      "path": "icons/mic-off-native.svg",
+      "source": "icons/mic-off.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "249e221ba45a18c016476e13db93794ea4b6d9c54aae26feb1050aae7ba08fca"
+    },
+    {
+      "path": "icons/log-out-native.svg",
+      "source": "icons/log-out.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "71f74b99ac5f788484e6faa7ea7b9d4f67c396f9643b97e20bf6b0aa69219588"
+    },
+    {
+      "path": "icons/square-check-native.svg",
+      "source": "icons/square-check.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "80784f00ec560155ee9d7850a0669869286309701d9fe5097b69aaa655f0de5c"
+    },
+    {
+      "path": "icons/camera-native.svg",
+      "source": "icons/camera.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "adb6b8620d9ff085ac4eff4cff2ff5cdddb79c3eeb08eaaeae17d5a8d9aff1c4"
+    },
+    {
+      "path": "icons/settings-native.svg",
+      "source": "icons/settings.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "dd1e7dd8348f392d574aa56f25421f69b6fc7ffe0142fa4d005db5076fb17bcf"
+    },
+    {
+      "path": "icons/plus-native.svg",
+      "source": "icons/plus.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "68542b00e85e2defb08480d66bb887dca1795d6509b03da1ebe53fb7fb58146a"
+    },
+    {
+      "path": "icons/play-native.svg",
+      "source": "icons/play.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "18d6881588ef3a004fddbe5f53810b068ec91d922cb491c269bd59413cc23659"
+    },
+    {
+      "path": "icons/send-native.svg",
+      "source": "icons/send.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "587d5b34f4facf8871e5318bde47b3a04cca9259744b807377cc1c62cc777c0b"
+    },
+    {
+      "path": "icons/ellipsis-native.svg",
+      "source": "icons/ellipsis.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "5559566fd44866b67036d70af8ac92921401e0e9bd35e328f81583ce81e25072"
+    },
+    {
+      "path": "fonts/DejaVuSans.ttf",
+      "source": "DejaVu Fonts 2.37 from Ubuntu fonts-dejavu-core; https://dejavu-fonts.github.io/",
+      "sha256": "690243adfefe0ce154b547db6205794bd30ac4277275179517a90994f4980648"
+    },
+    {
+      "path": "fonts/DejaVuSans-Bold.ttf",
+      "source": "DejaVu Fonts 2.37 from Ubuntu fonts-dejavu-core; https://dejavu-fonts.github.io/",
+      "sha256": "d1c3ff99f1e1ce1827a33efd4dad81f40babda06bff9e43bd7591c86662a287b"
+    },
+    {
+      "path": "fonts/DejaVuSans-Bold-coverage.json",
+      "source": "Fontconfig charset ranges from the packaged DejaVuSans-Bold.ttf.",
+      "sha256": "047c88bc35ab06be75081e8da1c291b138874d367219df003ae973af7405a34c"
+    },
+    {
+      "path": "fonts/DejaVu-LICENSE.txt",
+      "source": "DejaVu Fonts 2.37 from Ubuntu fonts-dejavu-core; https://dejavu-fonts.github.io/",
+      "sha256": "63d3ba759d12804c5b31a9d5940d855c1820d1f5999e6b0872eb1c7ff045fbc9"
+    },
+    {
+      "path": "fonts/InterTight-coverage.json",
+      "source": "Codepoint ranges extracted from the identical cmaps of packaged InterTight 400/500/600/700 using fontTools 4.59.2",
+      "sha256": "d812ae8f0f62ffd98b9c8cf864414a696cc89331ec7bc4124db0da97f460ebb2"
+    },
+    {
+      "path": "icons/phone.svg",
+      "source": "https://raw.githubusercontent.com/lucide-icons/lucide/f12b0de177fbc2a6795e99be065887e72b237123/icons/phone.svg",
+      "sha256": "08dc20d60c087dd6f19a8960927dac5c6d67f870de853d718cca79a10a94d535"
+    },
+    {
+      "path": "icons/phone-native.svg",
+      "source": "icons/phone.svg; root stroke/fill applied to primitives, layout v1.0 1.75 stroke",
+      "sha256": "2a6e39407165fcd445dcf292e3e74e6630652c4444d8a44b896e8a45631d1db1"
+    },
+    {
+      "path": "icons/symbols.png",
+      "source": "icons/*-native.svg via scripts/render_gui_symbols.py",
+      "sha256": "390db92dcdf0cc46a2423721c73537d45cb5aee5ec7447ec7f753fc5186285f0"
+    },
+    {
+      "path": "icons/symbols.atlas",
+      "source": "icons/*-native.svg via scripts/render_gui_symbols.py",
+      "sha256": "51cd860c1d60604edb0d08697771665561fd2c0cdf4726a8dca85a639455651a"
+    }
+  ]
+}

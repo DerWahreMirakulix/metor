@@ -1,53 +1,43 @@
 """Connection and pending-session state mixins."""
 
-from dataclasses import dataclass
 import socket
+import secrets
 import threading
 import time
 from typing import Dict, List, Optional, Set, Tuple
 
-from metor.core.api import ConnectionOrigin
+from metor.core.api import ConnectionActor, ConnectionOrigin, ConnectionReasonCode
 from metor.core.daemon.managed.models import SessionState
 from metor.core.daemon.managed.network.state.types import PendingConnectionReason
 from metor.utils import Constants
 
 
-def _close_socket(sock: socket.socket) -> None:
-    """
-    Closes one superseded socket while suppressing teardown noise.
-
-    Args:
-        sock (socket.socket): The socket to close.
-
-    Returns:
-        None
-    """
-    try:
-        sock.close()
-    except OSError:
-        pass
-
-
-@dataclass(frozen=True)
-class PendingConnectionSnapshot:
-    """Represents one pending live-request snapshot for startup rendering."""
-
-    onion: str
-    reason: Optional[PendingConnectionReason]
-    origin: Optional[ConnectionOrigin]
-    expires_at: Optional[float]
-
-
 class StateTrackerConnectionsMixin:
     """Encapsulates live, pending, and outbound connection state operations."""
 
-    _lock: threading.Lock
+    def retire_connection(
+        self, conn: socket.socket, *, preserve_final: bool = False
+    ) -> None:
+        """Delegates exact socket retirement to the state coordinator.
+
+        Args:
+            conn (socket.socket): Retiring transport.
+            preserve_final (bool): Preserve admitted local final control.
+
+        Returns:
+            None
+        """
+        raise NotImplementedError
+
+    _lock: threading.RLock
     _connections: Dict[str, socket.socket]
     _pending_connections: Dict[str, socket.socket]
     _pending_connection_reasons: Dict[str, PendingConnectionReason]
     _pending_connection_origins: Dict[str, ConnectionOrigin]
     _pending_connection_deadlines: Dict[str, float]
+    _pending_connection_tokens: Dict[str, str]
     _outbound_attempts: Set[str]
+    _outbound_attempt_ids: Dict[str, str]
     _outbound_attempt_origins: Dict[str, ConnectionOrigin]
     _outbound_sockets: Dict[str, socket.socket]
     _outbound_connected_origin_overrides: Dict[str, ConnectionOrigin]
@@ -59,6 +49,63 @@ class StateTrackerConnectionsMixin:
     _local_recovery_opt_outs: Dict[str, float]
     _retunnel_in_progress: Set[str]
     _session_last_activity: Dict[str, float]
+    _unacked_messages: Dict[str, Dict[str, Tuple[str, str]]]
+    _last_disconnect_reasons: Dict[str, ConnectionReasonCode]
+    _last_disconnect_actors: Dict[str, ConnectionActor]
+    _live_context_generations: Dict[str, int]
+    _accepted_live_contexts: Dict[str, int]
+    _accepted_live_context_deadlines: Dict[str, float]
+    _next_live_context_generation: int
+
+    def set_last_disconnect_reason(
+        self,
+        onion: str,
+        reason: Optional[ConnectionReasonCode],
+        actor: Optional[ConnectionActor] = None,
+    ) -> None:
+        """Stores only machine-readable lifecycle state for later snapshots.
+
+        Args:
+            onion (str): The onion input.
+            reason (Optional[ConnectionReasonCode]): The reason input.
+            actor (Optional[ConnectionActor]): The actor input.
+
+        Returns:
+            None
+        """
+        with self._lock:
+            if reason is None:
+                self._last_disconnect_reasons.pop(onion, None)
+            else:
+                self._last_disconnect_reasons[onion] = reason
+            if actor is None:
+                self._last_disconnect_actors.pop(onion, None)
+            else:
+                self._last_disconnect_actors[onion] = actor
+
+    def get_last_disconnect_reason(self, onion: str) -> Optional[ConnectionReasonCode]:
+        """Returns the last relevant disconnect reason for one peer.
+
+        Args:
+            onion (str): The onion input.
+
+        Returns:
+            Optional[ConnectionReasonCode]: The resulting value.
+        """
+        with self._lock:
+            return self._last_disconnect_reasons.get(onion)
+
+    def get_last_disconnect_actor(self, onion: str) -> Optional[ConnectionActor]:
+        """Returns the actor associated with the last relevant disconnect.
+
+        Args:
+            onion (str): The onion input.
+
+        Returns:
+            Optional[ConnectionActor]: The resulting value.
+        """
+        with self._lock:
+            return self._last_disconnect_actors.get(onion)
 
     def get_active_onions(self) -> List[str]:
         """
@@ -74,6 +121,30 @@ class StateTrackerConnectionsMixin:
             return list(self._connections.keys()) + list(
                 self._pending_connections.keys()
             )
+
+    def get_relevant_live_onions(self) -> List[str]:
+        """Returns peers with active, recovery, or pending outbound LIVE state.
+
+        Args:
+            None
+
+        Returns:
+            List[str]: Stable snapshot of LIVE-relevant peer identities.
+        """
+        with self._lock:
+            onions = (
+                set(self._connections)
+                | set(self._pending_connections)
+                | set(self._outbound_attempts)
+                | set(self._scheduled_auto_reconnects)
+                | set(self._live_reconnect_grace)
+                | set(self._retunnel_in_progress)
+                | set(self._unacked_messages)
+                | set(self._last_disconnect_reasons)
+                | set(self._last_disconnect_actors)
+                | set(self._accepted_live_contexts)
+            )
+            return sorted(onions)
 
     def get_active_connections_keys(self) -> List[str]:
         """
@@ -146,6 +217,10 @@ class StateTrackerConnectionsMixin:
                 return SessionState.RETUNNELING
             if onion in self._outbound_attempts:
                 return SessionState.CONNECTING
+            if onion in self._live_reconnect_grace:
+                return SessionState.RECONNECT_GRACE
+            if onion in self._scheduled_auto_reconnects:
+                return SessionState.RECONNECT_SCHEDULED
             return SessionState.DISCONNECTED
 
     def has_outbound_attempt(self, onion: str) -> bool:
@@ -201,8 +276,27 @@ class StateTrackerConnectionsMixin:
             None
         """
         with self._lock:
+            if onion not in self._outbound_attempts:
+                self._outbound_attempt_ids[onion] = secrets.token_hex(
+                    Constants.LIVE_ATTEMPT_TOKEN_BYTES
+                )
             self._outbound_attempts.add(onion)
             self._outbound_attempt_origins[onion] = origin
+
+    def get_outbound_attempt_id(self, onion: str) -> Optional[str]:
+        """Returns only the current outbound attempt's opaque cancellation identity.
+
+        Args:
+            onion: Canonical peer whose calling state is displayed.
+        Returns:
+            Optional[str]: Current attempt identity, absent after acceptance or cancellation.
+        """
+        with self._lock:
+            return (
+                self._outbound_attempt_ids.get(onion)
+                if onion in self._outbound_attempts
+                else None
+            )
 
     def get_outbound_attempt_origin(self, onion: str) -> Optional[ConnectionOrigin]:
         """
@@ -252,40 +346,62 @@ class StateTrackerConnectionsMixin:
         with self._lock:
             return self._outbound_connected_origin_overrides.pop(onion, None)
 
-    def discard_outbound_attempt(self, onion: str) -> None:
+    def discard_outbound_attempt(
+        self, onion: str, expected_attempt_id: Optional[str] = None
+    ) -> None:
         """
         Cleans up the bookkeeping for one tracked outbound attempt.
 
         Args:
             onion (str): The peer onion identity.
+            expected_attempt_id: Optional original worker identity; replacement attempts remain untouched.
 
         Returns:
             None
         """
         with self._lock:
+            if (
+                expected_attempt_id is not None
+                and self._outbound_attempt_ids.get(onion) != expected_attempt_id
+            ):
+                return
             self._outbound_attempts.discard(onion)
+            self._outbound_attempt_ids.pop(onion, None)
             self._outbound_attempt_origins.pop(onion, None)
             self._outbound_sockets.pop(onion, None)
             self._recent_outbound_attempts.pop(onion, None)
             self._outbound_connected_origin_overrides.pop(onion, None)
 
-    def bind_outbound_socket(self, onion: str, conn: socket.socket) -> None:
+    def bind_outbound_socket(
+        self, onion: str, conn: socket.socket, expected_attempt_id: Optional[str] = None
+    ) -> bool:
         """
         Associates the current outbound attempt with its concrete socket instance.
 
         Args:
             onion (str): The peer onion identity.
             conn (socket.socket): The outbound socket instance.
+            expected_attempt_id: Optional original attempt that must still own admission.
 
         Returns:
-            None
+            bool: Whether this socket was bound to its still-current attempt.
         """
         with self._lock:
+            if (
+                expected_attempt_id is not None
+                and self._outbound_attempt_ids.get(onion) != expected_attempt_id
+            ):
+                return False
+            if onion not in self._outbound_attempts:
+                self._outbound_attempt_ids[onion] = secrets.token_hex(
+                    Constants.LIVE_ATTEMPT_TOKEN_BYTES
+                )
             self._outbound_attempts.add(onion)
             self._outbound_sockets[onion] = conn
             self._recent_outbound_attempts[onion] = (
                 time.time() + Constants.MUTUAL_CONNECT_RACE_WINDOW_SEC
             )
+            return True
 
     def clear_bound_outbound_socket(
         self,
@@ -323,6 +439,7 @@ class StateTrackerConnectionsMixin:
         with self._lock:
             conn: Optional[socket.socket] = self._outbound_sockets.pop(onion, None)
             self._outbound_attempts.discard(onion)
+            self._outbound_attempt_ids.pop(onion, None)
             self._outbound_attempt_origins.pop(onion, None)
             self._recent_outbound_attempts.pop(onion, None)
             self._outbound_connected_origin_overrides.pop(onion, None)
@@ -342,24 +459,69 @@ class StateTrackerConnectionsMixin:
         with self._lock:
             return self._outbound_sockets.get(onion) == sock
 
-    def add_active_connection(self, onion: str, conn: socket.socket) -> None:
+    def add_active_connection(
+        self,
+        onion: str,
+        conn: socket.socket,
+        *,
+        expected_context_generation: Optional[int] = None,
+        require_outbound_socket: bool = False,
+    ) -> bool:
         """
         Registers one fully authenticated live socket as the active connection.
 
         Args:
             onion (str): The peer onion identity.
             conn (socket.socket): The authenticated live socket.
+            expected_context_generation: Accepted scope captured before recovery work.
+            require_outbound_socket: Require exact current outbound socket ownership.
 
         Returns:
-            None
+            bool: Whether this socket still owns admission into the logical scope.
         """
         replaced_active: Optional[socket.socket] = None
         replaced_pending: Optional[socket.socket] = None
         with self._lock:
+            if expected_context_generation is not None and (
+                self._accepted_live_contexts.get(onion) != expected_context_generation
+                or self._accepted_live_context_deadlines.get(onion, float('inf'))
+                <= time.monotonic()
+            ):
+                return False
+            if (
+                require_outbound_socket
+                and self._outbound_sockets.get(onion) is not conn
+            ):
+                return False
+            recovery_origins = {
+                ConnectionOrigin.AUTO_RECONNECT,
+                ConnectionOrigin.GRACE_RECONNECT,
+                ConnectionOrigin.RETUNNEL,
+            }
+            is_recovery = onion in self._accepted_live_contexts and (
+                expected_context_generation is not None
+                or self._outbound_attempt_origins.get(onion) in recovery_origins
+                or self._pending_connection_origins.get(onion) in recovery_origins
+            )
+            if (
+                is_recovery
+                and self._accepted_live_context_deadlines.get(onion, float('inf'))
+                <= time.monotonic()
+            ):
+                return False
             replaced_active = self._connections.get(onion)
             replaced_pending = self._pending_connections.pop(onion, None)
+            self._pending_connection_tokens.pop(onion, None)
+            if onion not in self._live_context_generations or not is_recovery:
+                self._live_context_generations[onion] = (
+                    self._next_live_context_generation
+                )
+                self._next_live_context_generation += 1
+            self._accepted_live_contexts[onion] = self._live_context_generations[onion]
+            self._accepted_live_context_deadlines.pop(onion, None)
             self._connections[onion] = conn
             self._outbound_attempts.discard(onion)
+            self._outbound_attempt_ids.pop(onion, None)
             self._outbound_attempt_origins.pop(onion, None)
             self._outbound_sockets.pop(onion, None)
             self._outbound_connected_origin_overrides.pop(onion, None)
@@ -372,271 +534,15 @@ class StateTrackerConnectionsMixin:
             self._pending_connection_deadlines.pop(onion, None)
             self._initial_buffers.pop(onion, None)
             self._expired_pending_connections.pop(onion, None)
+            self._last_disconnect_reasons.pop(onion, None)
+            self._last_disconnect_actors.pop(onion, None)
 
         if replaced_active is not None and replaced_active is not conn:
-            _close_socket(replaced_active)
+            self.retire_connection(replaced_active)
 
         if replaced_pending is not None and replaced_pending is not conn:
-            _close_socket(replaced_pending)
-
-    def add_pending_connection(
-        self,
-        onion: str,
-        conn: socket.socket,
-        initial_buffer: bytes,
-        reason: PendingConnectionReason = PendingConnectionReason.USER_ACCEPT,
-        origin: ConnectionOrigin = ConnectionOrigin.INCOMING,
-        expiry_deadline: Optional[float] = None,
-    ) -> bool:
-        """
-        Registers a socket connection awaiting local user acceptance.
-
-        Args:
-            onion (str): The peer onion address.
-            conn (socket.socket): The pending socket to track.
-            initial_buffer (bytes): Any leftover unread stream bytes.
-            reason (PendingConnectionReason): The reason why the connection is pending.
-            origin (ConnectionOrigin): The semantic origin of the live flow.
-            expiry_deadline (Optional[float]): Optional expiry timestamp for the pending request.
-
-        Returns:
-            bool: True if the socket was tracked, False if an active connection already won the race.
-        """
-        active_conn: Optional[socket.socket] = None
-        replaced_pending: Optional[socket.socket] = None
-        should_track: bool = True
-        with self._lock:
-            active_conn = self._connections.get(onion)
-            allow_recovery_replacement: bool = (
-                onion in self._retunnel_in_progress
-                or origin
-                in {
-                    ConnectionOrigin.AUTO_RECONNECT,
-                    ConnectionOrigin.GRACE_RECONNECT,
-                    ConnectionOrigin.RETUNNEL,
-                }
-            )
-            if (
-                active_conn is not None
-                and active_conn is not conn
-                and not allow_recovery_replacement
-            ):
-                should_track = False
-            else:
-                replaced_pending = self._pending_connections.get(onion)
-                self._pending_connections[onion] = conn
-                self._initial_buffers[onion] = initial_buffer
-                self._pending_connection_reasons[onion] = reason
-                self._pending_connection_origins[onion] = origin
-                if expiry_deadline is None:
-                    self._pending_connection_deadlines.pop(onion, None)
-                else:
-                    self._pending_connection_deadlines[onion] = expiry_deadline
-                self._outbound_attempts.discard(onion)
-                self._outbound_attempt_origins.pop(onion, None)
-                self._outbound_sockets.pop(onion, None)
-                self._outbound_connected_origin_overrides.pop(onion, None)
-                self._recent_outbound_attempts.pop(onion, None)
-                self._expired_pending_connections.pop(onion, None)
-                self._live_reconnect_grace.pop(onion, None)
-
-        if replaced_pending is not None and replaced_pending is not conn:
-            _close_socket(replaced_pending)
-
-        if not should_track:
-            _close_socket(conn)
-
-        return should_track
-
-    def pop_pending_connection(
-        self, onion: str
-    ) -> Tuple[
-        Optional[socket.socket],
-        bytes,
-        Optional[PendingConnectionReason],
-        Optional[ConnectionOrigin],
-    ]:
-        """
-        Retrieves and removes one pending connection for acceptance processing.
-
-        Args:
-            onion (str): The peer onion identity.
-
-        Returns:
-            Tuple[Optional[socket.socket], bytes, Optional[PendingConnectionReason], Optional[ConnectionOrigin]]:
-                The pending socket, initial buffer, pending reason, and origin.
-        """
-        with self._lock:
-            conn: Optional[socket.socket] = self._pending_connections.pop(onion, None)
-            buf: bytes = self._initial_buffers.pop(onion, b'')
-            reason: Optional[PendingConnectionReason] = (
-                self._pending_connection_reasons.pop(onion, None)
-            )
-            origin: Optional[ConnectionOrigin] = self._pending_connection_origins.pop(
-                onion, None
-            )
-            self._pending_connection_deadlines.pop(onion, None)
-            if conn is not None:
-                self._expired_pending_connections.pop(onion, None)
-            return conn, buf, reason, origin
-
-    def get_pending_connection_reason(
-        self, onion: str
-    ) -> Optional[PendingConnectionReason]:
-        """
-        Returns the internal reason recorded for one pending inbound connection.
-
-        Args:
-            onion (str): The peer onion identity.
-
-        Returns:
-            Optional[PendingConnectionReason]: The pending reason, if the peer is pending.
-        """
-        with self._lock:
-            return self._pending_connection_reasons.get(onion)
-
-    def get_pending_connection_origin(self, onion: str) -> Optional[ConnectionOrigin]:
-        """
-        Returns the semantic origin recorded for one pending inbound connection.
-
-        Args:
-            onion (str): The peer onion identity.
-
-        Returns:
-            Optional[ConnectionOrigin]: The pending connection origin, if present.
-        """
-        with self._lock:
-            return self._pending_connection_origins.get(onion)
-
-    def get_pending_connection_snapshots(self) -> List[PendingConnectionSnapshot]:
-        """
-        Returns startup-oriented pending connection snapshots for all tracked peers.
-
-        Args:
-            None
-
-        Returns:
-            List[PendingConnectionSnapshot]: Pending connection snapshots.
-        """
-        with self._lock:
-            return [
-                PendingConnectionSnapshot(
-                    onion=onion,
-                    reason=self._pending_connection_reasons.get(onion),
-                    origin=self._pending_connection_origins.get(onion),
-                    expires_at=self._pending_connection_deadlines.get(onion),
-                )
-                for onion in self._pending_connections.keys()
-            ]
-
-    def set_pending_connection_reason(
-        self, onion: str, reason: PendingConnectionReason
-    ) -> bool:
-        """
-        Updates the internal reason recorded for one pending inbound connection.
-
-        Args:
-            onion (str): The peer onion identity.
-            reason (PendingConnectionReason): The new pending reason.
-
-        Returns:
-            bool: True if the pending connection still existed and was updated.
-        """
-        with self._lock:
-            if onion not in self._pending_connections:
-                return False
-            self._pending_connection_reasons[onion] = reason
-            return True
-
-    def get_pending_connections_with_reason(
-        self, reason: PendingConnectionReason
-    ) -> List[str]:
-        """
-        Returns all pending peers matching one specific internal pending reason.
-
-        Args:
-            reason (PendingConnectionReason): The pending reason to filter by.
-
-        Returns:
-            List[str]: Pending peer onion identities with the requested reason.
-        """
-        with self._lock:
-            return [
-                onion
-                for onion, pending_reason in self._pending_connection_reasons.items()
-                if pending_reason is reason and onion in self._pending_connections
-            ]
-
-    def is_pending_socket(self, onion: str, sock: socket.socket) -> bool:
-        """
-        Checks whether one socket is the currently tracked pending connection.
-
-        Args:
-            onion (str): The peer onion identity.
-            sock (socket.socket): The socket instance to inspect.
-
-        Returns:
-            bool: True if the socket matches the tracked pending connection.
-        """
-        with self._lock:
-            return self._pending_connections.get(onion) == sock
-
-    def remove_pending_connection_if_socket(
-        self, onion: str, sock: socket.socket
-    ) -> bool:
-        """
-        Removes a pending connection only if the tracked socket still matches.
-
-        Args:
-            onion (str): The peer onion identity.
-            sock (socket.socket): The socket instance expected to be pending.
-
-        Returns:
-            bool: True if the pending entry was removed.
-        """
-        with self._lock:
-            if self._pending_connections.get(onion) != sock:
-                return False
-
-            self._pending_connections.pop(onion, None)
-            self._initial_buffers.pop(onion, None)
-            self._pending_connection_reasons.pop(onion, None)
-            self._pending_connection_origins.pop(onion, None)
-            self._pending_connection_deadlines.pop(onion, None)
-            return True
-
-    def mark_recent_pending_expiry(self, onion: str) -> None:
-        """
-        Remembers that one pending live request just expired.
-
-        Args:
-            onion (str): The peer onion identity.
-
-        Returns:
-            None
-        """
-        with self._lock:
-            self._expired_pending_connections[onion] = (
-                time.time() + Constants.PENDING_EXPIRY_FEEDBACK_WINDOW_SEC
-            )
-
-    def consume_recent_pending_expiry(self, onion: str) -> bool:
-        """
-        Consumes one recent pending-expiry marker if it is still valid.
-
-        Args:
-            onion (str): The peer onion identity.
-
-        Returns:
-            bool: True if a still-valid expiry marker was consumed.
-        """
-        with self._lock:
-            deadline: Optional[float] = self._expired_pending_connections.get(onion)
-            if deadline is None:
-                return False
-
-            self._expired_pending_connections.pop(onion, None)
-            return deadline > time.time()
+            self.retire_connection(replaced_pending)
+        return True
 
     def get_connection(self, onion: str) -> Optional[socket.socket]:
         """
@@ -651,7 +557,9 @@ class StateTrackerConnectionsMixin:
         with self._lock:
             return self._connections.get(onion)
 
-    def pop_any_connection(self, onion: str) -> Optional[socket.socket]:
+    def pop_any_connection(
+        self, onion: str, expected_socket: Optional[socket.socket] = None
+    ) -> Optional[socket.socket]:
         """
         Removes and returns any tracked socket connection for teardown.
 
@@ -664,8 +572,14 @@ class StateTrackerConnectionsMixin:
         active_conn: Optional[socket.socket] = None
         pending_conn: Optional[socket.socket] = None
         with self._lock:
+            current = self._connections.get(onion) or self._pending_connections.get(
+                onion
+            )
+            if expected_socket is not None and current is not expected_socket:
+                return None
             active_conn = self._connections.pop(onion, None)
             pending_conn = self._pending_connections.pop(onion, None)
+            self._pending_connection_tokens.pop(onion, None)
             self._outbound_attempt_origins.pop(onion, None)
             self._outbound_sockets.pop(onion, None)
             self._outbound_connected_origin_overrides.pop(onion, None)
@@ -685,7 +599,7 @@ class StateTrackerConnectionsMixin:
             and pending_conn is not None
             and pending_conn is not active_conn
         ):
-            _close_socket(pending_conn)
+            self.retire_connection(pending_conn)
 
         return conn
 

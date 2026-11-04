@@ -2,51 +2,39 @@
 Module defining application-wide constants to adhere to the DRY (Don't Repeat Yourself) principle.
 """
 
+from metor.shared.constants import Constants as ContractConstants
+
 import os
 from pathlib import Path
 
 
-def _load_local_dotenv() -> None:
-    """
-    Loads environment variables from a local `.env` file when python-dotenv exists.
-
-    Args:
-        None
-
-    Returns:
-        None
-    """
-    try:
-        from dotenv import load_dotenv
-    except ImportError:
-        return
-
-    load_dotenv()
-
-
-_load_local_dotenv()
-
-
-class Constants:
+class Constants(ContractConstants):
     """Centralized constants for file names, network settings, and directory structures."""
 
-    LOCALHOST: str = '127.0.0.1'
-
     # Network Constraints
-    MAX_STREAM_BYTES: int = 1048576  # 1 MB Limit for Tor TCP streams (OOM Protection)
-    MAX_IPC_BYTES: int = 5242880  # 5 MB Limit for local IPC streams (OOM Protection)
-    TCP_BUFFER_SIZE: int = 4096  # Standard TCP chunk size for socket.recv
-    SERVER_BACKLOG: int = 5  # Standard socket backlog for daemon IPC and listeners
-    SERVER_BACKLOG_HEADLESS: int = 1  # Minimal socket backlog for ephemeral daemons
 
-    # Protocol Versions
-    IPC_PROTOCOL_VERSION: int = 1  # Current IPC wire protocol version
-    IPC_PROTOCOL_MIN_SUPPORTED: int = 1  # Oldest accepted IPC wire protocol version
-    PEER_PROTOCOL_VERSION: int = 1  # Current peer-wire handshake version
-    PEER_PROTOCOL_MIN_SUPPORTED: int = 1  # Oldest accepted peer-wire handshake version
+    VOICE_TURN_HARD_MAX_BYTES: int = 1073741824
+    VOICE_MAX_SEGMENTS: int = 16384
+    VOICE_METADATA_MAX_BYTES: int = 2097152
+
+    SERVER_BACKLOG: int = 5  # Standard socket backlog for daemon IPC and listeners
+    PEER_WRITER_QUEUE_FRAMES: int = 256
+    DROP_SESSION_MAX_TRANSFERS: int = 64
+    IPC_WRITER_QUEUE_FRAMES: int = 256
+    IPC_CREDENTIAL_PROMPT_TIMEOUT_SEC: float = 180.0
+    PEER_WRITER_QUEUE_BYTES: int = 8 * ContractConstants.MAX_STREAM_BYTES
+    IPC_WRITER_QUEUE_BYTES: int = 8 * ContractConstants.MAX_IPC_BYTES
+    SOCKET_WRITER_FLUSH_TIMEOUT_SEC: float = 2.0
+    SOCKET_WRITER_POLL_TIMEOUT_SEC: float = 0.1
 
     # Tor Bootstrapping
     UNIX_TOR_TIMEOUT: int = 45  # Process launch timeout for Unix Tor binaries
+    WINDOWS_TOR_BOOTSTRAP_TIMEOUT_SEC: float = 45.0
+    WINDOWS_TOR_CONFIG_MAX_BYTES: int = 4096
+    WINDOWS_TOR_LOG_LINE_MAX_BYTES: int = 4096
+    MAX_DERIVED_DAEMON_START_WAIT_SEC: float = (
+        210.0  # Bound the automatic cold-start wait before an explicit IPC override
+    )
     TOR_BOOTSTRAP_POLL_SEC: float = 1.0
     TOR_BOOTSTRAP_RETRY_SEC: float = 2.0
     TOR_CONTROL_RETRY_SEC: float = 1.0  # Delay between Tor control-port retry attempts
@@ -62,55 +50,59 @@ class Constants:
         1.0  # Timeout for local SOCKS readiness probe connections
     )
     TOR_KILL_TIMEOUT_SEC: float = 2.0  # Timeout for Tor process termination
+    OWNED_DAEMON_SHUTDOWN_TIMEOUT_SEC: float = 10.0  # Graceful chat child exit
+    FRONTEND_FIRST_REGISTRATION_GRACE_SEC: float = 60.0
+    FRONTEND_DISCONNECT_GRACE_SEC: float = 45.0
+    FRONTEND_FINAL_RELEASE_GRACE_SEC: float = 2.0
+    FRONTEND_SUSPEND_GAP_SEC: float = 5.0
+    FRONTEND_MAX_SUSPEND_EXTENSION_SEC: float = 24.0 * 60.0 * 60.0
+    FRONTEND_MAX_LEASES: int = 64
+    DEVICE_RESOURCE_LOCK_SECONDS: float = 0.2
+
+    # Security-Critical File Operations
+    SECURE_SHRED_BLOCK_BYTES: int = 65536
+    PRIVATE_TEMP_TOKEN_BYTES: int = 8
 
     # Application & UI Constraints
-    DEFAULT_COLS: int = 80  # Fallback terminal width
+    CLI_PIPE_SECRET_MAX_BYTES: int = 4096
     UUID_MSG_BYTES: int = 8  # Byte length for persistent message UUIDs
     UUID_CHAT_BYTES: int = 4  # Byte length for ephemeral live-chat UUIDs
     LIVE_MSG_DEDUPE_CACHE_SIZE: int = (
         256  # Per-peer cache size for recent live message IDs
     )
-    SESSION_AUTH_KEY_BYTES: int = (
-        32  # Argon2-derived key length for IPC session-auth proofs
-    )
-    SESSION_AUTH_CHALLENGE_BYTES: int = (
-        32  # Random challenge length for one IPC session-auth proof round
-    )
+
+    SENSITIVE_AUTH_GRANT_TIMEOUT_SEC: float = 60.0
+    PENDING_INVITATION_TOKEN_BYTES: int = 32
+    MAX_PENDING_INVITATION_HANDLES: int = 128
     TOR_HANDSHAKE_CHALLENGE_BYTES: int = (
         32  # Random challenge length for one Tor peer-auth proof round
     )
-    TOR_V3_ONION_ADDRESS_LENGTH: int = 56  # Base32 chars in one v3 onion address
-    TOR_V3_PUBLIC_KEY_BYTES: int = 32  # Ed25519 public key bytes embedded in v3 onions
-    TOR_V3_CHECKSUM_BYTES: int = 2  # Checksum bytes embedded in v3 onions
-    TOR_V3_VERSION_BYTE: int = 3  # Tor v3 onion address version marker
-    INPUT_SELECT_TIMEOUT_SEC: float = 0.0  # Non-blocking POSIX stdin poll
 
     # Request Defaults
-    DEFAULT_IPC_TIMEOUT: float = 15.0  # Default client IPC socket timeout in seconds
+
     DEFAULT_HISTORY_LIMIT: int = (
         50  # History rows per request when no explicit limit is sent
     )
     DEFAULT_MESSAGES_LIMIT: int = (
         50  # Stored messages per request when no explicit limit is sent
     )
+    RUNTIME_SNAPSHOT_MAX_RETRIES: int = 8
 
     # Thread Constraints & Timing
-    THREAD_POLL_TIMEOUT: float = 1.0  # Timeout for non-blocking accept/recv loops
+
     LISTENER_READY_TIMEOUT: float = (
         5.0  # Startup wait for inbound listener bind/listen readiness
     )
+    IPC_ACCEPTOR_STOP_TIMEOUT_SEC: float = 3.0  # Bound listener thread shutdown
+    HEADLESS_SHUTDOWN_TIMEOUT_SEC: float = 10.0  # Bound private offline worker exit
     WORKER_SLEEP_SEC: float = 1.0  # Standard background worker tick rate
     WORKER_SLEEP_SLOW_SEC: float = 2.0  # Slower background worker tick rate
     LOCK_SLEEP_SEC: float = 0.05  # Sleep interval for FileLock spinlocks
     FILE_LOCK_TIMEOUT_SEC: float = 5.0  # Maximum wait for acquiring a file lock
-    FILE_LOCK_STALE_AGE_SEC: float = (
-        10.0  # Age threshold for considering a lock file stale
-    )
-    INPUT_SLEEP_SEC: float = 0.02  # UI non-blocking input thread sleep
+    PROFILE_MUTATION_INSTANCE_LOCK_TIMEOUT_SEC: float = 0.1
+    FILE_LOCK_METADATA_MAX_BYTES: int = 128
     TCP_CLOSE_LINGER_SEC: float = 0.2  # Socket linger before shutdown
-    IPC_AUTH_FAILURE_LIMIT: int = (
-        3  # Maximum invalid local auth attempts per IPC session before disconnect
-    )
+
     MUTUAL_CONNECT_RACE_WINDOW_SEC: float = 5.0  # Short grace window to recognize the winning inbound side of a simultaneous connect race
     PENDING_EXPIRY_FEEDBACK_WINDOW_SEC: float = 30.0  # How long a recently expired pending live request should produce a dedicated accept-expired UI hint
 
@@ -124,12 +116,24 @@ class Constants:
     CONTACTS_FILE: str = 'contacts.json'
     DAEMON_PORT_FILE: str = 'daemon.port'
     DAEMON_PID_FILE: str = 'daemon.pid'
+    FRONTEND_LIFETIME_FILE: str = 'daemon.frontend-lifetime'
+    PROCESS_IDENTITY_MAX_BYTES: int = 4096
+    PROCESS_CREATE_TIME_TOLERANCE_SEC: float = 0.01
+    PROCESS_ROLE_DAEMON: str = 'daemon'
+    PROCESS_ROLE_TOR: str = 'tor'
     SETTINGS_FILE: str = 'settings.json'
 
     # Directory Names
     DATA_DIR: str = '.metor'
     HIDDEN_SERVICE_DIR: str = 'hidden_service'
     TOR_DATA_DIR: str = 'tor_data'
+    PROTECTED_KEY_DIR: str = 'protected-key-material'
+    PROFILE_KEYSLOT_FILE: str = 'keyslot.json'
+    QUICK_UNLOCK_FILE: str = 'quick-unlock.json'
+    QUICK_UNLOCK_METADATA_MAX_BYTES: int = 4096
+    BLOBS_DIR: str = 'blobs'
+    PERSISTENT_BLOBS_DIR: str = 'persistent'
+    TEMPORARY_BLOBS_DIR: str = 'temporary'
 
     # Key Files (Tor & Metor)
     METOR_SECRET_KEY: str = 'metor_secret.key'
@@ -138,6 +142,7 @@ class Constants:
     HOSTNAME_FILE: str = 'hostname'
     TOR_WIN: str = 'tor.exe'
     TOR_UNIX: str = 'tor'
+    TOR_UNIX_DEFAULT_PATH: Path = Path('/usr/bin/tor')
 
     # Application Metadata
     # Uses METOR_DATA_DIR_PARENT from environment if set, otherwise falls back to the user's home directory natively via pathlib

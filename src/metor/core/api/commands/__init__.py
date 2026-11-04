@@ -1,5 +1,29 @@
 """Facade exports for strict command DTO packages."""
 
+from metor.core.api.commands.calls import (
+    StartCallCommand,
+    AcceptCallCommand,
+    RejectCallCommand,
+    CancelCallCommand,
+    HangupCallCommand,
+    MuteCallCommand,
+    GetCallsCommand,
+    SendCallAudioCommand,
+    ReadCallAudioCommand,
+)
+
+from metor.core.api.commands.producers import (
+    RegisterVoiceOwnerCommand,
+    ReleaseVoiceOwnerCommand,
+)
+
+from metor.core.api.commands.messages import GetMessageOutcomeCommand
+
+from metor.core.api.commands.preferences import (
+    GetGuiPreferencesCommand,
+    SetGuiPreferencesCommand,
+)
+
 from metor.core.api.commands.address import GenerateAddressCommand, GetAddressCommand
 from metor.core.api.commands.contacts import (
     AddContactCommand,
@@ -15,12 +39,21 @@ from metor.core.api.commands.history import (
 )
 from metor.core.api.commands.messages import (
     ClearMessagesCommand,
+    AppendVoiceChunkCommand,
+    BeginVoiceCommand,
+    CommitVoiceCommand,
+    CancelVoiceCommand,
+    DeleteMessageCommand,
+    DismissLiveContextCommand,
+    FinalizeVoiceCommand,
     FallbackCommand,
     GetInboxCommand,
     GetMessagesCommand,
+    GetVoiceChunkCommand,
+    ListRetainedMessagesCommand,
     MarkReadCommand,
-    MsgCommand,
-    SendDropCommand,
+    SendMessageCommand,
+    ReleaseVoiceCommand,
 )
 from metor.core.api.commands.profile import (
     AddProfileCommand,
@@ -32,15 +65,23 @@ from metor.core.api.commands.profile import (
 from metor.core.api.commands.session import (
     AcceptCommand,
     AuthenticateSessionCommand,
+    ConfigureQuickUnlockCommand,
     ConnectCommand,
+    ChangePasswordCommand,
     DisconnectCommand,
     GetChatStartupStateCommand,
+    GetRuntimeSnapshotCommand,
     GetConnectionsCommand,
     InitCommand,
+    FrontendLeaseCommand,
     RegisterLiveConsumerCommand,
+    ReauthorizeClientCommand,
+    RestrictClientCommand,
+    GetRestrictedClientStateCommand,
     RejectCommand,
     RetunnelCommand,
     SwitchCommand,
+    LockCommand,
     UnlockCommand,
 )
 from metor.core.api.commands.settings import (
@@ -52,22 +93,48 @@ from metor.core.api.commands.settings import (
     SetSettingCommand,
     SyncConfigCommand,
 )
-from metor.core.api.commands.system import ClearProfileDbCommand, SelfDestructCommand
+from metor.core.api.commands.system import (
+    ClearProfileDbCommand,
+    PrepareProfileExitCommand,
+    SelfDestructCommand,
+)
 from metor.core.api.commands.transport import GetTransportStateCommand
 
 
 __all__ = [
+    'StartCallCommand',
+    'AcceptCallCommand',
+    'RejectCallCommand',
+    'CancelCallCommand',
+    'HangupCallCommand',
+    'MuteCallCommand',
+    'GetCallsCommand',
+    'SendCallAudioCommand',
+    'ReadCallAudioCommand',
+    'RegisterVoiceOwnerCommand',
+    'ReleaseVoiceOwnerCommand',
+    'GetMessageOutcomeCommand',
+    'GetGuiPreferencesCommand',
+    'SetGuiPreferencesCommand',
     'InitCommand',
+    'FrontendLeaseCommand',
     'GetChatStartupStateCommand',
+    'GetRuntimeSnapshotCommand',
     'RegisterLiveConsumerCommand',
     'GetConnectionsCommand',
     'ConnectCommand',
+    'ChangePasswordCommand',
     'DisconnectCommand',
     'AcceptCommand',
     'RejectCommand',
     'SwitchCommand',
     'UnlockCommand',
+    'LockCommand',
     'AuthenticateSessionCommand',
+    'ConfigureQuickUnlockCommand',
+    'ReauthorizeClientCommand',
+    'RestrictClientCommand',
+    'GetRestrictedClientStateCommand',
     'RetunnelCommand',
     'GetContactsListCommand',
     'AddContactCommand',
@@ -79,8 +146,7 @@ __all__ = [
     'RemoveProfileCommand',
     'RenameProfileCommand',
     'SetDefaultProfileCommand',
-    'MsgCommand',
-    'SendDropCommand',
+    'SendMessageCommand',
     'GetInboxCommand',
     'MarkReadCommand',
     'FallbackCommand',
@@ -89,6 +155,16 @@ __all__ = [
     'ClearHistoryCommand',
     'GetMessagesCommand',
     'ClearMessagesCommand',
+    'DeleteMessageCommand',
+    'DismissLiveContextCommand',
+    'AppendVoiceChunkCommand',
+    'BeginVoiceCommand',
+    'CommitVoiceCommand',
+    'CancelVoiceCommand',
+    'FinalizeVoiceCommand',
+    'GetVoiceChunkCommand',
+    'ListRetainedMessagesCommand',
+    'ReleaseVoiceCommand',
     'GetAddressCommand',
     'GenerateAddressCommand',
     'SetSettingCommand',
@@ -100,5 +176,6 @@ __all__ = [
     'SyncConfigCommand',
     'ClearProfileDbCommand',
     'SelfDestructCommand',
+    'PrepareProfileExitCommand',
     'GetTransportStateCommand',
 ]

@@ -3,8 +3,8 @@ Module for managing the local Tor process, hidden services, and local proxies.
 Enforces strict socket timeouts, configurable network resilience, and Tor circuit rotations.
 """
 
+import locale
 import os
-import shutil
 import socket
 import subprocess
 import threading
@@ -19,10 +19,52 @@ from typing import Tuple, Optional, Dict, Callable
 from metor.core.api import EventType, JsonValue, RuntimeErrorCode
 from metor.data import SettingKey
 from metor.data.profile import ProfileManager
-from metor.utils import Constants, clean_onion, secure_shred_file, ensure_onion_format
+from metor.utils import (
+    Constants,
+    ProcessManager,
+    open_private_binary_file,
+    secure_shred_file,
+)
+from metor.shared import clean_onion, ensure_onion_format
 
 # Local Package Imports
 from metor.core.key import KeyManager
+from metor.core.tor_windows import launch_tor_without_console
+
+
+def _torrc_path(path: Path) -> str:
+    """Quote one filesystem path as an ASCII torrc value for either launcher.
+
+    Tor treats an unquoted hash as a comment. Octal escapes preserve control
+    characters and filesystem bytes even through Stem's Latin-1 stdin encoder.
+    The Windows Tor Expert Bundle opens paths using the system ANSI code page.
+    """
+    if _is_windows():
+        encoding = locale.getencoding()
+        encoded = str(path).encode(encoding)
+        if encoded.decode(encoding) != str(path):
+            raise UnicodeError('Tor cannot represent the profile directory.')
+    else:
+        encoded = os.fsencode(path)
+    escaped = ''.join(
+        chr(byte)
+        if 0x20 <= byte <= 0x7E and chr(byte) not in '"\\'
+        else f'\\{byte:03o}'
+        for byte in encoded
+    )
+    return f'"{escaped}"'
+
+
+def _is_windows() -> bool:
+    """Returns whether the running host uses the Windows process model.
+
+    Args:
+        None
+
+    Returns:
+        bool: True on Windows.
+    """
+    return os.name == 'nt'
 
 
 class TorManager:
@@ -95,9 +137,8 @@ class TorManager:
         try:
             decrypted_tor_key: bytes = self._km.get_decrypted_tor_key()
             tor_sec_path: Path = hs_dir / Constants.TOR_SECRET_KEY
-            with tor_sec_path.open('wb') as f:
+            with open_private_binary_file(tor_sec_path) as f:
                 f.write(decrypted_tor_key)
-            tor_sec_path.chmod(0o600)
             return True, None, {}
         except nacl.exceptions.CryptoError:
             return (
@@ -166,25 +207,43 @@ class TorManager:
 
     def _terminate_process(self) -> None:
         """
-        Terminates the tracked Tor process if it is still running.
+        Terminates the tracked Tor process and confirms its bounded exit.
 
         Args:
             None
 
+        Raises:
+            RuntimeError: If neither terminate nor kill produces a confirmed exit.
+
         Returns:
             None
         """
-        if self._tm_proc:
-            try:
-                self._tm_proc.terminate()
-                self._tm_proc.wait(timeout=Constants.TOR_KILL_TIMEOUT_SEC)
-            except Exception:
-                try:
-                    self._tm_proc.kill()
-                except Exception:
-                    pass
-            finally:
+        process = self._tm_proc
+        if process is None:
+            return
+        if process.poll() is not None:
+            self._tm_proc = None
+            return
+
+        try:
+            process.terminate()
+            process.wait(timeout=Constants.TOR_KILL_TIMEOUT_SEC)
+        except Exception:
+            if process.poll() is not None:
                 self._tm_proc = None
+                return
+            try:
+                process.kill()
+                process.wait(timeout=Constants.TOR_KILL_TIMEOUT_SEC)
+            except Exception as exc:
+                if process.poll() is not None:
+                    self._tm_proc = None
+                    return
+                raise RuntimeError(
+                    'Tor process termination could not be confirmed.'
+                ) from exc
+
+        self._tm_proc = None
 
     def _is_process_running(self) -> bool:
         """
@@ -265,18 +324,20 @@ class TorManager:
         """
         tor_cmd_override: str = Constants.TOR_PATH
         if tor_cmd_override:
-            return tor_cmd_override
+            configured_path = Path(tor_cmd_override)
+            if not configured_path.is_absolute():
+                raise FileNotFoundError('METOR_TOR_PATH must be an absolute path.')
+            candidate = configured_path.resolve()
+        elif _is_windows():
+            candidate = (Constants.DATA / Constants.TOR_WIN).resolve()
+        else:
+            candidate = Constants.TOR_UNIX_DEFAULT_PATH.resolve()
 
-        if os.name == 'nt':
-            path_tor_cmd: Optional[str] = shutil.which(Constants.TOR_WIN)
-            if path_tor_cmd:
-                return path_tor_cmd
-            return str(Constants.DATA / Constants.TOR_WIN)
-
-        path_tor_cmd = shutil.which(Constants.TOR_UNIX)
-        if path_tor_cmd:
-            return path_tor_cmd
-        return Constants.TOR_UNIX
+        if not candidate.is_file():
+            raise FileNotFoundError('The configured Tor executable does not exist.')
+        if not _is_windows() and not os.access(candidate, os.X_OK):
+            raise PermissionError('The configured Tor executable is not executable.')
+        return str(candidate)
 
     def _launch_process(self) -> Tuple[bool, Optional[EventType], Dict[str, JsonValue]]:
         """
@@ -293,12 +354,21 @@ class TorManager:
 
         self._reserve_ports()
 
+        try:
+            tor_data_path = _torrc_path(data_dir)
+            tor_service_path = _torrc_path(hs_dir)
+        except UnicodeError:
+            return (
+                False,
+                EventType.TOR_START_FAILED,
+                {'error_code': RuntimeErrorCode.TOR_LAUNCH_FAILED},
+            )
         config: Dict[str, str] = {
             'SocksPort': str(self.socks_port),
             'ControlPort': str(self.control_port),
             'CookieAuthentication': '1',
-            'DataDirectory': str(data_dir),
-            'HiddenServiceDir': str(hs_dir),
+            'DataDirectory': tor_data_path,
+            'HiddenServiceDir': tor_service_path,
             'HiddenServicePort': f'80 {Constants.LOCALHOST}:{self.incoming_port}',
         }
 
@@ -322,41 +392,57 @@ class TorManager:
                 TorManager._log_callback(line)
 
         max_retries: int = self._pm.config.get_int(SettingKey.MAX_TOR_RETRIES)
-        last_error: str = 'Unknown Tor launch error.'
         self._tm_proc = None
 
         for attempt in range(max_retries):
             try:
-                self._tm_proc = stem.process.launch_tor_with_config(
-                    config=config,
-                    timeout=tor_timeout,
-                    take_ownership=True,
-                    tor_cmd=tor_cmd,
-                    init_msg_handler=print_tor_output,
-                )
+                if _is_windows():
+                    self._tm_proc = launch_tor_without_console(
+                        config=config,
+                        tor_cmd=tor_cmd,
+                        init_msg_handler=print_tor_output,
+                    )
+                else:
+                    self._tm_proc = stem.process.launch_tor_with_config(
+                        config=config,
+                        timeout=tor_timeout,
+                        take_ownership=True,
+                        tor_cmd=tor_cmd,
+                        init_msg_handler=print_tor_output,
+                    )
 
                 pid_file: Path = data_dir / 'tor.pid'
-                with pid_file.open('w') as f:
-                    f.write(str(self._tm_proc.pid))
-
+                identity_payload = ProcessManager.process_identity_payload(
+                    self._tm_proc.pid,
+                    self._pm.profile_name,
+                    role=Constants.PROCESS_ROLE_TOR,
+                    executable=Path(tor_cmd),
+                ).encode('utf-8')
+                with open_private_binary_file(pid_file) as f:
+                    f.write(identity_payload)
                 break
-            except OSError as e:
-                last_error = str(e).strip() or 'Unknown Tor launch error.'
+            except (OSError, ValueError):
+                if self._tm_proc is not None:
+                    try:
+                        self._terminate_process()
+                    except RuntimeError:
+                        return (
+                            False,
+                            EventType.TOR_START_FAILED,
+                            {'error_code': RuntimeErrorCode.TOR_LAUNCH_FAILED},
+                        )
                 if (
                     self._pm.config.get_bool(SettingKey.ENABLE_TOR_LOGGING)
                     and TorManager._log_callback
                 ):
-                    TorManager._log_callback(f'Error starting Tor: {e}')
+                    TorManager._log_callback('Tor launch failed.')
                 if attempt < max_retries - 1:
                     time.sleep(Constants.TOR_BOOTSTRAP_RETRY_SEC)
                     continue
                 return (
                     False,
                     EventType.TOR_START_FAILED,
-                    {
-                        'error_code': RuntimeErrorCode.TOR_LAUNCH_FAILED,
-                        'error_detail': last_error,
-                    },
+                    {'error_code': RuntimeErrorCode.TOR_LAUNCH_FAILED},
                 )
 
         self._load_onion_address(hs_dir)
@@ -435,6 +521,9 @@ class TorManager:
         Args:
             None
 
+        Raises:
+            OSError: If an existing exported key cannot be securely removed.
+
         Returns:
             None
         """
@@ -447,6 +536,7 @@ class TorManager:
                     TorManager._log_callback('Failed to shred Tor runtime key.')
                 except Exception:
                     pass
+            raise
 
     def start(self) -> Tuple[bool, Optional[EventType], Dict[str, JsonValue]]:
         """
@@ -479,12 +569,32 @@ class TorManager:
         Args:
             None
 
+        Raises:
+            Exception: If process termination or required runtime-key cleanup fails.
+
         Returns:
             None
         """
         with self._process_lock:
-            self._terminate_process()
-            self._shred_runtime_keys()
+            process_error: Optional[Exception] = None
+            key_error: Optional[Exception] = None
+            try:
+                self._terminate_process()
+            except Exception as exc:
+                process_error = exc
+            try:
+                self._shred_runtime_keys()
+            except Exception as exc:
+                key_error = exc
+
+            if process_error is not None and key_error is not None:
+                raise RuntimeError(
+                    'Tor process termination and runtime-key cleanup both failed.'
+                ) from process_error
+            if process_error is not None:
+                raise process_error
+            if key_error is not None:
+                raise key_error
 
     def ensure_proxy_ready(
         self,
@@ -546,7 +656,6 @@ class TorManager:
             if not self._is_process_running() or not self.control_port:
                 return self._recover_runtime('Tor process not actively running.')
 
-            last_error: str = 'Unknown Tor control error.'
             for attempt in range(Constants.TOR_CONTROL_RETRY_ATTEMPTS):
                 try:
                     with stem.control.Controller.from_port(
@@ -561,12 +670,11 @@ class TorManager:
                         )
 
                     return True, None, {}
-                except Exception as e:
-                    last_error = str(e).strip() or 'Unknown Tor control error.'
+                except Exception:
                     if attempt < Constants.TOR_CONTROL_RETRY_ATTEMPTS - 1:
                         time.sleep(Constants.TOR_CONTROL_RETRY_SEC)
 
-            return self._recover_runtime(last_error)
+            return self._recover_runtime('Tor control operation failed.')
 
     def get_address(self) -> Tuple[bool, EventType, Dict[str, JsonValue]]:
         """
@@ -611,10 +719,12 @@ class TorManager:
                 {'profile': self._pm.profile_name},
             )
 
-        success, event_type, params = self.start()
-        if not success:
-            return False, event_type or EventType.TOR_START_FAILED, params
-        self.stop()
+        try:
+            success, event_type, params = self.start()
+            if not success:
+                return False, event_type or EventType.TOR_START_FAILED, params
+        finally:
+            self.stop()
 
         return (
             True,

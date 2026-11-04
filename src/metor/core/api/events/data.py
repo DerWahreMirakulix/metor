@@ -1,15 +1,19 @@
 """Data-returning IPC event DTOs."""
 
 from dataclasses import dataclass, field
-from typing import ClassVar, Dict, List, Optional
+from typing import ClassVar, Dict, List, Mapping, Optional
 
 # Local Package Imports
 from metor.core.api.base import IpcEvent
 from metor.core.api.codes import EventType
+from metor.core.api.content import Delivery
 from metor.core.api.events.entries import (
     ContactEntry,
+    DropConversationSummaryEntry,
+    LiveContextEntry,
     MessageEntry,
     PendingConnectionEntry,
+    RetainedMessageEntry,
     ProfileEntry,
     SettingSnapshotEntry,
     UnreadInboxSummaryEntry,
@@ -27,6 +31,8 @@ class InboxNotificationEvent(IpcEvent):
     alias: str
     onion: Optional[str] = None
     count: int = 1
+    delivery: Delivery = Delivery.DROP
+    source_id: Optional[str] = None
     event_type: EventType = field(default=EventType.INBOX_NOTIFICATION, init=False)
 
 
@@ -40,7 +46,7 @@ class InboxDataEvent(NestedEntryCastingMixin, IpcEvent):
     messages: List[UnreadMessageEntry] = field(default_factory=list)
     inbox_counts: Dict[str, int] = field(default_factory=dict)
     is_live_flush: bool = False
-    _nested_entry_types: ClassVar[Dict[str, type[object]]] = {
+    _nested_entry_types: ClassVar[Mapping[str, type[object]]] = {
         'messages': UnreadMessageEntry,
     }
     event_type: EventType = field(default=EventType.INBOX_DATA, init=False)
@@ -54,7 +60,7 @@ class ContactsDataEvent(NestedEntryCastingMixin, IpcEvent):
     saved: List[ContactEntry]
     discovered: List[ContactEntry]
     profile: str
-    _nested_entry_types: ClassVar[Dict[str, type[object]]] = {
+    _nested_entry_types: ClassVar[Mapping[str, type[object]]] = {
         'saved': ContactEntry,
         'discovered': ContactEntry,
     }
@@ -69,10 +75,39 @@ class MessagesDataEvent(NestedEntryCastingMixin, IpcEvent):
     messages: List[MessageEntry]
     alias: str
     onion: Optional[str] = None
-    _nested_entry_types: ClassVar[Dict[str, type[object]]] = {
+    has_older: bool = False
+    page_available: bool = True
+    _nested_entry_types: ClassVar[Mapping[str, type[object]]] = {
         'messages': MessageEntry,
     }
     event_type: EventType = field(default=EventType.MESSAGES_DATA, init=False)
+
+
+@register_event(EventType.RETAINED_MESSAGES)
+@dataclass
+class RetainedMessagesEvent(NestedEntryCastingMixin, IpcEvent):
+    """Returns one stable page of non-consuming retained-item descriptors."""
+
+    messages: List[RetainedMessageEntry] = field(default_factory=list)
+    next_cursor: Optional[str] = None
+    inventory_version: str = '0'
+    _nested_entry_types: ClassVar[Mapping[str, type[object]]] = {
+        'messages': RetainedMessageEntry,
+    }
+    event_type: EventType = field(default=EventType.RETAINED_MESSAGES, init=False)
+
+
+@register_event(EventType.RETAINED_MESSAGES_UNAVAILABLE)
+@dataclass
+class RetainedMessagesUnavailableEvent(IpcEvent):
+    """Rejects an invalid or no-longer-consistent inventory cursor."""
+
+    reason: str
+    retryable: bool = True
+    event_type: EventType = field(
+        default=EventType.RETAINED_MESSAGES_UNAVAILABLE,
+        init=False,
+    )
 
 
 @register_event(EventType.INBOX_COUNTS)
@@ -93,11 +128,46 @@ class ChatStartupStateEvent(NestedEntryCastingMixin, IpcEvent):
     contacts: List[str]
     pending: List[PendingConnectionEntry] = field(default_factory=list)
     unread: List[UnreadInboxSummaryEntry] = field(default_factory=list)
-    _nested_entry_types: ClassVar[Dict[str, type[object]]] = {
+    _nested_entry_types: ClassVar[Mapping[str, type[object]]] = {
         'pending': PendingConnectionEntry,
         'unread': UnreadInboxSummaryEntry,
     }
     event_type: EventType = field(default=EventType.CHAT_STARTUP_STATE, init=False)
+
+
+@register_event(EventType.RUNTIME_SNAPSHOT)
+@dataclass
+class RuntimeSnapshotEvent(NestedEntryCastingMixin, IpcEvent):
+    """Returns one aggregate, content-free runtime projection for rich clients."""
+
+    profile: str
+    onion: str
+    contacts: List[ContactEntry] = field(default_factory=list)
+    conversations: List[DropConversationSummaryEntry] = field(default_factory=list)
+    live_contexts: List[LiveContextEntry] = field(default_factory=list)
+    pending: List[PendingConnectionEntry] = field(default_factory=list)
+    settings_version: str = '1'
+    profile_instance_id: Optional[str] = None
+    authenticated_client_count: Optional[int] = None
+    _nested_entry_types: ClassVar[Mapping[str, type[object]]] = {
+        'contacts': ContactEntry,
+        'conversations': DropConversationSummaryEntry,
+        'live_contexts': LiveContextEntry,
+        'pending': PendingConnectionEntry,
+    }
+    event_type: EventType = field(default=EventType.RUNTIME_SNAPSHOT, init=False)
+
+
+@register_event(EventType.RUNTIME_SNAPSHOT_UNAVAILABLE)
+@dataclass
+class RuntimeSnapshotUnavailableEvent(IpcEvent):
+    """Signals that sustained mutation prevented an authoritative snapshot."""
+
+    retryable: bool = True
+    event_type: EventType = field(
+        default=EventType.RUNTIME_SNAPSHOT_UNAVAILABLE,
+        init=False,
+    )
 
 
 @register_event(EventType.UNREAD_MESSAGES)
@@ -108,7 +178,7 @@ class UnreadMessagesEvent(NestedEntryCastingMixin, IpcEvent):
     messages: List[UnreadMessageEntry]
     alias: str
     onion: Optional[str] = None
-    _nested_entry_types: ClassVar[Dict[str, type[object]]] = {
+    _nested_entry_types: ClassVar[Mapping[str, type[object]]] = {
         'messages': UnreadMessageEntry,
     }
     event_type: EventType = field(default=EventType.UNREAD_MESSAGES, init=False)
@@ -170,7 +240,7 @@ class ProfilesDataEvent(NestedEntryCastingMixin, IpcEvent):
     """
 
     profiles: List[ProfileEntry]
-    _nested_entry_types: ClassVar[Dict[str, type[object]]] = {
+    _nested_entry_types: ClassVar[Mapping[str, type[object]]] = {
         'profiles': ProfileEntry,
     }
     event_type: EventType = field(default=EventType.PROFILES_DATA, init=False)
@@ -190,7 +260,7 @@ class SettingsListDataEvent(NestedEntryCastingMixin, IpcEvent):
 
     scope: str
     entries: List[SettingSnapshotEntry] = field(default_factory=list)
-    _nested_entry_types: ClassVar[Dict[str, type[object]]] = {
+    _nested_entry_types: ClassVar[Mapping[str, type[object]]] = {
         'entries': SettingSnapshotEntry,
     }
     event_type: EventType = field(default=EventType.SETTINGS_LIST_DATA, init=False)
@@ -212,7 +282,7 @@ class ConfigListDataEvent(NestedEntryCastingMixin, IpcEvent):
     scope: str
     profile: str
     entries: List[SettingSnapshotEntry] = field(default_factory=list)
-    _nested_entry_types: ClassVar[Dict[str, type[object]]] = {
+    _nested_entry_types: ClassVar[Mapping[str, type[object]]] = {
         'entries': SettingSnapshotEntry,
     }
     event_type: EventType = field(default=EventType.CONFIG_LIST_DATA, init=False)

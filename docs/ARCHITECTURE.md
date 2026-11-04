@@ -1,31 +1,520 @@
 # Metor Architecture Decisions Guide
 
-This document is the canonical architecture guide for the repository.
-It records the long-lived design boundaries that should survive feature work, refactors, and UI changes.
-Future architecture decisions should extend this file instead of creating separate top-level notes.
+This document is the canonical architecture guide for the repository. It records
+the long-lived boundaries that survive feature work, refactors, and frontend
+changes. Future decisions extend this file instead of creating parallel notes.
 
-## Purpose
+## System model
 
-Use this document when you need to answer one of these questions:
+Metor is a Tor-based messenger with a strict client-daemon boundary. Four
+distributions share a PEP 420 namespace without overlapping files:
 
-- Which layer is allowed to own state or side effects?
-- Which behaviors should remain configurable, and which should stay hard safety guardrails?
-- How should new IPC, transport, or persistence features fit into the existing design?
-- Which other repository documents should be updated when architecture changes?
+| Distribution        | Owner                                                                         |
+| ------------------- | ----------------------------------------------------------------------------- |
+| `metor-sdk`         | Typed IPC DTOs, `metor.client`, proof helpers, version and platform contracts |
+| `metor`             | General CLI, daemon, Tor, persistence and host implementations                |
+| `metor-ui-terminal` | Interactive Terminal chat and its in-session help                             |
+| `metor-ui-gui`      | Native GUI presentation, local assets and concrete desktop adapters           |
 
-## Document Map
+Frontends own interaction and presentation state. Core owns authorization, Tor,
+message identity, delivery, persistence, recovery and cryptographic lifecycle.
+Local platform ports own capture, playback, display, hardware input, indicators,
+haptics and host power without gaining Core authority. A frontend never reads
+SQL, Tor keys or profile runtime files directly.
 
-- [README.md](../README.md): Master entry point for installation, usage, and repository navigation.
-- [SETTINGS.md](./SETTINGS.md): Generated reference for user-facing settings and structural profile config keys.
-- [API.md](./API.md): Generated reference for the typed IPC contract.
-- [api.schema.json](./api.schema.json): Generated JSON Schema wire contract for the typed IPC DTOs.
-- [GLOSSARY.md](./GLOSSARY.md): Canonical terminology reference for settings namespaces, transport fields, and renamed symbols.
-- [AUDIT.md](./AUDIT.md): Review checklist for security, OPSEC, concurrency, and architecture risks.
-- [CONTRIBUTE.md](./CONTRIBUTE.md): Coding rules, import boundaries, typing requirements, and formatting standards.
+```text
+Terminal or GUI -> metor.client / typed IPC -> managed daemon -> Tor peers
+                        |                       |
+                  local host ports       protected profile state
+```
 
-## Core System Boundaries
+DROP is durable asynchronous delivery; LIVE is interactive ephemeral delivery
+with Core-owned crash-safe pending state. Text and Voice share stable logical
+message identities. Navigation is never a transport command.
 
-1. The UI is stateless.
+### Repository ownership map
+
+The source tree follows subsystem ownership; the distribution manifests select
+disjoint files from that tree. A directory named `core` does not make every
+module a public SDK dependency.
+
+| Path                                           | Responsibility                                                                                    |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `src/metor/client/`, `core/api/`, `core/auth/` | Portable Python SDK, wire DTOs and credential proofs; no host runtime or UI imports               |
+| `src/metor/application/`                       | Local profile, daemon-process and frontend-host orchestration                                     |
+| `src/metor/core/daemon/managed/`               | Long-lived runtime, IPC authorization, peer transport, delivery and media lifetimes               |
+| `src/metor/core/daemon/headless/`              | Short-lived offline execution for applicable CLI operations                                       |
+| `src/metor/data/`                              | Profile configuration, persistence, SQL schemas, message/contact repositories and encrypted blobs |
+| `src/metor/cli/`, `src/metor/ui/`              | Command presentation and independently packaged interactive frontends                             |
+| `src/metor/shared/`, `src/metor/versioning/`   | Lightweight SDK-safe values and the authoritative compatibility registry                          |
+| `src/metor/utils/`                             | Base-owned operating-system and runtime services                                                  |
+| `packaging/`, `requirements/`                  | Distribution ownership and the pinned dependency closures                                         |
+| `tests/`, `scripts/`, `.github/`               | Behavior fixtures, local validation/release tools and their CI orchestration                      |
+| `docs/contracts/`, `docs/generated/`           | Authored frontend contracts and code-generated references                                         |
+
+Use the public package facades at subsystem boundaries. Within a subsystem,
+import its implementation modules directly to avoid facade cycles. New behavior
+belongs with the state owner: a new UI does not duplicate delivery, encryption,
+authorization or durable-message logic. `check_boundaries.py` enforces the
+dependency direction; installed-wheel acceptance checks the packaging boundary
+that source-tree imports alone cannot prove.
+
+## Documentation map
+
+- [README.md](../README.md) is the human entry point.
+- [CONTRIBUTE.md](./CONTRIBUTE.md) owns development, testing and review rules.
+- [FRONTENDS.md](contracts/FRONTENDS.md) owns public frontend integration.
+- [GUI.md](./contracts/GUI.md) owns GUI operation, device configuration, behavior, and presentation.
+- [API.md](./generated/API.md), [SETTINGS.md](./generated/SETTINGS.md), and
+  generated JSON references are code-owned and must be regenerated, not edited.
+- [GLOSSARY.md](./GLOSSARY.md) and [RELEASING.md](./RELEASING.md) own terminology
+  and version/release procedure.
+
+## Daemon lock lifecycle
+
+The managed daemon has an explicit security lifecycle:
+
+```text
+START → LOCKED → UnlockCommand → UNLOCKED → LockCommand → LOCKED
+```
+
+`LockCommand` is an idempotent runtime lock, not a screen lock, shutdown, or
+self-destruct operation. It revokes authenticated sessions and UI focus before
+stopping profile-scoped workers, peer sessions, Tor, database access, and key
+state. IPC stays available so the process can accept a later `UnlockCommand`,
+which constructs a fresh profile runtime.
+
+Normal frontend exit and profile switch release only that frontend's session
+resources and daemon lifetime lease. They do not issue `LockCommand` or revoke
+another client's authorization. An automatically started daemon has a separate
+shared lifetime; an independently started daemon has no frontend shutdown
+deadline. [FRONTENDS.md](contracts/FRONTENDS.md) defines the startup policy and
+lease behavior.
+
+For encrypted profiles, unlock uses the configured `KeyProtector` to recover the
+PMK and derives fresh DB, secret, and blob keys. Lock closes SQLCipher and the
+blob store, clears their mutable runtime key buffers, clears the PMK hierarchy,
+and releases all references. The protected PMK keyslot remains intact. Python
+cannot guarantee deterministic erasure of every interpreter-created immutable
+copy, so this is honest best-effort process-memory hygiene rather than a claim
+of secure-memory behavior.
+
+### Profile process and mutation exclusion
+
+Catalog mutations acquire gates in one order: catalog, profile startup, profile
+instance, then migration. Startup and instance locks use persistent, bounded
+identity hashes in the data root, outside the profile directory that rename or
+migration may move. A managed process holds its instance lock from initialization
+through cleanup, including before PID/IPC publication and if its spawning parent
+exits. Startup ownership covers IPC readiness. A busy instance produces a typed
+refusal instead of allowing an offline mutation alongside a live writer.
+
+Offline runtime operations take startup then instance ownership, recheck profile
+eligibility and integrity, and clear sensitive storage before releasing those
+gates. Creation holds its lifecycle gates until keys, database and configuration
+are complete. Profile lifecycle commands own their catalog and mutation gates
+directly rather than nesting a generic offline-runtime guard around migration.
+Ordinary profile recovery takes only the migration gate and never acquires the
+other gates while holding it. This prevents lookup from discarding an active
+prepared migration and avoids a parent/child startup lock cycle.
+
+## Profile encryption and storage
+
+### Short-lived offline execution
+
+Applicable one-shot CLI operations may run through a local offline Core when
+the managed daemon is absent. This executor uses a private non-inheritable
+socket pair owned by the invoking CLI, never a TCP listener. It accepts one
+command; its context joins the worker and releases SQLCipher and runtime keys
+before returning. Incomplete teardown fails visibly and retains lifecycle
+exclusion until cleanup succeeds or the process exits. It does not register a
+shared daemon, create a remote-control endpoint or start Tor.
+
+### Stable encrypted profile model
+
+Each encrypted local profile has exactly one independently random 32-byte
+Profile Master Key (PMK), created with the operating system CSPRNG. The password
+is an unlock credential and never becomes the SQLCipher key.
+
+```text
+Password
+   │
+Argon2id
+   ▼
+  KEK ── authenticated unwrap ──► PMK
+                                  │
+                      keyed BLAKE2b KDF
+                    ┌─────────────┼─────────────┐
+                    ▼             ▼             ▼
+              DB_KEY         SECRET_KEY      BLOB_KEY
+             metor/db/v1  metor/secrets/v1 metor/blobs/v1
+```
+
+- `DB_KEY` is the raw 32-byte SQLCipher key. User passwords are never passed to
+  SQLCipher.
+- `SECRET_KEY` encrypts long-lived Metor signing and Tor Onion Service private
+  identity files. These remain separate files because Tor consumes its own key
+  format at runtime; moving them into SQLCipher would not remove the need for a
+  carefully controlled Tor runtime export.
+- `BLOB_KEY` is the root for encrypted external binary objects. It is not a
+  network key and is never used by the typed message/delivery layer directly.
+
+Domain derivation uses PyNaCl/libsodium keyed BLAKE2b with stable, versioned
+labels. Raw material is never reused between domains. Runtime keys live in
+mutable buffers where practical and are cleared on lock, shutdown, and purge.
+
+### KeyProtector and password keyslot
+
+Profile lifecycle code depends on `KeyProtector`, whose responsibilities are to
+protect, unprotect, atomically rewrap, and destroy PMK access. The desktop
+implementation is `PasswordKeyProtector`. Future TPM or Secure Element
+implementations can replace it without changing SQLCipher, key derivation,
+blob storage, message DTOs, or lock semantics.
+
+The password keyslot is strict JSON containing:
+
+- format `metor-password-keyslot`, version `1`;
+- Argon2id algorithm, random salt, and persisted operation/memory limits;
+- XSalsa20-Poly1305 SecretBox algorithm, random nonce, and authenticated PMK
+  ciphertext.
+
+Unknown fields, unsupported versions/algorithms/parameters, malformed Base64,
+wrong passwords, and authentication failures are rejected. The keyslot never
+stores the password, KEK, derived domain keys, or plaintext PMK. Argon2id uses
+libsodium's interactive limits (operation limit `2` and a 64 MiB memory limit).
+These parameters provide a memory-hard interactive unlock without applying the much larger sensitive
+profile to every desktop daemon start. Unlock derives the KEK from the persisted
+parameters, after validating the supported algorithm/version and bounded
+Argon2id operation and memory limits. Future recommended defaults can therefore
+change without invalidating existing valid keyslots, while hostile metadata
+cannot request unbounded work or memory.
+
+Keyslot creation and password rewrap use an owner-only temporary file, flush and
+`fsync`, then atomic replacement. Before replacement, rewrap opens the staged
+keyslot with the new password and verifies that it recovers the exact original
+PMK. Rewrap authenticates the old password and wraps that same PMK with a new
+salt and nonce. It does not re-encrypt SQLCipher, identity data, or blobs, so
+`DB_KEY`, `SECRET_KEY`, and `BLOB_KEY` remain unchanged. A failed build or
+read-back leaves the prior valid keyslot in place.
+`ChangePasswordCommand(current_password, new_password)` requires explicit
+current-password verification even from an authenticated unlocked daemon session;
+this prevents a separate local IPC client from changing another session's
+profile password. Password-bearing commands suppress dataclass `repr` output.
+
+`PasswordKeyProtector.destroy` overwrites and `fsync`s its regular keyslot file,
+unlinks it, and synchronizes the parent directory where supported. This is
+best-effort software destruction only: flash wear-leveling, copy-on-write,
+snapshots, backups, and remapped blocks can retain historical copies.
+
+### Security-mode migration
+
+Security-mode migration is a multi-resource staged transaction. It copies the
+active profile to a sibling staged generation, transforms the staged database,
+keyslot, private secret representation, metadata, and every persistent external
+blob, then reopens and validates that staged target. Encrypted-to-plaintext
+migration authenticates and decrypts each source blob with the source `BLOB_KEY`;
+plaintext-to-encrypted migration writes the current authenticated blob format
+with the target `BLOB_KEY`. Both paths preserve every logical blob ID, compare
+each staged read-back with its source payload, and validate target database
+`blob_id` references before commit. The active source and its key material are
+not modified during preparation.
+
+Temporary blobs are non-durable runtime spool state. Security migration requires
+the profile daemon to be offline, so the staged target discards that namespace
+instead of copying mode-incompatible runtime residue. Persistent blobs are all
+migrated, including currently orphaned canonical objects, because ownership
+metadata is not yet sufficient to discard them without risking data loss.
+
+The explicit durable commit point is the atomic replacement of a sibling
+migration journal from `prepared` to `committed`, after the complete staged tree
+has been synchronized. Recovery reads this journal before opening a profile:
+`prepared` discards the staged tree and continues using the unchanged source;
+`committed` completes generation activation and then performs best-effort old
+source cleanup. Cleanup failure after commit leaves the target authoritative and
+usable; it never triggers destructive rollback.
+
+### Profile layout
+
+```text
+profile/
+├── config.json
+├── storage.db                         # plaintext or DB_KEY-protected SQLCipher
+├── storage.runtime.db                 # optional plaintext DEBUG mirror
+├── protected-key-material/
+│   └── keyslot.json                   # protected PMK, owner-only
+├── blobs/
+│   ├── persistent/                    # durable ciphertext or development plaintext
+│   └── temporary/                     # non-durable mode-appropriate runtime spool
+├── hidden_service/
+│   ├── metor_secret.key               # SECRET_KEY ciphertext when encrypted
+│   ├── hs_ed25519_secret_key.enc       # SECRET_KEY ciphertext when encrypted
+│   └── hs_ed25519_secret_key           # runtime-only Tor plaintext, shredded
+└── tor_data/                           # Tor runtime state
+```
+
+Sensitive directories use owner-only permissions where the platform supports
+them. Permissions are defense in depth, not encryption.
+
+### External blob stores
+
+`EncryptedBlobStore` and `PlaintextBlobStore` implement the same logical
+`BlobStore` API: `put`, `read`, `delete`, `promote`, and `exists`. Callers use
+opaque IDs and never select filesystem paths or security-mode formats. The
+plaintext implementation is development-only and writes payload bytes directly
+to disk; it provides no at-rest confidentiality.
+
+`EncryptedBlobStore` maps random 256-bit lowercase hexadecimal blob IDs to
+internal files; callers never supply or receive filesystem paths. It supports
+`put`, authenticated `read`, idempotent `delete`, and atomic temporary-to-
+persistent `promote`. IDs are strictly validated, preventing path traversal.
+
+Each object derives an independent key from `BLOB_KEY`, the versioned
+`metor/blob-object/v1` context, and its blob ID using keyed BLAKE2b. Files use an
+explicit `METORB01` magic value and format version followed by a fresh
+XChaCha20-Poly1305 nonce and authenticated ciphertext. Magic/version and blob ID
+form immutable authenticated context. Reads reject truncated, unsupported,
+relocated, wrong-key, or modified objects before returning plaintext. Writes
+encrypt in memory and atomically persist ciphertext without creating a
+plaintext temporary file. The initial whole-object implementation caps
+plaintext objects at 64 MiB to bound corrupt-file reads; future streaming media
+work may introduce a different documented limit with a new format version.
+
+The whole-object API establishes crypto and ownership semantics. Voice adds a
+bounded, resumable application protocol while keeping encrypted object paths and
+formats behind `BlobStore`. `VoiceContent` carries `blob_id`, codec, byte count,
+and optional duration metadata only; raw binary data does not become a permanent
+NDJSON message representation. A future `FileContent` can reuse these ownership
+and bounded-transfer principles without changing message semantics.
+
+Temporary and persistent objects use the same encryption model. Consequently a
+`LIVE + VOICE` object can be promoted to `DROP + VOICE` during fallback
+without changing keys or embedding content in transport messages. Promotion
+changes ownership/lifecycle only; LIVE content does not become history merely
+because it required encrypted crash-safe spooling.
+
+### Lock versus purge and self-destruct
+
+```text
+LOCK                              PURGE / SELF DESTRUCT
+stop profile runtime              stop profile runtime
+close SQLCipher/blob handles      close SQLCipher/blob handles
+clear PMK and derived keys        clear PMK and derived keys
+keep protected PMK                destroy protected PMK access
+keep encrypted profile data       then best-effort filesystem cleanup
+keep IPC available                stop/remove profile data
+```
+
+All destructive paths use the central `destroy_profile_storage` lifecycle.
+Callers first stop or exclude runtime activity; the lifecycle then closes pooled
+SQLCipher access, clears any injected runtime keys, calls
+`KeyProtector.destroy`, and only afterward invokes recursive filesystem cleanup.
+`SelfDestructCommand`, individual profile removal, and global purge share this
+key-first ordering. If cleanup fails after key destruction, nothing recreates
+protected key material.
+
+An opt-in `SelfDestructCommand.operation_id` binds GUI lifecycle reports to one
+accepted operation on its already authorized connection. `SelfDestructRuntimeReleased`
+requires successful runtime preparation, database close and runtime-key release.
+`SelfDestructSafe` additionally requires persistent key-protection removal and is
+emitted only for encrypted profiles, before best-effort file cleanup. Key removal,
+an initiated event, EOF or process exit alone does not provide that guarantee.
+The safe event covers only the selected profile; an independently validated host
+binding must still establish that shutting down the appliance cannot interrupt
+other unprepared runtimes. These additive reports do not grant destruction or
+host-power authority and do not weaken the accepted restricted-client policy.
+
+Hard-locked daemons reject anonymous self-destruction. An authenticated client
+may deliberately enter restricted mode with the `device_lifecycle` capability;
+only that fixed lock-cycle capability can prepare profile exit or self-destruct
+while the client remains restricted. Merely reaching the local IPC socket never
+grants destructive access.
+
+`secure_remove_path` remains defense in depth. Portable Python overwrite and
+unlink cannot guarantee physical erasure on SSD, SD, flash, copy-on-write,
+snapshotted, journaled, remapped, or backed-up storage. The software password
+protector's keyslot is itself stored on that media, so historical physical
+copies may remain recoverable. Software purge therefore provides clean logical
+key destruction plus best-effort cleanup, not guaranteed irreversible hardware
+sanitization. Full-disk encryption is still recommended. A future hardware
+protector can make purge stronger by destroying a non-exportable wrapping key.
+
+### Plaintext and debug modes
+
+Plaintext local profiles remain an explicit DEVELOPMENT/DEBUG option for testing
+workflows, but are not appropriate for normal or hardened deployment. They have
+no PMK, no at-rest confidentiality, no password-backed local unlock, no
+encrypted external blob store, and no cryptographic-erasure guarantee. Their
+external blob payloads are plaintext on disk; purge is filesystem cleanup only.
+`daemon.allow_plaintext_profiles` defaults to `false`;
+development environments must deliberately enable it, while hardened/device
+builds keep it disabled to prohibit plaintext profile creation and migration.
+
+`daemon.enable_runtime_db_mirror` is disabled by default and is explicitly a
+DEBUG/DEVELOPMENT-ONLY facility. When enabled it writes a plaintext database
+copy beside encrypted storage. It is removed on disable, lock, shutdown, purge,
+and self-destruct, but PMK destruction cannot retroactively protect deliberately
+created plaintext copies, snapshots, or backups. Hardened device configuration
+must prohibit this setting.
+
+### Threat-model separation and future hardware work
+
+Tor and Onion Services protect network transport and network-identity
+properties. PMK-derived keys protect persistent data on the local device. The
+blob key exists for local at-rest protection, not because Tor transport lacks
+encryption.
+
+A future `TPMKeyProtector` or `SecureElementKeyProtector` must implement the same
+protector contract, define versioned provider metadata, provision a
+non-exportable wrapping key, map authentication failures to the existing error
+boundary, register/select the provider, inject it through `KeyManager` and the
+central destruction lifecycle, and destroy that hardware key during purge. No
+SQLCipher, key-hierarchy, blob, message, or lock semantic requires redesign.
+
+Voice uses authenticated, exact-offset chunks with receiver-enforced frame and
+retention limits. Receipt metadata owns blob references, and fallback promotes
+temporary ownership only after the message transition commits. Platform audio
+capture/playback and frontend playback cursors stay outside Core. File transfer
+and a `FileContent` DTO remain future work.
+
+## Messages: delivery and content
+
+Messages have two independent dimensions. `Delivery` is either `LIVE`
+(ephemeral interactive delivery, with a temporary reliability spool) or `DROP`
+(persistent asynchronous delivery). `ContentType` is `TEXT` or `VOICE`,
+represented by `TextContent` and `VoiceContent`.
+
+```text
+LIVE + TEXT → ephemeral interactive text
+DROP + TEXT → persistent asynchronous text
+LIVE + VOICE → ephemeral, resumable interactive Voice
+DROP + VOICE → persistent asynchronous Voice
+```
+
+The public boundary uses `SendMessageCommand(target, delivery, content,
+msg_id)` and `MessageReceivedEvent(alias, delivery, content, msg_id)`. Fallback
+changes only `Delivery.LIVE` to `Delivery.DROP`; logical identity and content
+remain unchanged.
+
+One Voice capture turn is one logical message and stable `msg_id`. Bounded
+Base64 chunks exist only in authenticated transfer frames; the stored/public
+content DTO is a blob reference. Voice uses the same ACK, dedupe, pending,
+reconnect/replay, selective fallback, consume, and DROP history semantics as
+text. `FILE` and `PAYMENT_REQUEST` remain extension examples.
+
+## Voice drafts and telephone calls
+
+All Voice recording uses protected Core staging. Begin and exact-offset append
+accept bytes locally; finalize closes the recording into an unpublished draft
+for DROP and LIVE alike. Only explicit commit publishes. Review playback is
+manual and does not require listening to the complete draft before sending.
+Capture limits, producer interruption, app lock, connection loss and automatic
+message fallback cannot publish an unsent draft. An ended LIVE draft requires
+an explicit eligible LIVE reconnection or an explicit commit as DROP with the
+same logical identity. Published messages retain their existing receipt,
+recovery, retention and consume rules.
+
+CALL is a separate runtime domain, with its own exact identity, consent,
+signaling, owner and lifetime. It is not a Delivery or ContentType value and
+cannot enter message history or fallback. Call acceptance authorizes only
+conversation audio. A direct call uses a call-only authenticated transport and
+requires one acceptance; it does not create a LIVE chat permission. Calls may
+reuse an accepted LIVE transport, while rejecting or hanging up the call leaves
+that chat intact. Ending LIVE transfers the shared connection to the call alone and revokes message permission; physical transport loss terminates the call explicitly.
+
+Local frontend adapters own capture and output. Calls use mono signed 16-bit
+PCM at 16 kHz in 20 ms frames, allowing independent frame expiry without
+retaining decoder state. Core transfers sequence-qualified frames independently
+in both directions, with call-relative monotonic timing. Each direction retains
+at most ten frames (200 ms); Core and native adapters discard expired audio
+instead of building a replay backlog. A transport interruption
+ends the call, so reconnect cannot replay conversation audio or silently accept
+another call. Audio requires explicitly selected headset endpoints; no speaker
+echo cancellation or automatic conversation recording is claimed.
+
+App restriction always stops message capture/playback and hardware PTT, while
+preserving protected unsent staging. An already accepted exact-owner call keeps
+its narrowly scoped audio/mute/hangup permissions through app or screen lock.
+New call acceptance while covered requires the distinct protected preference
+and an explicit action; all chat contents remain covered. Hard profile lock,
+profile departure, owner disconnect or purge ends calls and frees their audio.
+System suspend ends calls; display lock alone does not imply suspend, and resume
+never reconstructs microphone input or consent.
+
+Metor 1.0.0 uses IPC and peer generation 1, with minimum 1 on both axes.
+These contracts include Voice publication, explicit call acceptance and call
+audio frames. Peers with no common generation fail closed during negotiation.
+
+## Core system boundaries
+
+### Frontend-independent, typed platform contracts
+
+`metor.client.platform` is the SDK-owned public boundary for local platform
+contracts. It imports no frontend, toolkit, native driver, database or host
+implementation. Concrete adapters own OS/device access; clients own presentation
+and interaction; Core retains communication and lifecycle authorization.
+
+Keep three interfaces separate:
+
+- **Hardware status** is read-only cached observation. Battery charge, charging
+  and external power can independently be unknown. Observations carry monotonic
+  validity intervals; expired values are not current facts.
+- **Inputs** are ordered physical observations with subscription ownership,
+  sequence numbers, complete button levels and explicit loss. Missing events,
+  initial held controls and discontinuities cannot create an admitted press or
+  a continuously held purge chord.
+- **Controlling actions** use capability-specific actuator ports and typed
+  outcomes. Indicators and haptics receive only finite, privacy-filtered semantic
+  requests. Shutdown is a separate privileged port; its acceptance is neither
+  Core preparation nor proof of completed power-off.
+
+These are not a single notification hook. Notification delivery remains a
+separate privacy-filtered product concern. Hardware input grants no permission;
+local shutdown still requires authorized deployment binding, confirmed Core
+preparation and exclusive host/runtime coordination. Simulator composition must
+not receive real destructive or shutdown adapters.
+
+`PlatformBindings` composes those independent ports for one validated adapter ID
+without merging their authority. A trusted local package registers the selected
+`metor.platform_adapters` entry point, or the host injects bindings through
+`FrontendLaunchContext`. Strict device TOML must name the same
+adapter before the GUI subscribes. Optional indicator, haptic and shutdown ports
+are exposed only when their matching TOML tables name that adapter; omission or
+explicit `none` disables the
+capability. The GUI reads cached status separately, drains ordered inputs on the
+UI thread, and sends actuator requests off that thread. Before normal power it
+also rejects a remote selection or another running local profile. The shutdown
+port is the privileged deployment boundary and must close the remaining race by
+enforcing local privilege plus exclusive runtime ownership; the GUI first proves
+the current local-profile binding and required Core lifecycle milestone. No
+binding means physical mode fails closed, and simulator mode rejects a binding.
+The selected adapter runs in the GUI process as trusted code or proxies to a
+separately installed, authorized local OS device service. Its device-wide
+settings readback has a single adapter/service owner and does not move with a
+communication profile. An exclusive local resource uses an adapter-declared
+stable resource ID and GUI-held OS file lock obtained through the Base
+`FrontendHost.device_resource_lock` boundary; a shared adapter must
+coordinate its own value and I/O ownership. This does not grant Core content
+access.
+
+Normal appliance power and emergency purge remain different transactions.
+Normal power requires explicit V21 confirmation followed by capture/owner
+finalization and `PrepareProfileExit`. V22 asks Core for exactly one operation
+only after the continuous physical chord and, while restricted, the immutable
+`device_lifecycle` grant. `SelfDestructInitiated`, EOF and
+`SelfDestructSafe` without a terminal cleanup result do not invoke shutdown. A
+safe operation whose cleanup result is lost uses the bounded cleanup wait before
+one shutdown request. Adapter acceptance remains distinct from completed OS
+power-off.
+
+Streaming `CapturePort` and `OutputPort` also live in this SDK package and are
+used by the GUI's existing production workers. They preserve independent duplex
+ownership. The native PortAudio implementation and PCM codec remain in the GUI
+distribution. New hardware contracts do not declare any untested board supported.
+
+The platform contract itself adds no IPC, persistence or cryptographic format.
+The frontend lifetime and profile-exit contracts remain independent of calls.
+
+1. The UI owns presentation and interaction state only.
    It may hold transient presentation state such as focus or scroll position, but it must not own Tor, database, or cryptographic lifecycle.
 
 2. The daemon owns operational state.
@@ -36,6 +525,42 @@ Use this document when you need to answer one of these questions:
 
 4. Remote profiles are still client profiles.
    UI-local settings remain on the client machine, while daemon settings are routed over IPC to the daemon host.
+
+## GUI platform decisions
+
+The production GUI uses Kivy 2.3.1 with SDL2/OpenGL and a small native widget
+kit. Fonts and icons are packaged locally; the application has no webview,
+hosted asset service, runtime font/icon fetch, telemetry, update check, or
+package download. A web frontend was rejected because it would add a different
+runtime and security boundary rather than implement the same native product.
+
+The GUI owns its AccessKit accessibility projection and native UIA/AT-SPI
+adapters. Covering private content synchronously revokes native nodes, tooltips,
+and pending assistive actions before repaint. Password values and counts are not
+exposed. Accessibility is a presentation surface, never an authorization path or
+a second message inventory. Concrete screen-reader and desktop-environment
+support requires evidence for the declared platform and capability.
+
+Desktop focus loss revokes focus-owned input and message media; it is not promoted to an
+OS lock. Actual Windows session/power events and validated Linux logind or
+supported screen-lock signals enter one bounded typed lifecycle path. Privacy
+departure wins over resume under pressure. Resume keeps the cover and never
+reconstructs PTT, starts capture/playback, or unlocks automatically. Unsupported
+desktop providers remain unclaimed rather than inferred from a working window.
+
+The current Voice candidate is `pcm_s16le_16000_mono`: complete 16-bit samples
+are decoder checkpoints and incomplete samples are rejected. Capture and output
+workers are independent and bounded. A route must be explicitly enumerated and
+capability-compatible. Speaker output is not AEC-capable without a separately
+validated echo canceller; absent media capability leaves text usable. Current
+native evidence and reruns are release evidence, not architecture.
+
+Strict device TOML selects registered platform capabilities. Simulator mode uses
+the same GUI state machines but receives no production destruction or shutdown
+port. No production physical adapter is registered by this repository, and typed
+ports alone do not establish appliance support. The former GUI-local `embedded`
+platform prototype is retired; frontend-neutral contracts belong to
+`metor.client.platform`, while concrete adapters remain distribution-owned.
 
 ## Configuration Model
 
@@ -52,17 +577,16 @@ Metor has three configuration classes with different responsibilities:
 
 Settings keys live in exactly three namespaces (see [GLOSSARY.md](./GLOSSARY.md)):
 
-| Prefix            | Scope                                                                   | Validated by                 |
-| ----------------- | ----------------------------------------------------------------------- | ---------------------------- |
-| `client.*`        | Client-machine behavior, paradigm-neutral (e.g. `client.history_limit`) | Client registry              |
-| `daemon.*`        | Daemon-host behavior                                                    | Daemon `SettingKey` registry |
-| `ui.<frontend>.*` | Frontend-owned presentation and behavior                                | Registering UI frontend      |
+| Prefix            | Scope                                                                   | Validated by                               |
+| ----------------- | ----------------------------------------------------------------------- | ------------------------------------------ |
+| `client.*`        | Client-machine behavior, paradigm-neutral (e.g. `client.history_limit`) | Client registry                            |
+| `daemon.*`        | Daemon-host behavior                                                    | Daemon `SettingKey` registry               |
+| `ui.<frontend>.*` | Frontend-owned presentation and behavior                                | Inert base-owned official metadata catalog |
 
 Validation is a two-registry rule: the daemon accepts only `daemon.*` keys that
 exist in its own `SettingKey` registry. Any client-scope key (`client.*` or
 `ui.<frontend>.*`) that gets routed to the daemon is rejected with the typed
-`CLIENT_SCOPE_KEY_REJECTED` event instead of the legacy
-`DAEMON_CANNOT_MANAGE_UI` naming.
+`CLIENT_SCOPE_KEY_REJECTED` event.
 
 Request defaults are resolved client-side, not daemon-side:
 `client.history_limit` and `client.messages_limit` are read by the client and
@@ -77,6 +601,14 @@ reuse is enabled, queued drops ride the existing live session channel and a
 cached drop tunnel is closed while live exists, so `allow_drop_standby_on_live`
 only has meaning when reuse is disabled:
 
+This policy covers both text and Voice Drops. Live keeps one socket reader;
+Voice delivery waits on bounded receiver-fed acknowledgements correlated to the
+authenticated peer, exact socket and message identity. Socket replacement or a
+failed transfer revokes that attempt's queued writes and leaves its durable Drop
+pending for retry. Only the terminal commit acknowledgement confirms delivery;
+chunk acknowledgements establish a resumable prefix. A peer's DROP-policy denial
+does not end its accepted Live chat.
+
 | `reuse_live_for_drops` | `allow_drop_standby_on_live` | Drop routing while live is active                                                                      |
 | ---------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------ |
 | `true` (default)       | `false` (default)            | Drops ride the live session channel; no drop tunnel cache is kept warm.                                |
@@ -90,7 +622,7 @@ ledger rows, including drop rows — uniform absence, never selective absence.
 
 Configuration should follow these rules:
 
-- User-relevant runtime behavior belongs in documented settings metadata and appears in [SETTINGS.md](./SETTINGS.md).
+- User-relevant runtime behavior belongs in documented settings metadata and appears in the generated [settings reference](./generated/SETTINGS.md).
 - Hard anti-DoS and protocol guardrails may stay in constants when exposing them would weaken safety or contract clarity.
 - Every persisted setting should have one canonical validator and one canonical documentation source.
 - Structural profile metadata must stay immutable through generic `config set` flows; changes such as storage security mode require a dedicated migration workflow.
@@ -111,38 +643,55 @@ The IPC boundary is typed on purpose. Future changes should extend that contract
 4. Alias-bearing peer-state logs should stay rename-safe when the event still refers to the current peer identity.
    In chat mode this means preserving the `{alias}` placeholder together with alias metadata for dynamic redraws, while inherently final events such as completed removals may remain static.
 
+New contact aliases are validated in Core after trimming: labels must be
+nonempty and exclude Unicode control characters, surrogates and line/paragraph
+separators (`Cc`, `Cs`, `Zl`, `Zp`). Spaces, non-Latin scripts and joined emoji
+remain valid. Existing malformed labels remain addressable for rename or removal;
+presentation boundaries still escape untrusted terminal text independently.
+
 ## IPC Contract Evolution
 
 The typed IPC contract is versioned so client/daemon drift becomes a typed error
 instead of silent misbehavior. Two version axes exist:
 
-1. IPC wire protocol (`Constants.IPC_PROTOCOL_VERSION` / `IPC_PROTOCOL_MIN_SUPPORTED`):
+1. IPC wire protocol (`IPC_PROTOCOL_VERSION` / `IPC_PROTOCOL_MIN_SUPPORTED` from
+   `metor.versioning`):
    negotiated over the local IPC socket between UI clients and the daemon.
 
-2. Peer wire protocol (`Constants.PEER_PROTOCOL_VERSION` / `PEER_PROTOCOL_MIN_SUPPORTED`):
+2. Peer wire protocol (`PEER_PROTOCOL_VERSION` / `PEER_PROTOCOL_MIN_SUPPORTED`
+   from `metor.versioning`):
    negotiated between daemons inside the Tor peer handshake.
 
-### Additive-Only Within a Major Version
+### Additive-Only Within an IPC Generation
 
-- New commands, events, and payload fields may be added within the same major
-  version, but every new field MUST have a default so writers from older
+- New commands, events, and payload fields may be added within the same IPC
+  generation, but every new field MUST have a default so writers from older
   versions stay valid.
-- Removing or renaming a field, event, or command is a major-version bump.
+- Removing or renaming a field, event, or command requires an incompatible IPC
+  protocol generation bump.
   Renames are never aliased; every caller migrates in the same release.
 - Strict unknown-field rejection stays in place: a payload with an unknown field
-  is a hard error, never a silent ignore. The version handshake converts
-  version drift into a typed `ProtocolMismatchEvent` before any payload parsing
-  could otherwise fail with an untyped error.
+  is a hard error, never a silent ignore. The version handshake rejects
+  non-overlapping protocol generations with a typed `ProtocolMismatchEvent`.
+  It does not negotiate individual additive fields within a generation:
+  integrations must use the documented schema and verify required capabilities
+  before sending newer routes or fields to an older daemon.
 
 ### IPC Version Handshake (UI -> Daemon)
 
-1. The client sends `InitCommand` with its `protocol_version`.
-2. If `protocol_version` is below `IPC_PROTOCOL_MIN_SUPPORTED`, the daemon
-   replies with `ProtocolMismatchEvent(daemon_version, min_supported, client_version)`
-   and the session is rejected.
-3. Otherwise the daemon replies with `InitEvent(onion, version, min_supported, profile)`.
-   A client whose own `protocol_version` is below the announced `min_supported`
-   must treat the session as incompatible.
+1. The client sends `InitCommand(current_version, min_supported)` to advertise
+   its inclusive IPC support range.
+2. The daemon intersects that range with
+   `[IPC_PROTOCOL_MIN_SUPPORTED, IPC_PROTOCOL_VERSION]`. If there is no overlap,
+   it returns `ProtocolMismatchEvent` containing both ranges.
+3. Otherwise the daemon selects the highest common generation and returns it as
+   `InitEvent.negotiated_version`, alongside its advertised range. The client
+   independently validates that result before accepting the session.
+
+In generation 1, `PrepareProfileExitCommand` cleans up the requesting socket.
+The daemon retains its independent clients and enforces separate consent for calls.
+
+For the complete generated command/event reference, see [API.md](./generated/API.md).
 
 ### Canonical Client Lifecycle and Wire Sequence (Track 1 & Track 2)
 
@@ -153,29 +702,71 @@ Metor provides two complementary client integration surfaces:
 
 The canonical wire sequence is:
 
+Between Connect and `Init`, a long-lived local frontend attached to an
+automatically managed daemon sends `FrontendLeaseCommand` with its host-provided instance
+token and a random frontend ID. Independent daemons, remote profiles, and
+short-lived queries do not require this lifetime registration. The lease does
+not authenticate a profile or grant content access.
+
 1. **Connect:** Connect to the daemon's local IPC listener (`127.0.0.1:<daemon_port>`). When connecting to a remote VPS daemon, the port is forwarded locally via SSH tunnel, keeping remote transparent.
-2. **Handshake:** Send `InitCommand(client_version, protocol_version)` with a unique `request_id`. Await `InitEvent`.
+2. **Handshake:** Send `InitCommand(current_version, min_supported)` with a unique `request_id`. The reply may require authentication or unlocking before the daemon returns `InitEvent(negotiated_version)`.
 3. **Auth & Unlock Gate:**
    - If the daemon responds with `DaemonLockedEvent`, send `UnlockCommand(password=...)` and await `DaemonUnlockedEvent`.
-   - If the daemon responds with `AuthRequiredEvent(challenge, salt)`, compute `proof = HMAC-SHA256(Argon2i(password, salt), challenge)` and send `AuthenticateSessionCommand(proof=...)`, awaiting `SessionAuthenticatedEvent`.
+   - If the daemon responds with `AuthRequiredEvent(challenge, salt)`, derive the session-authentication key and HMAC proof using the exact domain prefix, byte encodings and Argon2i parameters in the [generated wire guide](./generated/API.md#portable-authentication-derivation). Send `AuthenticateSessionCommand(proof=...)` and await `SessionAuthenticatedEvent`. This derivation is distinct from the profile-keyslot Argon2id derivation; using the bare password as the Argon2i input produces an invalid proof.
+   - Gate commands and the resent original `InitCommand` use the same `request_id` for that exchange. After a successful gate, resend Init and continue until the daemon returns a supported `InitEvent`. Credential success alone does not establish protocol compatibility.
 4. **Register Live Consumer:** Send `RegisterLiveConsumerCommand()`. The daemon will now stream asynchronous push events (messages, status updates, contact requests) to this socket.
-5. **Initial State & Event Loop:** Fetch startup state via `GetChatStartupStateCommand` or `GetHistoryCommand`. Process continuous streaming events delimited by newlines.
+5. **Initial State & Event Loop:** Terminal may fetch its compatibility projection
+   with `GetChatStartupStateCommand`. Rich clients request
+   `GetRuntimeSnapshotCommand`, install its `revision` as the projection
+   baseline, then apply newer projection invalidations in the same epoch. Never
+   discard command outcomes, media or lifecycle control events merely because
+   their revision precedes the snapshot. Process
+   continuous streaming events delimited by newlines.
+
+### Aggregate Runtime Projection
+
+`RuntimeSnapshotEvent` is the authoritative content-free reattachment boundary.
+It aggregates profile/Onion identity, saved and discovered contacts, DROP
+conversation summaries, LIVE contexts, pending incoming requests, unread and
+pending counts, terminal disconnect reasons, and a settings revision. Every IPC
+event carries a monotonically assigned daemon `revision`, so registration before
+snapshot retrieval cannot create an undetectable state-change gap. Frontends do
+not reconstruct this truth from logs or human-readable strings, and the snapshot
+never contains message bodies, Voice bytes, drafts, playback position, or
+notification history.
+
+### Per-Client Restriction Versus Hard Lock
+
+`LockCommand` retains its security meaning: it releases the complete active
+profile runtime and its keys. Device-style screen locking uses
+`RestrictClientCommand`, which freezes an authorization/privacy policy for only
+the requesting IPC session while other authenticated clients and the profile
+runtime remain active. Core gates commands, locked Voice target ownership,
+incoming acceptance, and identity disclosure; it does not trust frontend
+presentation state as an authorization boundary.
+
+Optional quick unlock is a one-use challenge proof backed by a salted Argon2id
+PIN verifier. It is not a PMK/keyslot credential and cannot start a cold or
+hard-locked profile. Three failed PIN proofs disable PIN for that session's lock
+cycle and require the normal profile-password proof.
 
 ### Peer Wire Version (Daemon -> Daemon)
 
-- The authenticated handshake CHALLENGE frame carries the peer's
-  `PEER_PROTOCOL_VERSION` as an explicit token; legacy frames without the token
-  default to version 1.
-- Each side validates the announced version against `PEER_PROTOCOL_MIN_SUPPORTED`
-  before accepting the connection. A too-old peer is rejected with a typed
-  handshake error instead of failing later on an unparseable payload.
+- The CHALLENGE and authenticated AUTH frames each advertise the sender's
+  inclusive current/minimum peer-generation range.
+- Each daemon intersects the two ranges and selects the highest common
+  generation. Either future-only or legacy-only non-overlap rejects the
+  connection before peer payloads are accepted.
+
+For application releases and every compatibility axis, see [RELEASING.md](./RELEASING.md).
 
 ### Delivery-Only Connect Hint (deliberately not implemented)
 
 A `delivery_only` handshake hint — an outbound connect that must not surface an
 accept prompt at the peer — was considered and deliberately rejected. It only
 makes sense for an automatic live-connect path, and automatic live connect was
-itself rejected: the UI sends `MsgCommand` (live) or `SendDropCommand` (drop)
+itself rejected: the UI sends `SendMessageCommand` with `Delivery.LIVE` or
+`Delivery.DROP`
 and never asks the daemon to auto-establish a session. A flag without a caller
 would be dead protocol surface, so it is not implemented. If a future UI
 paradigm reintroduces automatic live connect, this document must be revisited
@@ -198,6 +789,17 @@ canonical contract for that path:
   attached client is the authoritative notification consumer.
 - UI developers register their own sink types for their frontend instead of
   bolting display logic onto the daemon broadcast path.
+
+The built-in sinks are explicit opt-ins and export peer metadata outside the
+encrypted profile. A file sink writes plaintext alias/Onion metadata to an
+owner-private, regular, non-link file. POSIX opening is nonblocking, and descriptor
+checks reject FIFOs, devices and multiple hard links before writing; a configured
+FIFO cannot stall notification delivery waiting for a reader. The operator owns
+the file's location and retention. A webhook uses ordinary host networking, DNS and proxy configuration,
+not the daemon's Tor transport. It discloses the host's network address and
+notification metadata to the configured service. Profile encryption does not
+protect either export, and notifications never include message bodies or Voice
+bytes.
 
 ## History Model
 
@@ -226,6 +828,7 @@ History changes should follow these rules:
 - Plaintext profiles intentionally opt out of password-based local auth and encrypted runtime-mirror semantics; those features must degrade to disabled behavior instead of pretending to work.
 - Logging of Tor or SQL internals must stay explicit and documented because those logs can leak local operational details.
 - Stream framing, byte caps, and socket timeouts are security boundaries, not cosmetic implementation details.
+- A new managed IPC socket has `daemon.ipc_timeout` to send its first complete, valid command. Interactive unlock or session proof then has one shared window of up to 180 seconds from accept (or the configured timeout, if longer). Fragments, invalid frames, and repeated challenges do not renew it. After session authentication, a valid instance lifetime lease, or a command admitted by an unlocked runtime with local auth disabled, the socket may remain idle. A lifetime lease grants no access to profile data. The private one-command headless channel uses one `daemon.ipc_timeout` window for the whole request.
 
 ## Transport Model
 
@@ -317,7 +920,7 @@ It exists to keep reconnect, retunnel, fallback, and durable pending-live handli
    `StateTracker` tracks active live sockets, pending live sockets, outbound attempts, reconnect-grace windows, scheduled auto-reconnect intent, retunnel markers, and the in-memory mirror of per-peer pending live messages.
 
 2. Durable pending outbound live state is daemon-owned too.
-   The message store retains outbound `LIVE_TEXT` rows with `PENDING` status until ACK, terminal fallback conversion, or explicit manual fallback. That durable spool is the crash-safe source for recoverable live sends.
+   The message store retains outbound rows with `delivery = live` and `status = pending` until ACK, terminal fallback conversion, or explicit manual fallback. That durable spool is the crash-safe source for recoverable live sends.
 
 3. Live lifecycle state is derived, not stored redundantly.
    For each peer the daemon derives one `LiveTransportState`: `DISCONNECTED`, `CONNECTING`, `PENDING`, `CONNECTED`, or `RETUNNELING`.
@@ -326,13 +929,22 @@ It exists to keep reconnect, retunnel, fallback, and durable pending-live handli
    The UI may mark one peer as `LIVE`, `SWITCHING`, `RECONNECTING`, or `DROP`, but that state is only a rendering/send-policy mirror driven by typed IPC events.
 
 5. The UI does not own a recoverable outgoing buffer.
-   When the user types while the chat still routes through live semantics, the UI sends `MsgCommand` immediately and renders a pending self-message. Whether that message is sent now, durably deferred, replayed after recovery, or promoted to drop is daemon logic.
+   When the user types while the chat still routes through live semantics, the UI sends `SendMessageCommand(delivery=Delivery.LIVE, content=TextContent(...))` immediately and renders a pending self-message. Whether that message is sent now, durably deferred, replayed after recovery, or promoted to drop is daemon logic.
 
 6. `StateTracker` keeps only the fast in-memory replay mirror.
    The in-memory pending-live map exists to replay over the current process without rereading SQLite for every ACK or replay step, but it is not the sole source of truth.
 
 7. The UI must never infer recovery from time or socket silence.
    It reacts only to typed IPC transport events, fallback events, and ACK events.
+
+8. Accepted LIVE consent has a volatile logical generation.
+   Connected sockets own that generation; recoverable loss starts one monotonic
+   deadline using `daemon.live_reconnect_grace_timeout`. Authenticated recovery
+   can replace that generation before the deadline, subject to current consumer
+   and backlog policy. A `RECOVER` hint alone grants no consent. Retry failure
+   never extends the deadline, and End, reject, lock or shutdown revokes the scope.
+   Socket, attempt, generation and deadline checks keep delayed work from
+   reopening a terminated or replaced context.
 
 ### Recovery Origins and Their Meaning
 
@@ -371,7 +983,9 @@ The UI may translate them differently, but it must not reinterpret them.
 3. If both peers initiated a connection simultaneously, the deterministic tie-breaker decides the winner.
    The loser is rejected with `MUTUAL_CONNECT` semantics instead of appearing as a random failure.
 
-4. If reconnect grace, retunnel recovery, scheduled auto reconnect, or a generic recovery hint corroborated by current local recovery state is present, the listener may auto-accept the incoming socket as a recovery replacement.
+4. An authenticated recovery socket may replace a currently accepted logical
+   generation while connected or before its loss deadline expires. Recovery
+   markers and the peer's generic hint cannot independently grant acceptance.
 
    If the passive peer explicitly opts out during that window by using `/end` or `/reject`, the retunneling side must surface that as one terminal peer-ended outcome, not as a generic `connection lost` transport failure.
 
@@ -399,12 +1013,19 @@ The UI may translate them differently, but it must not reinterpret them.
 4. If a replacement socket arrives before grace expires, the delayed worker exits quietly.
    The peer only sees generic reconnect lifecycle, not a disconnect followed by a fresh incoming request.
 
-5. If grace expires without recovery, the daemon emits `DisconnectedEvent` and cleans up orphaned contacts.
+5. If grace expires without recovery, the daemon revokes that accepted scope,
+   emits `DisconnectedEvent`, and follows `daemon.fallback_to_drop` for pending
+   outgoing LIVE messages. Incoming unseen messages remain LIVE. With automatic
+   fallback disabled, outgoing messages remain in the durable pending LIVE spool.
 
-6. If `daemon.live_reconnect_delay > 0`, the daemon then schedules `AUTO_RECONNECT`.
+6. If `daemon.live_reconnect_delay > 0`, automatic work is scheduled during grace,
+   leaving time for the Tor handshake. It does not start a new accepted recovery
+   window after the old one expires.
 
-7. If `daemon.live_reconnect_delay = 0`, the daemon does not schedule a reconnect worker.
-   The current design still keeps retained unacknowledged live messages instead of converting them immediately at grace expiry, because a hinted late recovery replacement may still arrive and replay them.
+7. If `daemon.live_reconnect_delay = 0`, the daemon schedules no reconnect worker.
+   An eligible incoming replacement can still recover the accepted scope within
+   grace. After expiry, another session requires normal acceptance or mutual
+   connect under a fresh explicit attempt.
 
 ### Automatic Live Reconnect
 
@@ -413,12 +1034,18 @@ The UI may translate them differently, but it must not reinterpret them.
 
 2. When auto reconnect is scheduled, the daemon emits `AutoReconnectScheduledEvent` and the chat UI moves into `RECONNECTING` state.
 
-3. The reconnect worker later calls the normal outbound `connect_to()` path with `origin = AUTO_RECONNECT`.
+3. The reconnect worker calls the normal outbound `connect_to()` path with
+   `origin = AUTO_RECONNECT` inside the existing accepted grace window. The
+   initial delay is clipped to leave the configured Tor timeout budget; the
+   default 15-second delay cannot consume the entire default 15-second grace.
 
 4. Successful auto reconnect behaves like a normal successful connect, except the origin remains `AUTO_RECONNECT` and the UI renders it as reconnect lifecycle rather than as a first connect.
 
-5. Terminal auto-reconnect failure is one of the explicit terminal points for retained unacknowledged live messages.
-   When retries are exhausted, the outbound attempt is rejected, or the attempt closes before acceptance, the daemon converts retained unacknowledged live messages to drops and then emits `ConnectionFailedEvent`.
+5. Failed retry rounds remain bounded by the original grace deadline. They do
+   not prompt again, silently create a new session, or extend accepted consent.
+   Grace expiry or explicit terminal rejection ends recovery and follows the
+   configured fallback policy. A fresh manual Retry first resolves expired
+   cleanup, then binds a new attempt; stale receivers cannot revive old work.
 
 ### Explicit Local Retunnel
 
@@ -464,7 +1091,7 @@ The UI may translate them differently, but it must not reinterpret them.
    Pending live messages should survive recoverable grace, retunnel, and auto-reconnect paths and only become drops when the daemon concludes that the live recovery path is terminal or when the user explicitly forces fallback.
 
 8. Clean daemon shutdown is also a terminal decision point.
-   If `daemon.fallback_to_drop` is enabled, the daemon finalizes any remaining durable pending live rows into `DROP_TEXT` before shutdown. If fallback-to-drop is disabled, those durable pending live rows remain pending for a future live recovery.
+   If `daemon.fallback_to_drop` is enabled, the daemon changes any remaining durable pending rows from `delivery = live` to `delivery = drop` before shutdown. If fallback-to-drop is disabled, those durable pending live rows remain pending for a future live recovery.
 
 9. A seamless replacement over a still-connected old socket is still a recovery success.
    It must preserve retained pending live messages and replay them over the replacement socket rather than forcing fallback because the swap happened quickly.
@@ -478,10 +1105,10 @@ The UI may translate them differently, but it must not reinterpret them.
    The user may keep typing, but new outgoing messages remain local until the daemon reports retunnel success or terminal failure.
 
 2. `RECONNECTING` means the daemon is recovering a lost live session through grace reconnect or auto reconnect.
-   The prompt changes immediately, but the UI still waits for typed IPC events before deciding whether to flush or drop buffered content.
+   The prompt changes immediately; typed IPC events report Core-owned pending spool and fallback state. The UI does not flush a recoverable transport buffer.
 
 3. `DROP` means live transport is unavailable now.
-   New outgoing messages no longer stay in the UI buffer and instead follow normal drop behavior.
+   New outgoing messages request DROP semantics through Core; they are not queued in a UI transport buffer.
 
 4. Recovery prompt state and transport history state are intentionally coupled but not identical.
    Prompt decoration reacts immediately to typed lifecycle events, while visible chat lines such as `FallbackSuccessEvent`, `AckEvent`, and drop conversions continue to reflect daemon transport truth.
@@ -546,8 +1173,114 @@ When you add a new architecture-relevant behavior:
 
 1. Decide whether it belongs in fixed guardrails, cascading settings, or structural profile config.
 2. Extend the typed IPC contract if the UI must observe or control it.
-3. Update [SETTINGS.md](./SETTINGS.md) or [API.md](./API.md) via the generators instead of hand-editing generated references; the IPC contract schema in [api.schema.json](./api.schema.json) is regenerated by `scripts/generate_api_docs.py` as well.
-4. Update [AUDIT.md](./AUDIT.md) and [CONTRIBUTE.md](./CONTRIBUTE.md) if the new behavior changes review or implementation rules.
+3. Update the generated [settings](./generated/SETTINGS.md) or [IPC API](./generated/API.md) references through their generators; [api.schema.json](./generated/api.schema.json) is generated with the API reference.
+4. Update the [contribution and review rules](./CONTRIBUTE.md) if the new behavior changes review or implementation rules.
+
+## CLI and frontend distribution boundary
+
+The `metor` distribution owns the general command parser, one-shot renderers,
+daemon/profile orchestration, and the canonical `metor` executable entry. It
+contains no interactive frontend. `metor-sdk` owns `metor.client`,
+typed `metor.core.api` DTOs, shared proof helpers, protocol/version data, and the
+versioned `FrontendLaunchContext`. `metor-ui-terminal` owns
+`metor.ui.terminal`, including slash-command definitions, the upper help panel,
+rendering and key handling. These distributions share PEP 420 namespace paths
+but never ship the same file.
+
+The same declarative command definition drives parsing and general help for
+both `metor` and `python -m metor`. Managed daemon startup is the
+`metor daemon --non-interactive` execution mode of that CLI, not a second
+executable, parser, or help surface. Only that mode may consume the bounded
+startup credential from standard input; ordinary user arguments after the
+first `--` remain literal data. Process ownership additionally binds managed
+children to the exact interpreter and installed module or launcher identity.
+
+`metor chat` discovers metadata from the `metor.ui_frontends` entry-point group.
+Selection is explicit `--ui`, then `METOR_UI`, then `client.default_ui`. The
+base loads only the selected callable and validates its contract version before
+profile validation or daemon startup. Missing, duplicate, broken and
+incompatible frontends are explicit errors. General help and chat launcher help
+return before profile construction and never import or enumerate a UI. UI and
+daemon-autostart options are scoped to `chat`; other commands retain `--ui`
+text as ordinary user data.
+
+Peer and IPC sockets use finite per-socket FIFO writers. Canonical state locks
+cover mutation and generation assignment, never blocking socket writes. LIVE
+Text and Voice emissions carry last-moment generation claims so fallback or
+purge invalidation wins over queued stale work. Queue saturation is an explicit
+connection error and shutdown closes sockets to interrupt blocked writers.
+
+Runtime snapshots validate both the event revision and an atomic content-free
+network-state token around composition. Per-client FIFO writers stamp events
+before enqueue, so a delayed writer preserves revision order. Recovery state is
+typed as connected, connecting, pending, retunneling, reconnect grace,
+scheduled reconnect, or terminal disconnected with machine-readable actor and
+reason; receipt existence is not a recovery signal.
+
+Retained media discovery uses `ListRetainedMessagesCommand` and a stable,
+filter-bound opaque cursor. Inventory entries expose identity and safe metadata,
+never message bytes or storage paths. `GetVoiceChunkCommand` performs bounded
+non-consuming exact-identity reads; only `ReleaseVoiceCommand` consumes one
+eligible finalized inbound Voice item.
+
+The managed `network.voice` package has one `VoiceTransferManager` composition
+and one manager-owned transition lock plus inbound/outbound turn maps.
+`inbound.py` admits and acknowledges peer begin/chunk/end frames;
+`retained.py` owns metadata, hydration, object lifecycle and canonical retained
+projections; `capture.py` owns outbound begin/append/finalize mutation; and
+`outbound.py` owns replay, fallback, acknowledgement and explicit release. The
+mixins add no independent state store, lock, event bus or service locator.
+
+### Public integration and deterministic shared ownership
+
+`metor.core.auth` owns PIN/session proof primitives; `metor.shared` owns pure
+onion/identity helpers, mutable-buffer clearing and shared contract bounds.
+Callers import those owners directly. Base `metor.utils` lazily exposes only its
+host-owned `Constants`, `FileLock`, `ProcessManager`, configuration validator,
+secure path cleanup, and the pure human-input `TypeCaster`; it does not redirect
+SDK or Core APIs. Repository-only wheelhouse assembly lives under
+`scripts.release` and remains available through
+`python scripts/build_release_wheelhouse.py`, never through the installed Base
+runtime. SDK imports do not inspect HOME, load dotenv, open profiles or start
+processes. Base CLI/daemon explicitly call
+`initialize_runtime_environment` after side-effect-free help/version gates.
+
+The frontend launch contract defers host work until the selected frontend starts.
+`FrontendHost.bootstrap` returns a non-null active local or configured forwarded
+port, a consumable startup secret, storage prompt mode and `FrontendSettings`.
+This is endpoint resolution, not successful authentication: use `MetorClient`
+connect/bootstrap and handle their outcomes. Bootstrap reasons are typed;
+missing-profile, cancellation and transient failures permit another attempt.
+Concurrent selection/start is rejected. Remote profiles never start local daemons.
+Terminal uses this same boundary, not `ProfileManager`. Official frontend setting
+metadata remains an inert base catalog for CLI/docs, not duplicated UI defaults.
+
+The SDK correlates results by exchange lease through send, wait and cleanup.
+Expected terminal responses belong to the request caller; nonterminal fallback,
+pressure and runtime-change events go once to the callback. Actual rejection is
+typed; timeout and loss are transport outcomes. A bounded independent loss signal
+survives a full callback queue. Arbitrary user callbacks cannot be forcibly killed;
+replacement admission bounds retained callback generations and prevents their
+old request authority from reaching a new transport.
+
+Normal final peer frames drain in FIFO order with a bounded writer-owned deadline;
+enqueue is not delivery or peer acknowledgement. Purge cancels rather than draining
+ordinary reliability work. Exact socket removal prevents stale failures from
+disconnecting replacements. Runtime release attempts each sensitive phase even
+after failure, remains LOCKING on failure, and permits retry; keyslot removal is
+not proof of successful live-key or physical media erasure.
+
+Unpublished DROP and LIVE drafts retain temporary ownership, including after finalization. Explicit DROP publication promotes their protected blobs; published LIVE messages retain temporary ownership until their defined delivery/consume lifecycle ends. Exact committed fallback
+intents are additive internal receipt JSON (`fallback_committed`), not a new
+wire/schema/crypto generation. They authorize same-identity repair after partial
+blob promotion; absence of a LIVE generation alone never authorizes a sweep.
+
+StateTracker's facade is declarative; its coordinator owns a real reentrant lock.
+The domain-operation barrier precedes canonical state/store locks during snapshot
+composition and mutations. Stop/lock acquire domain then release serialization,
+never the reverse; external stop cannot race dispatch into a lock inversion.
+Writer admission is nonblocking; physical I/O is outside
+domain locks. SQL message mixins share an explicitly typed receipt collaborator.
 
 ## Terminal UI Design Guidelines
 
@@ -604,8 +1337,9 @@ applied after every colored span.
 
 ### Enforcement
 
-- `UIPresenter` formatters (transport, history, data snapshots, contacts)
-  are the single source for these layouts — chat and CLI share them.
+- Each distribution owns its presentation helpers. Base CLI formatters and
+  Terminal chat renderers may follow the same conventions but do not import
+  one another.
 - The chat renderer only adds the prefix and continuation indentation; it
   does not decorate content.
 - Tests assert the convention (no leading blank line, no `---`, header

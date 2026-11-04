@@ -12,7 +12,8 @@ from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
-from metor.data.profile import ProfileManager
+from metor.client import FrontendBootstrapResult, FrontendSettings, OneUseSecretProvider
+from metor.versioning import IPC_PROTOCOL_MIN_SUPPORTED, IPC_PROTOCOL_VERSION
 from metor.core.api import (
     AcceptCommand,
     AutoFallbackQueuedEvent,
@@ -37,22 +38,23 @@ from metor.core.api import (
     RetunnelInitiatedEvent,
     RetunnelSuccessEvent,
     RuntimeErrorCode,
-    SendDropCommand,
+    Delivery,
+    SendMessageCommand,
     SwitchCommand,
     UnreadInboxSummaryEntry,
-    MsgCommand,
+    TextContent,
     MarkReadCommand,
-    RemoteMsgEvent,
+    MessageReceivedEvent,
     UnreadMessageEntry,
     UnreadMessagesEvent,
 )
-from metor.ui import Theme
-from metor.ui.chat.command import CommandDispatcher
-from metor.ui.chat.engine import Chat
-from metor.ui.chat.event.content import handle_content_event
-from metor.ui.chat.event.handler import EventHandler
-from metor.ui.chat.models import ChatMessageType, ChatTransportState
-from metor.ui import Help
+from metor.ui.terminal import Theme
+from metor.ui.terminal.chat.command import CommandDispatcher
+from metor.ui.terminal.chat.engine import Chat
+from metor.ui.terminal.chat.event.content import handle_content_event
+from metor.ui.terminal.chat.event.handler import EventHandler
+from metor.ui.terminal.chat.models import ChatMessageType, ChatTransportState
+from metor.ui.terminal import Help
 
 
 class _DummyConfig:
@@ -87,36 +89,23 @@ class _DummyConfig:
         return 3
 
 
-class _DummyProfileManager:
+def _bootstrap_result() -> FrontendBootstrapResult:
+    """Provide the terminal with a typed disposable host projection.
+
+    Args:
+        None
+    Returns:
+        FrontendBootstrapResult: Isolated client settings and endpoint.
     """
-    Provides a dummy profile manager test double.
-    """
-
-    def __init__(self) -> None:
-        """
-        Initializes the dummy profile manager helper.
-
-        Args:
-            None
-
-        Returns:
-            None
-        """
-
-        self.config: _DummyConfig = _DummyConfig()
-
-    def get_daemon_port(self) -> int:
-        """
-        Returns daemon port for the test scenario.
-
-        Args:
-            None
-
-        Returns:
-            int: The computed return value.
-        """
-
-        return 43111
+    return FrontendBootstrapResult(
+        'test',
+        True,
+        43111,
+        False,
+        OneUseSecretProvider(None),
+        cast(FrontendSettings, _DummyConfig()),
+        False,
+    )
 
 
 class ChatContractTests(unittest.TestCase):
@@ -137,12 +126,12 @@ class ChatContractTests(unittest.TestCase):
         """
 
         with (
-            patch('metor.ui.chat.engine.Renderer', return_value=renderer),
-            patch('metor.ui.chat.engine.IpcClient'),
-            patch('metor.ui.chat.engine.EventHandler'),
-            patch('metor.ui.chat.engine.CommandDispatcher'),
+            patch('metor.ui.terminal.chat.engine.Renderer', return_value=renderer),
+            patch('metor.ui.terminal.chat.engine.IpcClient'),
+            patch('metor.ui.terminal.chat.engine.EventHandler'),
+            patch('metor.ui.terminal.chat.engine.CommandDispatcher'),
         ):
-            return Chat(cast(ProfileManager, _DummyProfileManager()))
+            return Chat(_bootstrap_result())
 
     def test_disconnect_exit_message_skips_prompt_during_chat_loop(self) -> None:
         """
@@ -177,9 +166,9 @@ class ChatContractTests(unittest.TestCase):
         renderer.read_line.side_effect = trigger_disconnect
 
         with (
-            patch('metor.ui.chat.engine.IpcClient', return_value=ipc_client),
-            patch('metor.ui.chat.engine.EventHandler'),
-            patch('metor.ui.chat.engine.CommandDispatcher'),
+            patch('metor.ui.terminal.chat.engine.IpcClient', return_value=ipc_client),
+            patch('metor.ui.terminal.chat.engine.EventHandler'),
+            patch('metor.ui.terminal.chat.engine.CommandDispatcher'),
             patch.object(Chat, '_bootstrap_ipc_session', return_value=True),
             patch.object(Chat, '_print_header'),
             patch.object(Chat, '_shutdown'),
@@ -248,11 +237,12 @@ class ChatContractTests(unittest.TestCase):
 
         with (
             patch(
-                'metor.ui.chat.engine.get_session_auth_prompt',
+                'metor.ui.terminal.chat.engine.get_session_auth_prompt',
                 return_value='Enter Master Password: ',
             ),
             patch(
-                'metor.ui.chat.engine.prompt_session_auth_proof', return_value='proof'
+                'metor.ui.terminal.chat.engine.prompt_session_auth_proof',
+                return_value='proof',
             ),
             patch('builtins.print') as print_mock,
         ):
@@ -279,7 +269,12 @@ class ChatContractTests(unittest.TestCase):
         chat = self._build_chat(renderer)
         chat._ipc = Mock()
         chat._ipc.read_event.side_effect = [
-            InitEvent(onion='abc123'),
+            InitEvent(
+                negotiated_version=IPC_PROTOCOL_VERSION,
+                daemon_current_version=IPC_PROTOCOL_VERSION,
+                daemon_min_supported=IPC_PROTOCOL_MIN_SUPPORTED,
+                onion='abc123',
+            ),
             ChatStartupStateEvent(
                 active=['alice'],
                 pending=[
@@ -315,7 +310,7 @@ class ChatContractTests(unittest.TestCase):
         self.assertEqual(chat._session.get_peer_onion('carol'), 'c' * 56)
         renderer.print_message.assert_not_called()
 
-    def test_prefilled_startup_session_auth_reuses_password_once(self) -> None:
+    def test_startup_session_auth_provider_reuses_password_once(self) -> None:
         """
         Verifies that chat bootstrap reuses one autostart session-auth password.
 
@@ -328,14 +323,14 @@ class ChatContractTests(unittest.TestCase):
 
         renderer = Mock()
         with (
-            patch('metor.ui.chat.engine.Renderer', return_value=renderer),
-            patch('metor.ui.chat.engine.IpcClient'),
-            patch('metor.ui.chat.engine.EventHandler'),
-            patch('metor.ui.chat.engine.CommandDispatcher'),
+            patch('metor.ui.terminal.chat.engine.Renderer', return_value=renderer),
+            patch('metor.ui.terminal.chat.engine.IpcClient'),
+            patch('metor.ui.terminal.chat.engine.EventHandler'),
+            patch('metor.ui.terminal.chat.engine.CommandDispatcher'),
         ):
             chat = Chat(
-                cast(ProfileManager, _DummyProfileManager()),
-                prefilled_session_auth_password='session-secret',
+                _bootstrap_result(),
+                startup_session_auth_provider=lambda: 'session-secret',
             )
 
         chat._ipc = Mock()
@@ -348,17 +343,30 @@ class ChatContractTests(unittest.TestCase):
                 },
             ),
             create_event(EventType.SESSION_AUTHENTICATED),
-            InitEvent(onion='abc123'),
+            InitEvent(
+                negotiated_version=IPC_PROTOCOL_VERSION,
+                daemon_current_version=IPC_PROTOCOL_VERSION,
+                daemon_min_supported=IPC_PROTOCOL_MIN_SUPPORTED,
+                onion='abc123',
+            ),
         ]
 
         with (
             patch(
-                'metor.ui.chat.engine.build_session_auth_proof',
+                'metor.ui.terminal.chat.engine.build_session_auth_proof',
                 return_value='proof',
             ) as build_proof_mock,
-            patch('metor.ui.chat.engine.prompt_session_auth_proof') as prompt_mock,
+            patch(
+                'metor.ui.terminal.chat.engine.prompt_session_auth_proof'
+            ) as prompt_mock,
         ):
-            result = chat._request_prechat_event(InitCommand(), InitEvent)
+            result = chat._request_prechat_event(
+                InitCommand(
+                    current_version=IPC_PROTOCOL_VERSION,
+                    min_supported=IPC_PROTOCOL_MIN_SUPPORTED,
+                ),
+                InitEvent,
+            )
 
         self.assertIsNotNone(result)
         build_proof_mock.assert_called_once_with(
@@ -432,7 +440,7 @@ class ChatContractTests(unittest.TestCase):
         chat._send_chat_message('hello during retunnel')
 
         sent_cmd = chat._ipc.send_command.call_args.args[0]
-        self.assertIsInstance(sent_cmd, MsgCommand)
+        self.assertIsInstance(sent_cmd, SendMessageCommand)
         self.assertEqual(
             sent_cmd.msg_id, renderer.print_message.call_args.kwargs['msg_id']
         )
@@ -485,7 +493,7 @@ class ChatContractTests(unittest.TestCase):
         chat._send_chat_message('hello during reconnect grace')
 
         sent_cmd = chat._ipc.send_command.call_args.args[0]
-        self.assertIsInstance(sent_cmd, MsgCommand)
+        self.assertIsInstance(sent_cmd, SendMessageCommand)
         self.assertEqual(
             sent_cmd.msg_id, renderer.print_message.call_args.kwargs['msg_id']
         )
@@ -634,7 +642,8 @@ class ChatContractTests(unittest.TestCase):
         )
 
         sent_cmd = ipc.send_command.call_args.args[0]
-        self.assertIsInstance(sent_cmd, SendDropCommand)
+        self.assertIsInstance(sent_cmd, SendMessageCommand)
+        self.assertIs(sent_cmd.delivery, Delivery.DROP)
         renderer.apply_fallback_to_drop.assert_called_once_with(['msg-1'])
         self.assertEqual(session.get_transport_state('alice'), ChatTransportState.DROP)
 
@@ -949,7 +958,8 @@ class ChatContractTests(unittest.TestCase):
         chat._send_chat_message('hello after peer disconnect')
 
         sent_cmd = ipc.send_command.call_args.args[0]
-        self.assertIsInstance(sent_cmd, SendDropCommand)
+        self.assertIsInstance(sent_cmd, SendMessageCommand)
+        self.assertIs(sent_cmd.delivery, Delivery.DROP)
         self.assertTrue(renderer.print_message.call_args.kwargs['is_drop'])
         self.assertTrue(renderer.print_message.call_args.kwargs['is_pending'])
 
@@ -1027,7 +1037,8 @@ class ChatContractTests(unittest.TestCase):
             ChatTransportState.DROP,
         )
         sent_cmd = ipc.send_command.call_args.args[0]
-        self.assertIsInstance(sent_cmd, SendDropCommand)
+        self.assertIsInstance(sent_cmd, SendMessageCommand)
+        self.assertIs(sent_cmd.delivery, Delivery.DROP)
         renderer.apply_fallback_to_drop.assert_called_once_with(['msg-1'])
 
     def test_rename_during_reconnect_preserves_focus_and_updates_alias_lists(
@@ -1192,15 +1203,16 @@ class LivePushContentTests(unittest.TestCase):
         """
         handler = self._make_handler(focused_alias='alice')
         handler._queue_buffered_notification = Mock()
-        event = RemoteMsgEvent(
+        event = MessageReceivedEvent(
             alias='bob',
             onion='bob.onion',
-            text='hi',
+            delivery=Delivery.LIVE,
+            content=TextContent('hi'),
             msg_id='m1',
         )
         self.assertTrue(handle_content_event(handler, event))
-        handler._renderer.print_message.assert_not_called()
-        handler._ipc.send_command.assert_not_called()
+        cast(Mock, handler._renderer).print_message.assert_not_called()
+        cast(Mock, handler._ipc).send_command.assert_not_called()
         handler._queue_buffered_notification.assert_called_once_with(
             'bob', 'bob.onion', 1
         )
@@ -1216,16 +1228,17 @@ class LivePushContentTests(unittest.TestCase):
             None
         """
         handler = self._make_handler(focused_alias='alice')
-        event = RemoteMsgEvent(
+        event = MessageReceivedEvent(
             alias='alice',
             onion='alice.onion',
-            text='hi',
+            delivery=Delivery.LIVE,
+            content=TextContent('hi'),
             msg_id='m1',
         )
         self.assertTrue(handle_content_event(handler, event))
-        handler._renderer.print_message.assert_called_once()
-        handler._ipc.send_command.assert_called_once()
-        command = handler._ipc.send_command.call_args.args[0]
+        cast(Mock, handler._renderer).print_message.assert_called_once()
+        cast(Mock, handler._ipc).send_command.assert_called_once()
+        command = cast(Mock, handler._ipc).send_command.call_args.args[0]
         self.assertIsInstance(command, MarkReadCommand)
         self.assertEqual(command.target, 'alice')
 
@@ -1241,28 +1254,29 @@ class LivePushContentTests(unittest.TestCase):
         """
         handler = self._make_handler(focused_alias='alice')
         handler._queue_buffered_notification = Mock()
-        push = RemoteMsgEvent(
+        push = MessageReceivedEvent(
             alias='bob',
             onion='bob.onion',
-            text='hi',
+            delivery=Delivery.LIVE,
+            content=TextContent('hi'),
             msg_id='m1',
         )
         handle_content_event(handler, push)
-        handler._renderer.reset_mock()
+        cast(Mock, handler._renderer).reset_mock()
         consume_response = UnreadMessagesEvent(
             alias='bob',
             onion='bob.onion',
             messages=[
                 UnreadMessageEntry(
                     timestamp='2026-01-01T00:00:00+00:00',
-                    payload='hi',
-                    is_drop=False,
+                    delivery=Delivery.LIVE,
+                    content=TextContent('hi'),
                     msg_id='m1',
                 )
             ],
         )
         self.assertTrue(handle_content_event(handler, consume_response))
-        handler._renderer.print_messages_batch.assert_called_once()
+        cast(Mock, handler._renderer).print_messages_batch.assert_called_once()
 
     def test_mark_read_response_does_not_rerender_pushed_live_message(self) -> None:
         """
@@ -1275,28 +1289,29 @@ class LivePushContentTests(unittest.TestCase):
             None
         """
         handler = self._make_handler(focused_alias='alice')
-        push = RemoteMsgEvent(
+        push = MessageReceivedEvent(
             alias='alice',
             onion='alice.onion',
-            text='hi',
+            delivery=Delivery.LIVE,
+            content=TextContent('hi'),
             msg_id='m1',
         )
         handle_content_event(handler, push)
-        handler._renderer.reset_mock()
+        cast(Mock, handler._renderer).reset_mock()
         consume_response = UnreadMessagesEvent(
             alias='alice',
             onion='alice.onion',
             messages=[
                 UnreadMessageEntry(
                     timestamp='2026-01-01T00:00:00+00:00',
-                    payload='hi',
-                    is_drop=False,
+                    delivery=Delivery.LIVE,
+                    content=TextContent('hi'),
                     msg_id='m1',
                 )
             ],
         )
         self.assertTrue(handle_content_event(handler, consume_response))
-        handler._renderer.print_messages_batch.assert_not_called()
+        cast(Mock, handler._renderer).print_messages_batch.assert_not_called()
 
     def test_mark_read_response_still_renders_fresh_messages(self) -> None:
         """
@@ -1309,28 +1324,29 @@ class LivePushContentTests(unittest.TestCase):
             None
         """
         handler = self._make_handler(focused_alias='alice')
-        push = RemoteMsgEvent(
+        push = MessageReceivedEvent(
             alias='alice',
             onion='alice.onion',
-            text='hi',
+            delivery=Delivery.LIVE,
+            content=TextContent('hi'),
             msg_id='m1',
         )
         handle_content_event(handler, push)
-        handler._renderer.reset_mock()
+        cast(Mock, handler._renderer).reset_mock()
         consume_response = UnreadMessagesEvent(
             alias='alice',
             onion='alice.onion',
             messages=[
                 UnreadMessageEntry(
                     timestamp='2026-01-01T00:00:00+00:00',
-                    payload='old',
-                    is_drop=True,
+                    delivery=Delivery.DROP,
+                    content=TextContent('old'),
                     msg_id='m2',
                 )
             ],
         )
         self.assertTrue(handle_content_event(handler, consume_response))
-        handler._renderer.print_messages_batch.assert_called_once()
+        cast(Mock, handler._renderer).print_messages_batch.assert_called_once()
 
     def test_chat_help_lists_slash_help_command(self) -> None:
         """
@@ -1348,6 +1364,25 @@ class LivePushContentTests(unittest.TestCase):
         rendered = Help.show_chat_help()
         self.assertIn('/help', rendered)
         self.assertIn('Show the chat command overview.', rendered)
+
+    def test_terminal_header_owns_chat_help_for_startup_and_redraw(self) -> None:
+        """R2-T31: chat help is inserted into Terminal's redraw-owned buffer."""
+        chat = object.__new__(Chat)
+        chat._renderer = Mock()
+        chat._session = Mock()
+        chat._session.my_onion = 'a' * 56
+        chat._session.header_active = []
+        chat._session.header_pending = []
+        panel = Help.show_chat_help()
+
+        chat._print_header(refresh_state=False, show_prompt=False)
+
+        rendered_messages = [
+            call.args[0] for call in chat._renderer.print_message.call_args_list
+        ]
+        self.assertIn(panel, rendered_messages)
+        self.assertIn('/help', panel)
+        self.assertNotIn('metor daemon', panel)
 
     @unittest.skipIf(
         os.name == 'nt',
@@ -1367,7 +1402,7 @@ class LivePushContentTests(unittest.TestCase):
         Returns:
             None
         """
-        from metor.ui.chat.renderer.input import InputHandler
+        from metor.ui.terminal.chat.renderer.input import InputHandler
 
         with open(os.devnull, 'r') as null_stdin:
             with patch('sys.stdin', null_stdin):

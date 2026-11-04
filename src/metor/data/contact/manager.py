@@ -3,7 +3,7 @@
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from metor.utils import clean_onion, decode_tor_v3_onion_public_key
+from metor.shared import clean_onion, decode_tor_v3_onion_public_key
 
 from metor.data.contact.models import (
     ContactAliasChange,
@@ -16,24 +16,29 @@ from metor.data.contact.models import (
 from metor.data.profile import ProfileManager
 from metor.data.sql import PeerRepository, SqlManager
 
+# Local Package Imports
+from .validation import is_valid_contact_alias
+
 
 class ContactManager:
     """Manages the database mapping between aliases and .onion addresses."""
 
-    def __init__(self, pm: ProfileManager, password: Optional[str] = None) -> None:
+    def __init__(
+        self, pm: ProfileManager, database_key: Optional[bytes] = None
+    ) -> None:
         """
         Initializes the contact manager connected to the centralized peer store.
 
         Args:
             pm (ProfileManager): The profile manager instance.
-            password (Optional[str]): The master password for SQLCipher encryption.
+            database_key (Optional[bytes]): PMK-derived SQLCipher key.
 
         Returns:
             None
         """
         self._pm: ProfileManager = pm
         self._db_path: Path = self._pm.paths.get_db_file()
-        self._sql: SqlManager = SqlManager(self._db_path, self._pm.config, password)
+        self._sql: SqlManager = SqlManager(self._db_path, self._pm.config, database_key)
         self._peers: PeerRepository = self._sql.peers
 
     def get_all_contacts(self) -> List[str]:
@@ -58,7 +63,7 @@ class ContactManager:
         Returns:
             bool: True if it is an unsaved discovered peer.
         """
-        peer = self._peers.get_by_alias(alias.strip().lower())
+        peer = self._peers.get_by_alias(alias.strip())
         return peer is not None and not peer.is_saved
 
     def add_contact(self, alias: str, onion: str) -> ContactOperationResult:
@@ -72,8 +77,13 @@ class ContactManager:
         Returns:
             ContactOperationResult: The typed address-book mutation result.
         """
-        alias = alias.strip().lower()
+        alias = alias.strip()
         onion = clean_onion(onion)
+
+        if not is_valid_contact_alias(alias):
+            return ContactOperationResult(
+                False, ContactOperationType.INVALID_ALIAS, {'target': alias}
+            )
 
         try:
             decode_tor_v3_onion_public_key(onion)
@@ -84,32 +94,32 @@ class ContactManager:
                 {'target': onion},
             )
 
-        alias_row = self._peers.get_by_alias(alias)
-        if alias_row is not None:
+        with self._peers.alias_mutation() as peers:
+            if peers.alias_is_taken(alias, except_onion=onion):
+                return ContactOperationResult(
+                    False,
+                    ContactOperationType.ALIAS_IN_USE,
+                    {'alias': alias, 'onion': onion},
+                )
+
+            onion_row = peers.get_by_onion(onion)
+            if onion_row is not None and onion_row.is_saved:
+                return ContactOperationResult(
+                    False,
+                    ContactOperationType.ONION_IN_USE,
+                    {'alias': onion_row.alias, 'onion': onion},
+                )
+
+            if onion_row is not None:
+                peers.update_alias_and_saved(onion, alias, True)
+            else:
+                peers.insert(onion, alias, True)
+
             return ContactOperationResult(
-                False,
-                ContactOperationType.ALIAS_IN_USE,
-                {'alias': alias, 'onion': onion},
+                True,
+                ContactOperationType.CONTACT_ADDED,
+                {'alias': alias, 'onion': onion, 'profile': self._pm.profile_name},
             )
-
-        onion_row = self._peers.get_by_onion(onion)
-        if onion_row is not None and onion_row.is_saved:
-            return ContactOperationResult(
-                False,
-                ContactOperationType.ONION_IN_USE,
-                {'alias': onion_row.alias, 'onion': onion},
-            )
-
-        if onion_row is not None:
-            self._peers.update_alias_and_saved(onion, alias, True)
-        else:
-            self._peers.insert(onion, alias, True)
-
-        return ContactOperationResult(
-            True,
-            ContactOperationType.CONTACT_ADDED,
-            {'alias': alias, 'onion': onion, 'profile': self._pm.profile_name},
-        )
 
     def promote_discovered_peer(self, alias: str) -> ContactOperationResult:
         """
@@ -121,33 +131,35 @@ class ContactManager:
         Returns:
             ContactOperationResult: The typed address-book mutation result.
         """
-        alias = alias.strip().lower()
-        peer = self._peers.get_by_alias(alias)
-        if peer is None:
-            return ContactOperationResult(
-                False,
-                ContactOperationType.DISCOVERED_PEER_NOT_FOUND,
-                {'target': alias},
-            )
+        alias = alias.strip()
+        with self._peers.alias_mutation() as peers:
+            peer = peers.get_by_alias(alias)
+            if peer is None:
+                return ContactOperationResult(
+                    False,
+                    ContactOperationType.DISCOVERED_PEER_NOT_FOUND,
+                    {'target': alias},
+                )
 
-        if peer.is_saved:
-            return ContactOperationResult(
-                False,
-                ContactOperationType.CONTACT_ALREADY_SAVED,
-                {'alias': alias, 'onion': peer.onion},
-            )
+            if peer.is_saved:
+                return ContactOperationResult(
+                    False,
+                    ContactOperationType.CONTACT_ALREADY_SAVED,
+                    {'alias': peer.alias, 'onion': peer.onion},
+                )
 
-        self._peers.update_saved(peer.onion, True)
-        return ContactOperationResult(
-            True,
-            ContactOperationType.PEER_PROMOTED,
-            {'alias': alias, 'onion': peer.onion},
-        )
+            peers.update_saved(peer.onion, True)
+            return ContactOperationResult(
+                True,
+                ContactOperationType.PEER_PROMOTED,
+                {'alias': peer.alias, 'onion': peer.onion},
+            )
 
     def rename_contact(
         self,
         old_alias: str,
         new_alias: str,
+        expected_onion: Optional[str] = None,
     ) -> ContactOperationResult:
         """
         Renames a contact or discovered peer dynamically.
@@ -155,52 +167,58 @@ class ContactManager:
         Args:
             old_alias (str): The current alias.
             new_alias (str): The desired new alias.
+            expected_onion: Optional immutable identity guard for stale alias controls.
 
         Returns:
             ContactOperationResult: The typed address-book mutation result.
         """
-        old_alias = old_alias.strip().lower()
-        new_alias = new_alias.strip().lower()
+        old_alias = old_alias.strip()
+        new_alias = new_alias.strip()
+        if not is_valid_contact_alias(new_alias):
+            return ContactOperationResult(
+                False, ContactOperationType.INVALID_ALIAS, {'target': new_alias}
+            )
+        with self._peers.alias_mutation() as peers:
+            peer = peers.get_by_alias(old_alias)
+            if peer is None or (
+                expected_onion is not None and peer.onion != clean_onion(expected_onion)
+            ):
+                return ContactOperationResult(
+                    False,
+                    ContactOperationType.ALIAS_NOT_FOUND,
+                    {'alias': old_alias},
+                )
 
-        if old_alias == new_alias:
-            return ContactOperationResult(False, ContactOperationType.ALIAS_SAME, {})
+            if peer.alias == new_alias:
+                return ContactOperationResult(
+                    False, ContactOperationType.ALIAS_SAME, {}
+                )
+            if peers.alias_is_taken(new_alias, except_onion=peer.onion):
+                return ContactOperationResult(
+                    False,
+                    ContactOperationType.ALIAS_IN_USE,
+                    {'alias': new_alias, 'onion': peer.onion},
+                )
 
-        onion = self.get_onion_by_alias(old_alias)
-        if self._peers.get_by_alias(new_alias) is not None:
-            params: Dict[str, str] = {'alias': new_alias}
+            onion = peer.onion
+            peers.update_alias(peer.onion, new_alias)
+            result_params: Dict[str, str] = {
+                'old_alias': peer.alias,
+                'new_alias': new_alias,
+            }
             if onion is not None:
-                params['onion'] = onion
+                result_params['onion'] = onion
             return ContactOperationResult(
-                False,
-                ContactOperationType.ALIAS_IN_USE,
-                params,
+                True,
+                ContactOperationType.ALIAS_RENAMED,
+                result_params,
             )
-
-        peer = self._peers.get_by_alias(old_alias)
-        if peer is None:
-            return ContactOperationResult(
-                False,
-                ContactOperationType.ALIAS_NOT_FOUND,
-                {'alias': old_alias},
-            )
-
-        self._peers.update_alias(peer.onion, new_alias)
-        result_params: Dict[str, str] = {
-            'old_alias': old_alias,
-            'new_alias': new_alias,
-        }
-        if onion is not None:
-            result_params['onion'] = onion
-        return ContactOperationResult(
-            True,
-            ContactOperationType.ALIAS_RENAMED,
-            result_params,
-        )
 
     def remove_contact(
         self,
         alias: str,
         active_onions: Optional[List[str]] = None,
+        expected_onion: Optional[str] = None,
     ) -> ContactOperationResult:
         """
         Removes a saved contact or anonymizes a renamed discovered peer.
@@ -208,76 +226,82 @@ class ContactManager:
         Args:
             alias (str): The contact to remove.
             active_onions (Optional[List[str]]): Currently connected onions functioning as a shield.
+            expected_onion: Optional immutable identity guard for stale alias controls.
 
         Returns:
             ContactOperationResult: The typed address-book mutation result.
         """
         active_onions = [clean_onion(onion) for onion in (active_onions or [])]
-        alias = alias.strip().lower()
-        peer = self._peers.get_by_alias(alias)
-        if peer is None:
-            return ContactOperationResult(
-                False,
-                ContactOperationType.PEER_NOT_FOUND,
-                {'target': alias},
-            )
+        alias = alias.strip()
+        with self._peers.alias_mutation() as peers:
+            peer = peers.get_by_alias(alias)
+            if peer is None or (
+                expected_onion is not None and peer.onion != clean_onion(expected_onion)
+            ):
+                return ContactOperationResult(
+                    False,
+                    ContactOperationType.PEER_NOT_FOUND,
+                    {'target': alias},
+                )
 
-        onion = peer.onion
-        was_saved: bool = peer.is_saved
-        has_refs: bool = onion in active_onions or self._peers.has_references(onion)
+            alias, onion = peer.alias, peer.onion
+            was_saved: bool = peer.is_saved
+            has_refs: bool = onion in active_onions or peers.has_references(onion)
 
-        if has_refs:
-            new_alias = self._generate_ram_alias(onion)
-            if new_alias == alias:
-                if was_saved:
-                    self._peers.update_saved(onion, False)
+            if has_refs:
+                new_alias = self._generate_ram_alias(onion, peers=peers)
+                if new_alias == alias:
+                    if was_saved:
+                        peers.update_saved(onion, False)
+                        return ContactOperationResult(
+                            True,
+                            ContactOperationType.CONTACT_DOWNGRADED,
+                            {'alias': alias, 'onion': onion},
+                        )
+
                     return ContactOperationResult(
-                        True,
-                        ContactOperationType.CONTACT_DOWNGRADED,
+                        False,
+                        ContactOperationType.PEER_CANT_DELETE_ACTIVE,
                         {'alias': alias, 'onion': onion},
                     )
 
-                return ContactOperationResult(
-                    False,
-                    ContactOperationType.PEER_CANT_DELETE_ACTIVE,
-                    {'alias': alias, 'onion': onion},
-                )
+                peers.update_alias_and_saved(onion, new_alias, False)
+                if was_saved:
+                    return ContactOperationResult(
+                        True,
+                        ContactOperationType.CONTACT_REMOVED_DOWNGRADED,
+                        {'alias': alias, 'new_alias': new_alias, 'onion': onion},
+                        renames=(
+                            ContactAliasChange(alias, new_alias, onion, was_saved),
+                        ),
+                    )
 
-            self._peers.update_alias_and_saved(onion, new_alias, False)
-            if was_saved:
                 return ContactOperationResult(
                     True,
-                    ContactOperationType.CONTACT_REMOVED_DOWNGRADED,
+                    ContactOperationType.PEER_ANONYMIZED,
                     {'alias': alias, 'new_alias': new_alias, 'onion': onion},
                     renames=(ContactAliasChange(alias, new_alias, onion, was_saved),),
                 )
 
-            return ContactOperationResult(
-                True,
-                ContactOperationType.PEER_ANONYMIZED,
-                {'alias': alias, 'new_alias': new_alias, 'onion': onion},
-                renames=(ContactAliasChange(alias, new_alias, onion, was_saved),),
-            )
+            peers.delete_by_onion(onion)
+            if was_saved:
+                return ContactOperationResult(
+                    True,
+                    ContactOperationType.CONTACT_REMOVED,
+                    {
+                        'alias': alias,
+                        'onion': onion,
+                        'profile': self._pm.profile_name,
+                    },
+                    removals=(ContactRemoval(alias, onion),),
+                )
 
-        self._peers.delete_by_alias(alias)
-        if was_saved:
             return ContactOperationResult(
                 True,
-                ContactOperationType.CONTACT_REMOVED,
-                {
-                    'alias': alias,
-                    'onion': onion,
-                    'profile': self._pm.profile_name,
-                },
+                ContactOperationType.PEER_REMOVED,
+                {'alias': alias, 'onion': onion},
                 removals=(ContactRemoval(alias, onion),),
             )
-
-        return ContactOperationResult(
-            True,
-            ContactOperationType.PEER_REMOVED,
-            {'alias': alias, 'onion': onion},
-            removals=(ContactRemoval(alias, onion),),
-        )
 
     def clear_contacts(
         self,
@@ -297,19 +321,17 @@ class ContactManager:
             renames: List[ContactAliasChange] = []
             removed: List[ContactRemoval] = []
 
-            for peer in self._peers.list_saved():
-                if peer.onion in active_onions or self._peers.has_references(
-                    peer.onion
-                ):
-                    new_alias = self._generate_ram_alias(peer.onion)
-                    self._peers.update_alias_and_saved(peer.onion, new_alias, False)
-                    renames.append(
-                        ContactAliasChange(peer.alias, new_alias, peer.onion, True)
-                    )
-                else:
-                    self._peers.delete_by_onion(peer.onion)
-                    removed.append(ContactRemoval(peer.alias, peer.onion))
-
+            with self._peers.alias_mutation() as peers:
+                for peer in peers.list_saved():
+                    if peer.onion in active_onions or peers.has_references(peer.onion):
+                        new_alias = self._generate_ram_alias(peer.onion, peers=peers)
+                        peers.update_alias_and_saved(peer.onion, new_alias, False)
+                        renames.append(
+                            ContactAliasChange(peer.alias, new_alias, peer.onion, True)
+                        )
+                    else:
+                        peers.delete_by_onion(peer.onion)
+                        removed.append(ContactRemoval(peer.alias, peer.onion))
             return ContactOperationResult(
                 True,
                 ContactOperationType.CONTACTS_CLEARED,
@@ -396,15 +418,18 @@ class ContactManager:
         if not alias:
             return None
 
-        peer = self._peers.get_by_alias(alias.strip().lower())
+        peer = self._peers.get_by_alias(alias.strip())
         return peer.onion if peer is not None else None
 
-    def _generate_ram_alias(self, onion: str) -> str:
+    def _generate_ram_alias(
+        self, onion: str, *, peers: Optional[PeerRepository] = None
+    ) -> str:
         """
         Generates a unique default alias from an onion string preventing collisions.
 
         Args:
             onion (str): The onion address.
+            peers: Existing atomic peer mutation, if present.
 
         Returns:
             str: The auto-generated alias.
@@ -412,9 +437,9 @@ class ContactManager:
         base_alias: str = clean_onion(onion)[:6]
         alias: str = base_alias
         counter: int = 1
+        repository = peers if peers is not None else self._peers
         while True:
-            peer = self._peers.get_by_alias(alias)
-            if peer is None or peer.onion == onion:
+            if not repository.alias_is_taken(alias, except_onion=onion):
                 return alias
             counter += 1
             alias = f'{base_alias}{counter}'
@@ -445,10 +470,6 @@ class ContactManager:
         Returns:
             Optional[str]: The mapped or newly created alias.
         """
-        alias = self.get_alias_by_onion(onion)
-        if alias:
-            return alias
-
         if not onion:
             return None
 
@@ -456,9 +477,13 @@ class ContactManager:
         if len(onion) != 56:
             return None
 
-        alias = self._generate_ram_alias(onion)
-        self._peers.insert(onion, alias, False)
-        return alias
+        with self._peers.alias_mutation() as peers:
+            peer = peers.get_by_onion(onion)
+            if peer is not None:
+                return peer.alias
+            alias = self._generate_ram_alias(onion, peers=peers)
+            peers.insert(onion, alias, False)
+            return alias
 
     def require_alias_by_onion(self, onion: str) -> str:
         """

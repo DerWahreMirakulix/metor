@@ -4,8 +4,12 @@ import os
 import subprocess
 import sys
 import time
-from typing import Callable, Optional
 
+from dataclasses import dataclass
+from pathlib import Path
+from typing import BinaryIO, Callable, Optional, TextIO
+
+from metor.core.api import EventType, JsonValue
 from metor.core.daemon.managed import (
     CorruptedDaemonStorageError,
     DaemonStatus,
@@ -16,20 +20,55 @@ from metor.core.daemon.managed import (
 )
 from metor.data import SettingKey, Settings
 from metor.data.profile import ProfileManager
-from metor.utils import Constants
+from metor.utils import Constants, FileLock
 
 
 RuntimeLogCallback = Callable[[str], None]
 _default_sql_log_callback: Optional[RuntimeLogCallback] = None
 _default_tor_log_callback: Optional[RuntimeLogCallback] = None
+MAX_STARTUP_SECRET_BYTES = 4096
+
+
+class DaemonProfileMissingError(ValueError):
+    """Raised when daemon startup targets a profile that does not exist."""
+
+
+class RemoteDaemonProfileError(ValueError):
+    """Raised when local daemon startup targets a remote-only profile."""
+
+
+@dataclass(frozen=True)
+class DaemonStartPreparation:
+    """Validated facts required by interactive and detached startup adapters."""
+
+    already_running: bool
+    encrypted: bool
+    session_auth_required: bool
+
+
+@dataclass
+class DaemonStartDiagnostics:
+    """Records bounded non-secret state for one detached startup attempt."""
+
+    phase: str = 'preflight'
+    child_pid: Optional[int] = None
+    return_code: Optional[int] = None
+    process: Optional[subprocess.Popen[bytes]] = None
+
 
 __all__ = [
     'CorruptedDaemonStorageError',
+    'DaemonProfileMissingError',
+    'DaemonStartDiagnostics',
+    'DaemonStartPreparation',
     'DaemonStatus',
     'InvalidDaemonPasswordError',
     'PlaintextLockedDaemonError',
+    'RemoteDaemonProfileError',
     'RuntimeStatusCallback',
     'configure_daemon_runtime_logging',
+    'read_startup_secret',
+    'prepare_managed_daemon_start',
     'run_managed_daemon',
     'start_managed_daemon_process',
 ]
@@ -59,6 +98,7 @@ def _build_daemon_launch_command(
     *,
     start_locked: bool,
     startup_session_auth_stdin: bool,
+    automatic_lifetime: bool = False,
 ) -> list[str]:
     """
     Builds the detached CLI command used to launch one managed daemon process.
@@ -67,38 +107,150 @@ def _build_daemon_launch_command(
         pm (ProfileManager): The active profile manager.
         start_locked (bool): Whether the daemon should expose IPC only until unlock.
         startup_session_auth_stdin (bool): Whether the child should read one startup-only session-auth password from stdin.
+        automatic_lifetime: Whether the daemon ends after its frontend leases.
 
     Returns:
         list[str]: The detached child-process argv.
     """
     command: list[str] = [
         sys.executable,
+        '-I',
         '-m',
-        'metor.daemon_main',
+        'metor',
         '-p',
         pm.profile_name,
+        'daemon',
+        '--non-interactive',
+        '--parent-start-lock-held',
     ]
+    if automatic_lifetime:
+        command.append('--frontend-managed')
     if start_locked:
         command.append('--locked')
     if startup_session_auth_stdin:
         command.append('--startup-session-auth-stdin')
-    command.append('daemon')
     return command
 
 
-def _build_daemon_start_timeout(pm: ProfileManager) -> float:
+def read_startup_secret(stream: TextIO) -> Optional[str]:
+    """Reads one bounded startup secret from the existing stdin pipe.
+
+    Args:
+        stream (TextIO): Existing child standard-input pipe.
+
+    Returns:
+        Optional[str]: One bounded secret, or None at clean end-of-file.
     """
-    Resolves the local wait window for daemon IPC readiness after background spawn.
+    line: str = stream.readline(MAX_STARTUP_SECRET_BYTES + 2)
+    if line == '':
+        return None
+    secret: str = line.rstrip('\r\n')
+    if len(secret.encode('utf-8')) > MAX_STARTUP_SECRET_BYTES:
+        raise ValueError('Startup session-auth secret is too long.')
+    if not secret:
+        return None
+    return secret
+
+
+def prepare_managed_daemon_start(
+    pm: ProfileManager,
+    *,
+    start_locked: bool,
+) -> DaemonStartPreparation:
+    """Validates one daemon start and returns its credential requirements.
+
+    Args:
+        pm (ProfileManager): Exact local profile selected for startup.
+        start_locked (bool): Whether startup must defer credential submission.
+
+    Returns:
+        DaemonStartPreparation: Validated launch and credential requirements.
+    """
+    if not pm.exists():
+        raise DaemonProfileMissingError(f"Profile '{pm.profile_name}' does not exist.")
+    Settings.validate_integrity()
+    pm.validate_integrity()
+    if pm.is_remote():
+        raise RemoteDaemonProfileError('Cannot start a daemon on a remote profile!')
+
+    already_running: bool = pm.is_daemon_running()
+    plaintext: bool = pm.uses_plaintext_storage()
+    if start_locked and plaintext:
+        raise PlaintextLockedDaemonError()
+    return DaemonStartPreparation(
+        already_running=already_running,
+        encrypted=pm.uses_encrypted_storage(),
+        session_auth_required=(
+            not start_locked
+            and plaintext
+            and pm.config.get_bool(SettingKey.REQUIRE_LOCAL_AUTH)
+        ),
+    )
+
+
+def _stop_failed_daemon_process(process: subprocess.Popen[bytes]) -> None:
+    """Best-effort bounded cleanup for a child whose startup did not complete.
+
+    Args:
+        process (subprocess.Popen[bytes]): Child whose startup failed.
+
+    Returns:
+        None
+    """
+    if process.poll() is not None:
+        return
+    if process.stdin is not None:
+        try:
+            process.stdin.close()
+        except OSError:
+            pass
+    try:
+        process.terminate()
+        process.wait(timeout=Constants.TOR_KILL_TIMEOUT_SEC)
+    except subprocess.TimeoutExpired:
+        try:
+            process.kill()
+            process.wait(timeout=Constants.TOR_KILL_TIMEOUT_SEC)
+        except (OSError, subprocess.SubprocessError):
+            return
+    except (OSError, subprocess.SubprocessError):
+        return
+
+
+def _build_daemon_start_timeout(pm: ProfileManager, *, start_locked: bool) -> float:
+    """
+    Covers profile setup and synchronous Tor startup before IPC publication.
 
     Args:
         pm (ProfileManager): The active profile manager.
+        start_locked (bool): Whether startup skips Tor and the protected runtime.
 
     Returns:
         float: The readiness timeout in seconds.
     """
     ipc_timeout: float = pm.config.get_float(SettingKey.IPC_TIMEOUT)
     tor_timeout: float = pm.config.get_float(SettingKey.TOR_TIMEOUT)
-    return max(ipc_timeout, tor_timeout + Constants.LISTENER_READY_TIMEOUT)
+    baseline: float = max(ipc_timeout, tor_timeout + Constants.LISTENER_READY_TIMEOUT)
+    if start_locked:
+        return baseline
+
+    retries: int = pm.config.get_int(SettingKey.MAX_TOR_RETRIES)
+    tor_start_budget: float = (
+        retries * Constants.UNIX_TOR_TIMEOUT
+        + max(0, retries - 1) * Constants.TOR_BOOTSTRAP_RETRY_SEC
+        + Constants.TOR_HOSTNAME_POLL_RETRIES * Constants.TOR_BOOTSTRAP_POLL_SEC
+        + Constants.TOR_PROXY_READY_ATTEMPTS
+        * (Constants.TOR_PROXY_READY_TIMEOUT_SEC + Constants.TOR_PROXY_READY_RETRY_SEC)
+        + Constants.LISTENER_READY_TIMEOUT
+    )
+    # The configured IPC wait also covers profile validation and the password KDF.
+    return max(
+        baseline,
+        min(
+            Constants.MAX_DERIVED_DAEMON_START_WAIT_SEC,
+            ipc_timeout + tor_start_budget,
+        ),
+    )
 
 
 def start_managed_daemon_process(
@@ -106,6 +258,55 @@ def start_managed_daemon_process(
     *,
     start_locked: bool = False,
     session_auth_password: Optional[str] = None,
+    diagnostics: Optional[DaemonStartDiagnostics] = None,
+    diagnostic_output: Optional[BinaryIO] = None,
+    automatic_lifetime: bool = False,
+) -> bool:
+    """Start a daemon under the local profile's cross-process launch lock.
+
+    Args:
+        pm: Exact profile to start.
+        start_locked: Whether encrypted startup remains IPC-only until unlock.
+        session_auth_password: One-use plaintext session authentication secret.
+        diagnostics: Optional non-secret child identity and phase recorder.
+        diagnostic_output: Optional caller-owned diagnostic stream.
+        automatic_lifetime: Whether frontends jointly manage this instance.
+    Returns:
+        bool: Whether the daemon published its IPC endpoint.
+    """
+
+    def start() -> bool:
+        """Run readiness while profile startup and lifecycle mutation are excluded.
+
+        Args:
+            None
+        Returns:
+            bool: Child IPC readiness.
+        """
+        return _start_managed_daemon_process_unlocked(
+            pm,
+            start_locked=start_locked,
+            session_auth_password=session_auth_password,
+            diagnostics=diagnostics,
+            diagnostic_output=diagnostic_output,
+            automatic_lifetime=automatic_lifetime,
+        )
+
+    with FileLock(
+        pm.paths.get_daemon_start_lock_file(),
+        timeout=_build_daemon_start_timeout(pm, start_locked=start_locked),
+    ):
+        return start()
+
+
+def _start_managed_daemon_process_unlocked(
+    pm: ProfileManager,
+    *,
+    start_locked: bool = False,
+    session_auth_password: Optional[str] = None,
+    diagnostics: Optional[DaemonStartDiagnostics] = None,
+    diagnostic_output: Optional[BinaryIO] = None,
+    automatic_lifetime: bool = False,
 ) -> bool:
     """
     Spawns one detached managed-daemon CLI process and waits for IPC readiness.
@@ -114,6 +315,9 @@ def start_managed_daemon_process(
         pm (ProfileManager): The active profile manager.
         start_locked (bool): Whether the daemon should start in locked IPC-only mode.
         session_auth_password (Optional[str]): Optional startup-only plaintext session-auth password delivered over stdin.
+        diagnostics (Optional[DaemonStartDiagnostics]): Optional non-secret launch-state recorder.
+        diagnostic_output (Optional[BinaryIO]): Optional caller-owned binary stream for bounded acceptance diagnostics.
+        automatic_lifetime: Whether frontends jointly manage this instance.
 
     Raises:
         PlaintextLockedDaemonError: If locked startup is requested for a plaintext profile.
@@ -122,74 +326,141 @@ def start_managed_daemon_process(
     Returns:
         bool: True when the managed daemon published a reachable IPC port.
     """
-    Settings.validate_integrity()
-    pm.validate_integrity()
-
-    if pm.is_remote():
+    preparation: DaemonStartPreparation = prepare_managed_daemon_start(
+        pm,
+        start_locked=start_locked,
+    )
+    if diagnostics is not None:
+        diagnostics.phase = 'prepared'
+    if preparation.already_running:
+        return True
+    if preparation.session_auth_required and session_auth_password is None:
         return False
 
-    if start_locked and pm.uses_plaintext_storage():
-        raise PlaintextLockedDaemonError()
-
-    if pm.is_daemon_running():
-        return True
+    secret_payload: Optional[bytes] = None
+    if session_auth_password is not None:
+        if '\n' in session_auth_password or '\r' in session_auth_password:
+            raise ValueError('Startup session-auth secret must be one line.')
+        encoded_secret: bytes = session_auth_password.encode('utf-8')
+        if len(encoded_secret) > MAX_STARTUP_SECRET_BYTES:
+            raise ValueError('Startup session-auth secret is too long.')
+        secret_payload = encoded_secret + b'\n'
 
     command: list[str] = _build_daemon_launch_command(
         pm,
         start_locked=start_locked,
-        startup_session_auth_stdin=session_auth_password is not None,
+        startup_session_auth_stdin=secret_payload is not None,
+        automatic_lifetime=automatic_lifetime,
     )
     stdin_target: int = (
-        subprocess.PIPE if session_auth_password is not None else subprocess.DEVNULL
+        subprocess.PIPE if secret_payload is not None else subprocess.DEVNULL
     )
 
     with open(os.devnull, 'wb') as sink:
+        output_target: BinaryIO = diagnostic_output or sink
         if os.name == 'nt':
-            detached_flags: int = getattr(subprocess, 'DETACHED_PROCESS', 0)
-            new_group_flags: int = getattr(
-                subprocess,
-                'CREATE_NEW_PROCESS_GROUP',
-                0,
-            )
+            executable = Path(sys.executable)
+            child_env = None
+            base = getattr(sys, '_base_executable', None)
+            if (
+                sys.prefix != sys.base_prefix
+                and base
+                and executable.name.lower() in ('python.exe', 'pythonw.exe')
+                and Path(base) != executable
+            ):
+                # CPython's venv redirector would own the Popen handle while
+                # a second PID publishes IPC. Select the same venv in-process,
+                # as multiprocessing does, so ownership stays with the daemon.
+                child_env = {**os.environ, '__PYVENV_LAUNCHER__': sys.executable}
+                executable = Path(base)
             process: subprocess.Popen[bytes] = subprocess.Popen(
                 command,
+                executable=executable,
+                env=child_env,
                 stdin=stdin_target,
-                stdout=sink,
-                stderr=sink,
-                creationflags=detached_flags | new_group_flags,
+                stdout=output_target,
+                stderr=output_target,
+                creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0),
             )
         else:
             process = subprocess.Popen(
                 command,
                 stdin=stdin_target,
-                stdout=sink,
-                stderr=sink,
+                stdout=output_target,
+                stderr=output_target,
                 start_new_session=True,
             )
+    if diagnostics is not None:
+        diagnostics.phase = 'spawned'
+        diagnostics.child_pid = process.pid
+        diagnostics.process = process
 
-    if session_auth_password is not None:
+    if secret_payload is not None:
         if process.stdin is None:
+            _stop_failed_daemon_process(process)
+            if diagnostics is not None:
+                diagnostics.phase = 'stdin-unavailable'
+                diagnostics.return_code = process.poll()
             return False
+        secret_write_failed: bool = False
         try:
-            process.stdin.write(f'{session_auth_password}\n'.encode('utf-8'))
+            written = process.stdin.write(secret_payload)
+            if written is None or written != len(secret_payload):
+                raise OSError('Incomplete startup secret write.')
             process.stdin.flush()
         except OSError:
-            return False
+            secret_write_failed = True
+        except BaseException:
+            _stop_failed_daemon_process(process)
+            raise
         finally:
-            process.stdin.close()
-
-    deadline: float = time.monotonic() + _build_daemon_start_timeout(pm)
-    while time.monotonic() < deadline:
-        daemon_port: Optional[int] = pm.get_daemon_port()
-        if daemon_port is not None:
-            return True
-
-        if process.poll() is not None:
+            try:
+                process.stdin.close()
+            except OSError:
+                secret_write_failed = True
+        if secret_write_failed:
+            _stop_failed_daemon_process(process)
+            if diagnostics is not None:
+                diagnostics.phase = 'stdin-delivery-failed'
+                diagnostics.return_code = process.poll()
             return False
+        if diagnostics is not None:
+            diagnostics.phase = 'secret-delivered'
 
-        time.sleep(Constants.LOCK_SLEEP_SEC)
+    try:
+        if diagnostics is not None:
+            diagnostics.phase = 'waiting-for-ipc'
+        deadline: float = time.monotonic() + _build_daemon_start_timeout(
+            pm, start_locked=start_locked
+        )
+        while time.monotonic() < deadline:
+            daemon_port: Optional[int] = pm.get_daemon_port()
+            if daemon_port is not None:
+                if diagnostics is not None:
+                    diagnostics.phase = 'ready'
+                return True
 
-    return pm.get_daemon_port() is not None
+            return_code: Optional[int] = process.poll()
+            if return_code is not None:
+                if diagnostics is not None:
+                    diagnostics.phase = 'child-exited-before-ipc'
+                    diagnostics.return_code = return_code
+                return False
+
+            time.sleep(Constants.LOCK_SLEEP_SEC)
+
+        ready: bool = pm.get_daemon_port() is not None
+    except BaseException:
+        _stop_failed_daemon_process(process)
+        raise
+    if not ready:
+        _stop_failed_daemon_process(process)
+        if diagnostics is not None:
+            diagnostics.phase = 'ipc-readiness-timeout'
+            diagnostics.return_code = process.poll()
+    elif diagnostics is not None:
+        diagnostics.phase = 'ready'
+    return ready
 
 
 def run_managed_daemon(
@@ -200,6 +471,9 @@ def run_managed_daemon(
     status_callback: Optional[RuntimeStatusCallback] = None,
     sql_log_callback: Optional[RuntimeLogCallback] = None,
     tor_log_callback: Optional[RuntimeLogCallback] = None,
+    preparation: Optional[DaemonStartPreparation] = None,
+    automatic_lifetime: bool = False,
+    parent_start_lock_held: bool = False,
 ) -> None:
     """
     Builds and runs one managed daemon instance for the active profile.
@@ -212,6 +486,8 @@ def run_managed_daemon(
         status_callback (Optional[RuntimeStatusCallback]): Optional status callback.
         sql_log_callback (Optional[RuntimeLogCallback]): Optional SQL diagnostics callback.
         tor_log_callback (Optional[RuntimeLogCallback]): Optional Tor diagnostics callback.
+        preparation: Optional already validated daemon startup facts.
+        automatic_lifetime: Whether frontends jointly manage this instance.
 
     Raises:
         InvalidDaemonPasswordError: If the supplied password cannot unlock storage.
@@ -221,16 +497,76 @@ def run_managed_daemon(
     Returns:
         None
     """
-    Settings.validate_integrity()
-    pm.validate_integrity()
-
-    daemon = create_managed_daemon(
-        pm,
-        password=password,
-        session_auth_password=session_auth_password,
-        start_locked=start_locked,
-        status_callback=status_callback,
-        sql_log_callback=sql_log_callback or _default_sql_log_callback,
-        tor_log_callback=tor_log_callback or _default_tor_log_callback,
+    start_lock = (
+        None
+        if parent_start_lock_held
+        else FileLock(
+            pm.paths.get_daemon_start_lock_file(),
+            timeout=_build_daemon_start_timeout(pm, start_locked=start_locked),
+        )
     )
-    daemon.run()
+    instance_lock = FileLock(
+        pm.paths.get_daemon_instance_lock_file(),
+        timeout=_build_daemon_start_timeout(pm, start_locked=start_locked),
+    )
+    lock_held = False
+    if start_lock is not None:
+        start_lock.__enter__()
+        lock_held = True
+    instance_held = False
+
+    def report_ready(
+        code: EventType | DaemonStatus, params: dict[str, JsonValue]
+    ) -> None:
+        """Release the cross-process start lock only after IPC publication."""
+        nonlocal lock_held
+        if code in (DaemonStatus.ACTIVE, DaemonStatus.LOCKED_MODE) and lock_held:
+            assert start_lock is not None
+            start_lock.__exit__(None, None, None)
+            lock_held = False
+        if status_callback is not None:
+            status_callback(code, params)
+
+    try:
+        # A removal or rename may have won the lifecycle gate after CLI preflight.
+        # Never let the profile-local instance lock recreate that vanished root.
+        if not pm.exists():
+            raise DaemonProfileMissingError(
+                f"Profile '{pm.profile_name}' does not exist."
+            )
+        if pm.is_daemon_running():
+            return
+        try:
+            instance_lock.__enter__()
+            instance_held = True
+        except TimeoutError:
+            if pm.is_daemon_running():
+                return
+            raise
+        prepared: DaemonStartPreparation = prepare_managed_daemon_start(
+            pm, start_locked=start_locked
+        )
+        if prepared.already_running:
+            return
+        if prepared.encrypted and not start_locked and password is None:
+            raise InvalidDaemonPasswordError()
+        if prepared.session_auth_required and session_auth_password is None:
+            raise ValueError('Session-auth password is required for daemon startup.')
+
+        daemon = create_managed_daemon(
+            pm,
+            password=password,
+            session_auth_password=session_auth_password,
+            start_locked=start_locked,
+            automatic_lifetime=automatic_lifetime,
+            status_callback=report_ready,
+            sql_log_callback=sql_log_callback or _default_sql_log_callback,
+            tor_log_callback=tor_log_callback or _default_tor_log_callback,
+        )
+        daemon.run()
+    finally:
+        if instance_held:
+            instance_lock.__exit__(None, None, None)
+        if lock_held:
+            assert start_lock is not None
+            start_lock.__exit__(None, None, None)

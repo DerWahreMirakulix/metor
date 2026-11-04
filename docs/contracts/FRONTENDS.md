@@ -1,0 +1,438 @@
+# Frontend integration contract
+
+This document defines the shared Core and SDK boundary for every Metor
+frontend. The official frontends are `terminal` / `metor-ui-terminal` and
+`gui` / `metor-ui-gui`. The [GUI contract](GUI.md) covers GUI behavior, device configuration,
+presentation, and startup.
+
+This contract does not define screens, navigation, playback, hardware drivers,
+or other presentation behavior. Terminal, GUI, and third-party clients consume
+the same typed boundary without gaining storage, transport, key, or host-process
+ownership.
+
+## Connecting a Python client
+
+Install `metor-sdk` in the client environment. The daemon runs separately; its
+Tor, SQLCipher and GUI dependencies are unnecessary on a machine that only runs
+this client. Connect to the loopback port of the running daemon, or to the local
+end of an authenticated SSH tunnel. The port belongs to the selected profile.
+
+```python
+from metor.client import AuthProvider, MetorClient
+
+
+def negotiated_protocol(port: int, credentials: AuthProvider) -> int:
+    client = MetorClient(port, auth_provider=credentials)
+    try:
+        session = client.bootstrap()
+        if session is None:
+            raise RuntimeError("Daemon unavailable or authentication incomplete")
+        return session.negotiated_version
+    finally:
+        client.disconnect()
+```
+
+Your application supplies the `AuthProvider`: ask for secrets through its own
+masked input, derive the session response with `build_session_auth_proof` from
+`metor.client`, and return `None` when the user cancels. Do not log passwords,
+proofs or the full initialization event. After bootstrap, use `request` with a
+typed command and its expected reply; broadcasts and request replies share the
+same socket. A native GUI should perform the blocking handshake off its render
+thread. See the [wire reference](../generated/API.md) for command and event pairs.
+
+## Ownership boundary
+
+- Core owns profiles, identity, contacts, message identity, DROP/LIVE semantics,
+  persistence, ACK/dedupe, transport recovery, fallback, authentication,
+  resource limits, and typed runtime facts.
+- `metor.client` owns IPC connection/bootstrap orchestration and the safe profile
+  transition coordinator.
+- A frontend owns navigation, focus projection, drafts, scroll and playback
+  cursors, wording, notification presentation, and bounded volatile copies of
+  already-consumed LIVE content.
+- The platform layer owns capture/playback, echo cancellation, display, hardware
+  input, LEDs, haptics, camera, and physical power control.
+
+Frontend-independent, typed local platform contracts live in
+`metor.client.platform`. Hardware status, ordered input observations and
+capability-specific controlling actions are separate interfaces, not a shared
+notification hook. See the canonical
+[platform ownership decision](../ARCHITECTURE.md#frontend-independent-typed-platform-contracts).
+These local contracts neither add IPC authority nor make an untested adapter a
+supported appliance.
+
+`PlatformBindings` is the frontend-neutral composition object. It keeps status,
+input, ordinary device settings and each actuator as separate ports and carries
+one bounded registered ID. An appliance owner installs and selects a trusted
+`metor.platform_adapters` provider, or may inject bindings through
+`FrontendLaunchContext`; the GUI accepts
+physical mode only when strict configuration names the same ID. Simulator mode
+rejects all physical bindings. Optional actuator ports remain unavailable unless
+their matching configuration tables explicitly select that ID. Before normal
+power the GUI rejects remote ownership and another running local profile. A
+shutdown port must atomically enforce its own local privilege and exclusive
+host/runtime ownership and is called only after the GUI has confirmed the
+appropriate Core lifecycle boundary.
+
+Opening a view is never a network action. A frontend must issue explicit typed
+commands for connect, reconnect, fallback, accept, reject, disconnect, consume,
+or dismiss behavior.
+
+## Startup selection and invocation lifetime
+
+The catalog, persisted default, requested `-p` name, initial selection and
+authenticated active profile are separate facts. `FrontendHost.initial_selection()`
+returns one bounded `FrontendSelection` with a typed kind (resolved, choice
+required, empty, requested missing, or unavailable), requested name, resolved
+name and valid stored default. The host resolves the initial choice once;
+`requested` is `None` for an implicit stored-default or singleton resolution,
+even when `profile` is resolved. A directly supplied `ProfileManager` counts as
+an explicit request. Catalog I/O failures during implicit resolution yield the
+unavailable state for frontend presentation; they are never interpreted as an
+empty catalog. The GUI reads at most one bounded catalog page to distinguish a
+missing requested name from an empty catalog, then uses paginated reads for the
+picker. Paginated `profile_catalog()` reads never repair a default. The general CLI loads
+any installed frontend and passes the host without profile-dependent UI-name
+exceptions. GUI renders create/picker/error routes; Terminal currently prints
+selection guidance and exits before chat/daemon startup. A future Terminal picker
+can call the existing host `select_profile()` and then `bootstrap()`; no picker
+is currently provided. Host selection revalidates each chosen profile at the
+activation boundary. First successful creation sets the default. A stale
+or missing default resolves to the sole valid profile; several profiles without
+a valid default require a choice. Rename follows the default; permitted removal
+reconciles it to the sole survivor or clears it when none remain. Empty storage
+has no synthetic selected profile. Syntactically valid missing or damaged names
+are reported safely, and explicit `-p` never changes the persisted default.
+
+The common `FrontendHost` evaluates ASK, ALWAYS and NEVER only when the selected
+profile is activated. GUI interactions are graphical even when launched from a
+shell; Terminal prompts before chat. A remote profile never triggers local daemon
+spawn. `--start-daemon` permits a missing local daemon to start;
+`--no-start-daemon` prevents only that start. Neither flag changes the mode of
+an existing instance. Without a flag, `never`, `ask`, and `always` decide whether
+a missing daemon may start.
+
+| Existing daemon                                                | Start decision                                  | Concrete instance behavior                                                                                    |
+| -------------------------------------------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| Independently started with `metor daemon` or a service manager | Any frontend flag or policy                     | The daemon remains independent; frontend exit never shuts it down.                                            |
+| Automatically started by a frontend                            | Any later frontend flag or policy               | Long-lived local GUI and Terminal frontends share its lifetime. It exits after the last frontend releases it. |
+| Missing local daemon                                           | `--start-daemon`, `always`, or confirmed `ask`  | One automatic instance is started and shared.                                                                 |
+| Missing local daemon                                           | `--no-start-daemon`, `never`, or declined `ask` | No daemon is started; the frontend receives an unavailable result.                                            |
+| Remote profile                                                 | Any flag or policy                              | No local communication daemon is started.                                                                     |
+
+The local Base host reads an owner-only, per-instance bearer token for an
+automatic daemon and passes it to the selected frontend through its bootstrap
+result. The frontend registers a random instance ID before `Init`, profile
+unlock, or content authentication. This permission controls only daemon lifetime; it does
+not grant access to keys, content, or profile actions. Anonymous connections
+without that token cannot keep an automatic daemon alive. Re-registration on a
+new socket replaces only the same frontend ID. A stale socket or previous
+daemon token cannot release or join a newer instance. Frontends skip the lease
+command when a current independent daemon has no token. The first stable
+frontend launch contract and IPC contract both use generation 1. Short-lived
+CLI queries do not register as frontends.
+
+The first frontend has 60 seconds after IPC readiness to register. An
+unexpected disconnect reserves that frontend's slot for 45 seconds so a
+reconnect can replace its socket. An explicit final release starts a 2-second
+join grace. One daemon-owned monotonic clock drives these deadlines; a suspend
+gap extends outstanding deadlines before expiry is evaluated. Extensions
+within one idle period share a 24-hour maximum, so repeated polling stalls
+cannot retain a dead frontend indefinitely. At expiry the
+daemon fences new joins atomically and performs the normal bounded runtime,
+Tor, IPC, and endpoint cleanup. A joining client receives a typed `stopping`
+result and can retry bootstrap against the next instance. At most 64 frontend
+IDs are retained, including disconnected clients in their grace window;
+additional IDs receive a typed `full` result. All detached and
+manual start paths share the profile start lock through IPC publication. The
+managed process also holds a stable external instance lock from initialization
+through cleanup, so concurrent starts and offline profile mutations cannot open
+two writers for the same profile. The full gate order is documented in the
+[architecture guide](../ARCHITECTURE.md#profile-process-and-mutation-exclusion).
+
+Cold encrypted unlock has a bounded initialization wait distinct from the
+ordinary IPC request timeout. Frontends report failed bootstrap or lost
+connection without claiming that an unauthenticated session succeeded. `--debug`
+adds safe diagnostic locations; secrets and payloads are excluded.
+
+## Attach and race-safe recovery
+
+After the normal IPC version/auth handshake, a rich frontend must:
+
+1. send `RegisterLiveConsumerCommand` so it receives typed asynchronous events;
+2. request `GetRuntimeSnapshotCommand`;
+3. install `RuntimeSnapshotEvent` as its projection baseline;
+4. apply newer projection invalidations within the same epoch. Always process
+   command outcomes, media and lifecycle control events independently of that
+   projection revision filter.
+
+Every IPC event carries the daemon-authored monotonic `revision`. The aggregate
+snapshot contains profile and Onion identity, saved/discovered contacts,
+content-free DROP conversation summaries, LIVE contexts, pending incoming
+requests, unread and pending counts, disconnect reason, and settings revision.
+It deliberately excludes message content and UI-only state.
+
+The daemon also assigns a fresh opaque `epoch` at each start. Clients reset
+revision ordering when the epoch changes. `RuntimeSnapshotUnavailableEvent`
+means the bounded stable-read retries were exhausted and the request is safe to
+retry; it is never an unchecked snapshot. The client IPC layer owns the only
+socket reader, registers a request before writing it, demultiplexes correlated
+responses, and queues unsolicited events within bounded capacity. Overload fails
+the connection with one reliable loss notification requiring reattachment/resync;
+it never silently claims complete delivery. A shared
+`RuntimeStateChangedEvent` has no request correlation and invalidates only its
+content-free scope for every authorized client. Connection and pending-request
+events are absolute keyed upserts, not counters to apply more than once.
+Snapshot composition validates both the publication revision and an atomic,
+content-free state token. Reconnect grace and scheduled reconnect are explicit
+states, distinct from terminal disconnect with a machine-readable actor and
+reason.
+
+## Messaging contract
+
+The stable logical shape is `MessageContent + Delivery + msg_id`.
+
+- `Delivery.LIVE` is ephemeral interactive content. It may use crash-safe Core
+  spool state while unseen or awaiting ACK, but it is not chat history.
+- `Delivery.DROP` is durable mailbox content retained until explicit deletion or
+  configured shredding.
+- `TextContent` and `VoiceContent` are members of the same typed content union.
+- One Voice press is one logical message with one immutable `msg_id`; bounded
+  chunks and resume offsets are transport/application details beneath it.
+- ACK confirms durable peer acceptance, not that a person read the content.
+  Remote read receipts are optional and default to disabled.
+
+`FallbackCommand(target, msg_ids=None)` preserves Terminal's peer-wide fallback.
+Supplying IDs selects an atomic subset of pending outbound LIVE messages. A
+successful fallback preserves each `msg_id`, removes it from LIVE replay, and
+promotes the complete content to DROP. A malformed, cross-peer, non-pending, or
+already-promoted selection is rejected without partial changes.
+
+`MarkReadCommand(target, delivery=None)` preserves the combined Terminal consume
+flow. Rich clients should supply `DROP` or `LIVE` when projections are separate.
+Only selected unread text rows are consumed; Voice has its own handoff contract.
+`ClearMessagesCommand` and direction-qualified `DeleteMessageCommand` affect
+only eligible local DROP presentation/payload state; an omitted direction is
+rejected when inbound and outbound receipts share the same peer and `msg_id`.
+Their default preserves pending DROP delivery and all LIVE state. With Core's
+`drop_pending_cancellation` capability, clients may explicitly set
+`cancel_pending=True` to atomically delete the selected local history and stop
+queued DROP retries. Exact durable emission claims fence cached text and Voice
+frames against cancellation. An already transmitted copy may still arrive;
+this operation never recalls remote content. Content-free receipts preserve an
+unknown remote outcome after the spool is removed. Saved contacts, LIVE state,
+and unsent Voice drafts remain intact.
+`DismissLiveContextCommand` is the explicit cleanup action for a disconnected,
+non-recovering LIVE context. Its default rejects outbound pending LIVE content
+that still needs reconnect or fallback. With Core's `live_pending_cancellation`
+capability, an explicit `cancel_pending=True` discards that peer's published
+pending LIVE messages and removes the ended context under the existing operation
+and transport barriers. It preserves DROP content and unpublished Voice drafts.
+Content-free receipts still fence late acknowledgments and duplicate delivery;
+discard cannot recall an already transmitted copy. Active, recovering, or calling
+contexts remain ineligible. Existing Terminal and CLI callers retain the default
+rejection behavior.
+
+### Voice capture and transfer
+
+A capturing frontend uses `BeginVoiceCommand`, exact-offset bounded
+`AppendVoiceChunkCommand` calls, then `FinalizeVoiceCommand` for the same
+`msg_id`. Core stages both DROP and LIVE locally and binds target, delivery,
+producer and original LIVE context. Finalize creates an unpublished draft;
+explicit `CommitVoiceCommand` publishes, and `CancelVoiceCommand` discards.
+Hardware PTT release invokes finalize, never commit. Manual review playback is
+optional; complete listening is not a send prerequisite. No draft bytes leave
+the daemon before commit, including capture limits or interrupted producers.
+
+If LIVE ends during recording/review, the staged draft cannot automatically
+publish or enter message fallback. A qualified LIVE commit requires an eligible
+original chat context; reconnect and explicit commit as DROP are distinct user
+actions. Published LIVE Voice retains its defined recovery and fallback rules.
+Incoming messages and previews play only after a manual user action.
+
+Retained Voice is read through bounded `GetVoiceChunkCommand` /
+`VoiceDataEvent` ranges. A safe handoff is followed by explicit
+`ReleaseVoiceCommand`; reads never consume implicitly.
+
+A newly attached frontend discovers retained identities with
+`ListRetainedMessagesCommand`. Its opaque cursor is filter-bound and tied to a
+stable inventory version; stale pages fail explicitly. Entries expose only safe
+identity/status/media metadata, never bytes, text, previews, or storage paths.
+Enumeration and range reads preserve unread/payload state. Terminal displays
+finalized inbound Voice as metadata-only text, including a notice that playback
+is unsupported there. Its bounded retained-inventory lookup does not retrieve
+chunks, issue `ReleaseVoiceCommand`, or mark Voice read; `/inbox` retains its
+text-consumption behavior. Playback and Voice release require a capable client
+and an explicit handoff. Pending outbound IDs
+also provide the public discovery path for selective fallback after restart.
+If a bounded metadata page fails or becomes stale, Terminal reports that its
+Voice inbox display is incomplete and offers another explicit `/inbox` action.
+
+Terminal is a text-oriented client with no local capture/playback or duplex
+audio adapter in its independent package. It displays telephone signaling
+through typed Call events and `/calls`, separately from live-chat invitations.
+`/connect`, `/accept`, `/reject` and `/end` control LIVE chat only; chat
+acceptance never grants call audio. `/call reject <call-id>` refuses a telephone
+request. `/call cancel`, `/call hangup`, `/call mute` and `/call unmute` address
+one exact call ID and remain subject to Core client ownership. Neither call
+notices nor status queries change focus or message delivery mode. `/call start`
+and `/call accept` explicitly report that a capable frontend is required before
+issuing any Core command. Terminal never creates a silent accepted call, reads
+call media, auto-plays messages, or consumes Voice on the user's behalf.
+
+Peer wire generation 1 defines separate `/ack` (LIVE text), `/drop_ack` (DROP text),
+`/voice_ack <id> <offset>` (resumable progress), and
+`/voice_commit_ack <id>` (terminal Voice durability). A sender retains every
+Voice segment until the terminal commit ACK. Duplicate matching chunks and END
+frames are idempotent; conflicting bytes or offsets are malformed peer frames.
+
+Core applies finite profile-aware retained Voice and shared pending-LIVE count /
+byte budgets transactionally across text and Voice. It emits typed pressure and
+hard-limit events, finalizes the current turn at the hard boundary, stores each
+chunk as one bounded append-only encrypted object, never rewrites older chunks,
+and rejects new turns while capacity is full.
+Explicitly published pending LIVE Voice follows the same reconnect and selective/automatic
+fallback rules as text. Once a frontend consumes unseen LIVE Voice, Core may
+shred its owned spool; the frontend may retain only a bounded volatile copy.
+
+## Telephone calls
+
+`StartCallCommand`, `AcceptCallCommand`, reject/cancel/hangup/mute commands,
+`GetCallsCommand`, and bounded send/read audio commands form a separate public
+Core contract. The SDK exposes the same operations to every capable frontend.
+Call IDs and exact-client ownership remain Core authority; viewing an incoming
+request, accepting LIVE or navigating a chat cannot authorize conversation
+media. A call-only transport creates no independent chat permission. Reject or
+hangup on a transport reused from LIVE leaves the chat alive. Ending the chat revokes message authority while the accepted call retains the connection. Call-only sockets
+are released after termination.
+
+Both directions transfer ephemeral PCM in bounded recent-frame queues. There
+is no message spool, audio recording, retained inventory or CALL→DROP fallback.
+Transport loss and system suspend end calls; renewed consent starts a new call,
+so stale audio cannot become a reconnect backlog. Ringing/transport timeouts,
+concurrent-call rejection and client/profile teardown are explicit outcomes.
+Local adapters must establish compatible selected headset endpoints before
+starting or accepting media. Speaker echo cancellation is not claimed.
+
+IPC and peer communication require generation 1. A disjoint advertised range
+fails negotiation before either side can accept a command or a peer payload.
+
+## Restricted client/session lock
+
+`LockCommand` remains the hard profile-runtime lock: it releases database, Tor,
+blob, identity, and key runtime state. It is not a device screen lock.
+
+`RestrictClientCommand` restricts only its requesting authenticated IPC session.
+Its immutable lock-cycle policy selects unlock method, notification privacy,
+`accept_calls_locked` (default false), and independent `device_lifecycle`
+authority. It grants no continued LIVE media, message playback/capture or
+locked LIVE invitation acceptance. Unknown protected preference fields are
+rejected without changing stored values or granting call permission.
+
+Restricted clients cannot read contacts/history/messages/settings or create
+Voice recordings. Existing exact-owner accepted calls may continue their
+bounded audio and mute/hangup controls. New calls require an explicit exact-ID
+acceptance and the separate protected policy; a later call from the same peer
+cannot inherit permission. Calls use privacy-filtered metadata; Off suppresses
+unsolicited requests and identity, while own active terminal state remains
+observable for cleanup. Other authenticated clients remain independent.
+
+Quick unlock stores a salted Argon2id-derived verifier, never a PIN or profile
+encryption key. The verifier is itself a usable authentication credential and
+must stay inside the profile protection boundary with owner-only permissions.
+Proofs are bound to one-use challenges. Password retries share the daemon-wide
+failure counter and cooldown, including after reconnect or PIN escalation. A
+Forgot PIN action requests a fresh password-salt challenge without fabricating
+a failed attempt. After three failed PIN
+attempts in one lock cycle, only the profile-password proof can reauthorize that
+session; successful password recovery restores PIN eligibility for the next
+normal cycle. PIN never starts a cold or hard-locked profile.
+
+## Profile lifecycle and power
+
+`ProfileRuntimeCoordinator` is the client-layer profile-switch boundary. A
+frontend may inspect the current snapshot and must finalize platform-owned
+capture before switching. The coordinator then requests
+`PrepareProfileExitCommand`, disconnects the old client, attaches/authenticates
+the selected profile, and returns a fresh aggregate snapshot. Normal preparation
+releases only the requesting frontend's voice producer and focus. The subsequent
+disconnect removes its session authority and frontend lifetime registration.
+Other clients and the daemon's profile runtime continue. Explicit `LockCommand`
+still hard-locks the shared runtime and broadcasts the result to connected
+clients. An authorized profile purge immediately broadcasts a redacted
+initiation to other connected frontends so they cover local state. Its operation
+ID and detailed destruction milestones remain limited to the initiator.
+
+Generation 1 defines both the per-client profile exit and the independent call
+contract. Clients and daemons validate the agreed generation before dispatch.
+
+Self-destruct is a separate emergency path. Hard-locked anonymous clients cannot
+invoke it. A restricted client can act only when it was authenticated before
+restriction and its immutable lock-cycle policy grants `device_lifecycle`. The
+`daemon.self_destruct_requires_unlock` deployment setting defaults to `true`;
+setting it to `false` does not create anonymous, cold-boot, physical-input, or
+new-session authority. No GUI preference can bypass this rule.
+
+Once Core accepts one operation ID, destruction preempts Voice finalization,
+fallback, reconnect, outbox delivery, and ordinary notification work. Core
+reports runtime release separately from persistent key-protection destruction.
+`SelfDestructSafeEvent` is the combined selected-profile milestone for an
+encrypted profile; cleanup follows and reports completion or a typed phase
+failure. Initiation, keyslot removal, runtime release, EOF, timeout, or process
+exit alone is not the combined guarantee. A platform shutdown still requires a
+validated local binding and exclusive runtime coordination, and must follow only
+the documented safe-plus-terminal result or bounded post-safe cleanup-loss rule.
+
+Purge affects only the selected profile. Ordinary exit never purges: it converts
+eligible pending LIVE text and Voice to DROP when fallback is enabled, otherwise
+retains them as pending LIVE, does not wait for delivery, and does not recreate
+an automatic reconnect intent when the profile is next opened.
+
+## Public capability and failure map
+
+| Requirement family                 | Public owner and contract                                                                                         | Failure and reconciliation rule                                                                                                                          | Primary evidence                          |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
+| Launch and graphical bootstrap     | `FrontendHost`, `FrontendInteractions`, `FrontendLaunchContext`                                                   | Typed cancellation, unavailable, missing-profile and retryable bootstrap outcomes; no terminal prompt or local substitute for a remote endpoint          | GAT-31–42                                 |
+| Runtime projection                 | `register_live_consumer`, `RuntimeSnapshotEvent`, `RuntimeStateChangedEvent`                                      | Epoch/revision ordering applies only to projected state; media, request results and lifecycle reports are reconciled by their own identities             | GAT-42–45                                 |
+| Text admission and unknown outcome | `SendMessageCommand(local_acceptance=True)`, `TextAcceptedEvent`, `TextRejectedEvent`, `GetMessageOutcomeCommand` | Definite quota rejection is immediate; a lost result is checked by the original ID and never resent blindly                                              | GAT-01, GAT-30, GAT-46                    |
+| Retained Voice                     | `ListRetainedMessagesCommand`, `GetVoiceChunkCommand`, `ReleaseVoiceCommand`                                      | Inventory/read are bounded and non-consuming; only exact eligible finalized handoff releases content                                                     | GAT-43, GAT-52–55                         |
+| Voice producer ownership           | owner-qualified register/release and Begin/Append/Finalize/Commit/Cancel                                          | Both-mode draft cleanup is owner-scoped; committed winners survive uncertainty; interrupted recordings retain protected unsent bytes                     | GAT-10–12, GAT-49–55                      |
+| Protected GUI metadata             | `GetGuiPreferencesCommand`, `SetGuiPreferencesCommand`                                                            | Profile-instance scoped, bounded and revision-checked; stale writes reject rather than merge over another client                                         | GAT-61, GAT-67                            |
+| Qualified LIVE controls            | Connect/Accept/Reject, qualified Disconnect/Retunnel, Fallback, Dismiss                                           | Attempt/context qualifiers reject stale controls; fallback preserves IDs; ended dismissal rejects pending work unless explicit cancellation is requested | GAT-03–06, GAT-13–16, GAT-57, GAT-60      |
+| Restriction and unlock             | Restrict/Reauthorize/ConfigureQuickUnlock and restricted-state projection                                         | Immediate cover; exact lock-cycle policy and separately owned Call grants; failed restriction never becomes client-side success                          | GAT-20–23, GAT-56–60                      |
+| Contacts and activity              | typed contact validation/mutations and paged history metadata                                                     | Stable identity guards prevent stale rename/remove; pages are bounded and body-free; uncertain mutation uses readback                                    | GAT-02, GAT-03, GAT-17–19, GAT-67, GAT-68 |
+| Profile lifecycle                  | `ProfileRuntimeCoordinator`, optional public host profile management                                              | Phase-aware result distinguishes source-active from source-prepared failure; target credentials and callbacks never cross profiles                       | GAT-24–26, GAT-62–64                      |
+| Device lifecycle and purge         | frontend-neutral platform ports plus correlated SelfDestruct reports                                              | Physical input grants no authority; unconfirmed preparation or destruction never reaches shutdown                                                        | GAT-27, GAT-40, GAT-65, GAT-66            |
+
+All additions within the current IPC generation remain strict, registered, and
+defaulted where required. Generated wire shapes and capability names are
+authoritative; this table records ownership and failure semantics, not a second
+schema.
+
+## Privacy and compatibility rules
+
+- Never derive behavior by parsing human-readable strings; branch on typed event
+  classes/enums and structured fields.
+- Never place message text, Voice bytes, or previews in runtime snapshots,
+  notification metadata, or detached notification sinks.
+- Respect `daemon.ephemeral_messages`, history retention settings, and
+  `daemon.send_read_receipts` in every frontend.
+- Treat Onion identity and `msg_id` as stable keys; aliases are mutable labels.
+- Render unknown `MessageContent` variants safely. Terminal intentionally uses a
+  placeholder for Voice and remains a text-oriented client.
+
+Terminal text input and command recall are bounded volatile state. An active
+draft admits at most 65,536 characters; exceeding that limit discards the whole
+draft and ignores the remaining input until explicit Enter, with an error
+instead of a truncated send. Recall retains at most 100 entries and 65,536
+characters in total. Neither buffer is persisted as command history.
+
+Editing and wrapping use terminal-cell widths and Unicode grapheme boundaries,
+including combining marks and joined emoji. A long draft has a cursor-centered
+viewport bounded by the available rows; resize updates both height and width.
+Windows input handles UTF-16 surrogate pairs and polls dimensions because the
+console does not provide POSIX `SIGWINCH`. Slash commands accept quoted aliases
+with spaces, so labels created by another frontend remain usable in Terminal.
+
+The complete wire shapes and defaults are generated in
+[API.md](../generated/API.md) and [SETTINGS.md](../generated/SETTINGS.md).

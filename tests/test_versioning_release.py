@@ -1,0 +1,1248 @@
+"""Tests for central versioning, database generations, and release gates."""
+
+# ruff: noqa: E402
+
+import json
+import re
+import subprocess
+import sys
+import unittest
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from typing import cast
+from unittest.mock import patch
+from zipfile import ZipFile
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from metor.data.profile.config import Config
+from metor.client import MetorClient
+from metor.core.api import InitCommand, InitEvent
+from metor.core.daemon.managed.network.handshake import HandshakeProtocol
+from metor.data.sql import (
+    LegacyDatabaseSchemaError,
+    NewerDatabaseSchemaError,
+    SqlManager,
+)
+from metor.data.sql.backends import SqlCipherCursor, sqlite3
+from metor.data.sql.migrations import SchemaMigration, migrate_schema
+from metor.data.sql.schema import initialize_database
+from metor.utils.constants import Constants
+from metor.versioning import (
+    APP_VERSION,
+    BLOB_FORMAT_MIN_SUPPORTED,
+    BLOB_FORMAT_VERSION,
+    DB_SCHEMA_VERSION,
+    IPC_PROTOCOL_VERSION,
+    IPC_PROTOCOL_MIN_SUPPORTED,
+    KEYSLOT_FORMAT_MIN_SUPPORTED,
+    KEYSLOT_FORMAT_VERSION,
+    PEER_PROTOCOL_MIN_SUPPORTED,
+    PEER_PROTOCOL_VERSION,
+    negotiate_protocol_generation,
+    validate_version_registry,
+)
+from scripts.release.compatibility import compare_manifests, ipc_breaking_changes
+from scripts.release.manifest import write_compatibility_manifest
+from scripts.release.paths import (
+    API_DOC_PATH,
+    API_SCHEMA_PATH,
+    COMPATIBILITY_MANIFEST_PATH,
+    GENERATED_DOCS_DIR,
+    SETTINGS_DOC_PATH,
+)
+from scripts.release.refs import push_atomic_release_refs
+from scripts.release.semver import calculate_next_version, select_latest_stable_release
+from scripts import validate_generated_docs
+from scripts.validate_wheel_versions import validate_wheel_versions
+
+
+class _FakeConfig:
+    """Minimal SQL configuration for isolated schema tests."""
+
+    def get_bool(self, _key: object) -> bool:
+        """Disables optional SQL logging and runtime mirrors.
+
+        Args:
+            _key (object): Ignored setting identifier.
+
+        Returns:
+            bool: Always false.
+        """
+        return False
+
+
+def _ipc_schema(
+    properties: dict[str, dict[str, object]],
+    required: list[str] | None = None,
+) -> dict[str, object]:
+    """Builds a compact generated-schema fixture with one command.
+
+    Args:
+        properties (dict[str, dict[str, object]]): DTO property schemas.
+        required (list[str] | None): Required DTO fields.
+
+    Returns:
+        dict[str, object]: Generated-schema shaped fixture.
+    """
+    dto: dict[str, object] = {
+        'type': 'object',
+        'properties': properties,
+    }
+    if required:
+        dto['required'] = required
+    return {
+        'definitions': {'ExampleCommand': dto},
+        'commands': {'example': {'$ref': '#/definitions/ExampleCommand'}},
+        'events': {},
+    }
+
+
+def _release_manifest(ipc_schema: dict[str, object]) -> dict[str, object]:
+    """Builds a compact compatibility-manifest fixture.
+
+    Args:
+        ipc_schema (dict[str, object]): Generated IPC schema fixture.
+
+    Returns:
+        dict[str, object]: Candidate compatibility manifest.
+    """
+    return {
+        'frontend_launch': {'current': 1, 'minimum_supported': 1},
+        'platform_adapter': {'current': 1, 'minimum_supported': 1},
+        'ipc': {
+            'current': IPC_PROTOCOL_VERSION,
+            'minimum_supported': IPC_PROTOCOL_MIN_SUPPORTED,
+            'schema': ipc_schema,
+        },
+        'peer': {
+            'current': 1,
+            'minimum_supported': 1,
+            'contract': {'frame': 'v1'},
+        },
+        'database': {
+            'current': 1,
+            'minimum_supported': 1,
+            'schema': {'tables': []},
+        },
+        'keyslot': {
+            'current': 1,
+            'minimum_supported': 1,
+            'contract': {'fields': ['version']},
+        },
+        'blob': {
+            'current': 1,
+            'minimum_supported': 1,
+            'contract': {'framing': 'v1'},
+        },
+        'derivation': {
+            'profile_key': {'current': 1, 'context': 'v1'},
+            'blob_object': {'current': 1, 'context': 'v1'},
+        },
+    }
+
+
+class VersionRegistryTests(unittest.TestCase):
+    """Covers the authoritative registry and packaging source of truth."""
+
+    def test_registry_invariants_and_storage_reader_claims_are_valid(self) -> None:
+        """Verifies central versions and exact storage-reader support.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        self.assertEqual(validate_version_registry(), ())
+        self.assertEqual(KEYSLOT_FORMAT_MIN_SUPPORTED, KEYSLOT_FORMAT_VERSION)
+        self.assertEqual(BLOB_FORMAT_MIN_SUPPORTED, BLOB_FORMAT_VERSION)
+
+    def test_generic_constants_no_longer_owns_protocol_versions(self) -> None:
+        """Verifies protocol versions left the generic Constants class.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        self.assertFalse(hasattr(Constants, 'IPC_PROTOCOL_VERSION'))
+        self.assertFalse(hasattr(Constants, 'PEER_PROTOCOL_VERSION'))
+
+    def test_all_distributions_use_dynamic_central_application_version(self) -> None:
+        """Verifies package metadata has no second static application version.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        root: Path = Path(__file__).resolve().parents[1]
+        for relative_path in (
+            'pyproject.toml',
+            'packaging/sdk/pyproject.toml',
+            'packaging/terminal/pyproject.toml',
+            'packaging/gui/pyproject.toml',
+        ):
+            content: str = (root / relative_path).read_text(encoding='utf-8')
+            self.assertRegex(content, r'dynamic = \[[^\]]*"version"[^\]]*\]')
+            self.assertIn('metor.versioning.APP_VERSION', content)
+            self.assertNotIn(f'version = "{APP_VERSION}"', content)
+
+    def test_compatibility_assignments_exist_only_in_registry(self) -> None:
+        """Verifies production modules do not duplicate authoritative values.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        root: Path = Path(__file__).resolve().parents[1]
+        names: tuple[str, ...] = (
+            'IPC_PROTOCOL_VERSION',
+            'PEER_PROTOCOL_VERSION',
+            'DB_SCHEMA_VERSION',
+            'KEYSLOT_FORMAT_VERSION',
+            'BLOB_FORMAT_VERSION',
+        )
+        for name in names:
+            owners: list[Path] = []
+            pattern = re.compile(rf'^{name}: int = \d+$', re.MULTILINE)
+            for source_path in (root / 'src').rglob('*.py'):
+                if pattern.search(source_path.read_text(encoding='utf-8')):
+                    owners.append(source_path.relative_to(root))
+            self.assertEqual(owners, [Path('src/metor/versioning/__init__.py')])
+
+
+class ProtocolNegotiationTests(unittest.TestCase):
+    """Covers inclusive IPC and peer protocol-range intersection."""
+
+    def test_only_stable_generation_negotiates(self) -> None:
+        """Generation one is the entire supported range for IPC and peer transport."""
+        for current, minimum in (
+            (IPC_PROTOCOL_VERSION, IPC_PROTOCOL_MIN_SUPPORTED),
+            (PEER_PROTOCOL_VERSION, PEER_PROTOCOL_MIN_SUPPORTED),
+        ):
+            self.assertEqual((current, minimum), (1, 1))
+            self.assertEqual(negotiate_protocol_generation(current, minimum, 1, 1), 1)
+            for unsupported in (0, 2, 3, 4):
+                self.assertIsNone(
+                    negotiate_protocol_generation(
+                        current, minimum, unsupported, unsupported
+                    )
+                )
+
+    def test_range_matrix_selects_highest_overlap_or_rejects(self) -> None:
+        """Verifies current/minimum semantics in both negotiation directions.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        cases: tuple[tuple[int, int, int, int, int | None], ...] = (
+            (2, 2, 2, 2, 2),
+            (3, 2, 2, 2, 2),
+            (3, 2, 3, 2, 3),
+            (3, 3, 2, 2, None),
+            (1, 1, 2, 2, None),
+        )
+        for (
+            local_current,
+            local_minimum,
+            remote_current,
+            remote_minimum,
+            expected,
+        ) in cases:
+            with self.subTest(
+                local=(local_minimum, local_current),
+                remote=(remote_minimum, remote_current),
+            ):
+                self.assertEqual(
+                    negotiate_protocol_generation(
+                        local_current,
+                        local_minimum,
+                        remote_current,
+                        remote_minimum,
+                    ),
+                    expected,
+                )
+                self.assertEqual(
+                    negotiate_protocol_generation(
+                        remote_current,
+                        remote_minimum,
+                        local_current,
+                        local_minimum,
+                    ),
+                    expected,
+                )
+
+    def test_ipc_dtos_advertise_ranges_and_client_validates_selection(self) -> None:
+        """Verifies explicit IPC range fields and negotiated-generation checks.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        command = InitCommand(
+            current_version=IPC_PROTOCOL_VERSION,
+            min_supported=IPC_PROTOCOL_MIN_SUPPORTED,
+        )
+        self.assertEqual(command.current_version, IPC_PROTOCOL_VERSION)
+        self.assertEqual(command.min_supported, IPC_PROTOCOL_MIN_SUPPORTED)
+        accepted = InitEvent(
+            negotiated_version=IPC_PROTOCOL_VERSION,
+            daemon_current_version=IPC_PROTOCOL_VERSION,
+            daemon_min_supported=IPC_PROTOCOL_MIN_SUPPORTED,
+        )
+        future_only = InitEvent(
+            negotiated_version=IPC_PROTOCOL_VERSION + 1,
+            daemon_current_version=IPC_PROTOCOL_VERSION + 1,
+            daemon_min_supported=IPC_PROTOCOL_VERSION + 1,
+        )
+        self.assertTrue(MetorClient._accepts_init_event(accepted))
+        self.assertFalse(MetorClient._accepts_init_event(future_only))
+
+    def test_peer_frames_exchange_both_range_endpoints(self) -> None:
+        """Verifies challenge and auth frames advertise the complete peer range.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        challenge: str = 'ab' * Constants.TOR_HANDSHAKE_CHALLENGE_BYTES
+        self.assertEqual(
+            HandshakeProtocol.parse_challenge_line(
+                HandshakeProtocol.build_challenge_line(challenge)
+            ),
+            (challenge, PEER_PROTOCOL_VERSION, PEER_PROTOCOL_MIN_SUPPORTED),
+        )
+        auth = HandshakeProtocol.parse_auth_line(
+            HandshakeProtocol.build_auth_line('peer', 'signature')
+        )
+        self.assertEqual(
+            auth,
+            (
+                'peer',
+                'signature',
+                PEER_PROTOCOL_VERSION,
+                PEER_PROTOCOL_MIN_SUPPORTED,
+                False,
+                False,
+            ),
+        )
+
+
+class DatabaseVersionTests(unittest.TestCase):
+    """Covers schema initialization, validation, and migration atomicity."""
+
+    def _manager(self, path: Path, key: bytes | None = None) -> SqlManager:
+        """Creates an isolated SQL manager.
+
+        Args:
+            path (Path): Database file path.
+            key (bytes | None): Optional SQLCipher key.
+
+        Returns:
+            SqlManager: Initialized manager.
+        """
+        return SqlManager(path, cast(Config, _FakeConfig()), key)
+
+    def test_new_plaintext_and_encrypted_databases_receive_current_version(
+        self,
+    ) -> None:
+        """Verifies both database modes persist the central schema generation.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with TemporaryDirectory() as temp_dir:
+            root: Path = Path(temp_dir)
+            for name, key in (('plain.db', None), ('encrypted.db', b'k' * 32)):
+                path: Path = root / name
+                manager: SqlManager = self._manager(path, key)
+                self.assertEqual(
+                    manager.fetchall('PRAGMA user_version'), [(DB_SCHEMA_VERSION,)]
+                )
+                SqlManager.close_connection(path)
+
+    def test_current_opens_and_future_or_populated_zero_reject(self) -> None:
+        """Verifies deterministic handling of current, future, and legacy schemas.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with TemporaryDirectory() as temp_dir:
+            root: Path = Path(temp_dir)
+            current_path: Path = root / 'current.db'
+            self._manager(current_path)
+            SqlManager.close_connection(current_path)
+            self._manager(current_path)
+            SqlManager.close_connection(current_path)
+
+            future_path: Path = root / 'future.db'
+            connection = sqlite3.connect(str(future_path))
+            with connection:
+                initialize_database(connection)
+                connection.execute(f'PRAGMA user_version = {DB_SCHEMA_VERSION + 1}')
+            connection.close()
+            with self.assertRaises(NewerDatabaseSchemaError):
+                self._manager(future_path)
+
+            zero_path: Path = root / 'zero.db'
+            connection = sqlite3.connect(str(zero_path))
+            with connection:
+                connection.execute('CREATE TABLE old_development_data (value TEXT)')
+            connection.close()
+            with self.assertRaises(LegacyDatabaseSchemaError):
+                self._manager(zero_path)
+
+    def test_failed_initialization_does_not_stamp_schema_version(self) -> None:
+        """Verifies a failed schema transaction remains at version zero.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        connection = sqlite3.connect(':memory:')
+
+        def fail_creation(cursor: SqlCipherCursor) -> None:
+            """Raises during the patched schema creation step.
+
+            Args:
+                cursor (SqlCipherCursor): Active test cursor.
+
+            Returns:
+                None
+            """
+            cursor.execute('CREATE TABLE should_rollback (value TEXT)')
+            raise RuntimeError('schema failure')
+
+        with (
+            patch('metor.data.sql.schema.create_core_schema', fail_creation),
+            self.assertRaises(RuntimeError),
+        ):
+            initialize_database(connection)
+        self.assertEqual(connection.execute('PRAGMA user_version').fetchone(), (0,))
+        self.assertIsNone(
+            connection.execute(
+                "SELECT name FROM sqlite_master WHERE name = 'should_rollback'"
+            ).fetchone()
+        )
+        connection.close()
+
+    def test_failed_migration_rolls_back_ddl_and_version(self) -> None:
+        """Verifies a failed migration cannot falsely advance user_version.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        connection = sqlite3.connect(':memory:')
+        connection.execute('PRAGMA user_version = 1')
+        connection.commit()
+
+        def fail_step(cursor: SqlCipherCursor) -> None:
+            """Mutates and then fails inside one migration transaction.
+
+            Args:
+                cursor (SqlCipherCursor): Active migration cursor.
+
+            Returns:
+                None
+            """
+            cursor.execute('CREATE TABLE should_rollback (value TEXT)')
+            raise RuntimeError('migration failure')
+
+        step = SchemaMigration(1, 2, fail_step)
+        with (
+            patch('metor.data.sql.migrations.migration_path', return_value=(step,)),
+            self.assertRaises(ValueError),
+        ):
+            migrate_schema(connection, 1)
+        self.assertEqual(connection.execute('PRAGMA user_version').fetchone(), (1,))
+        self.assertIsNone(
+            connection.execute(
+                "SELECT name FROM sqlite_master WHERE name = 'should_rollback'"
+            ).fetchone()
+        )
+        connection.close()
+
+    def test_successful_migration_advances_version_after_step(self) -> None:
+        """Verifies a completed migration durably advances user_version.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        connection = sqlite3.connect(':memory:')
+        connection.execute('PRAGMA user_version = 1')
+        connection.commit()
+
+        def apply_step(cursor: SqlCipherCursor) -> None:
+            """Creates the schema object for a successful migration.
+
+            Args:
+                cursor (SqlCipherCursor): Active migration cursor.
+
+            Returns:
+                None
+            """
+            cursor.execute('CREATE TABLE migrated (value TEXT)')
+
+        step = SchemaMigration(1, 2, apply_step)
+        with patch('metor.data.sql.migrations.migration_path', return_value=(step,)):
+            migrate_schema(connection, 1)
+        self.assertEqual(connection.execute('PRAGMA user_version').fetchone(), (2,))
+        self.assertEqual(
+            connection.execute(
+                "SELECT name FROM sqlite_master WHERE name = 'migrated'"
+            ).fetchone(),
+            ('migrated',),
+        )
+        connection.close()
+
+
+class ReleaseCompatibilityTests(unittest.TestCase):
+    """Covers SemVer and release compatibility decisions."""
+
+    def test_semver_release_calculation(self) -> None:
+        """Verifies first, patch, minor, and major release calculations.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        self.assertEqual(calculate_next_version('1.0.0', 'current'), '1.0.0')
+        for bump in ('patch', 'minor', 'major'):
+            with (
+                self.subTest(bump=bump),
+                self.assertRaisesRegex(ValueError, 'first release'),
+            ):
+                calculate_next_version('1.0.0', bump)
+        self.assertEqual(
+            calculate_next_version('1.0.0', 'patch', previous_release='v1.0.0'),
+            '1.0.1',
+        )
+        self.assertEqual(
+            calculate_next_version('1.0.0', 'minor', previous_release='v1.0.0'),
+            '1.1.0',
+        )
+        self.assertEqual(
+            calculate_next_version('1.0.0', 'major', previous_release='v1.0.0'),
+            '2.0.0',
+        )
+
+    def test_current_release_rejects_existing_stable_baseline(self) -> None:
+        """Verifies current is reserved for the first public release.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with self.assertRaises(ValueError):
+            calculate_next_version('0.2.0', 'current', previous_release='v0.2.0')
+
+    def test_release_calculation_rejects_prerelease_versions(self) -> None:
+        """Verifies release creation cannot use a prerelease version.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with self.assertRaises(ValueError):
+            calculate_next_version('0.3.0-rc.1', 'current')
+        with self.assertRaises(ValueError):
+            calculate_next_version('0.2.0', 'patch', previous_release='v0.3.0-rc.1')
+
+    def test_registry_cli_rejects_prerelease_application_versions(self) -> None:
+        """Verifies release automation cannot write prerelease APP_VERSION values.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        root: Path = Path(__file__).resolve().parents[1]
+        result = subprocess.run(
+            [sys.executable, 'scripts/versioning.py', 'set-app', '0.3.0-rc.1'],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('Invalid Metor Semantic Version', result.stderr)
+
+    def test_release_baseline_uses_highest_stable_semver(self) -> None:
+        """Verifies release publication order cannot select an older backport.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        self.assertEqual(
+            select_latest_stable_release(
+                ('v0.4.3', 'v0.5.0', 'v0.6.0-rc.1', 'not-a-release')
+            ),
+            'v0.5.0',
+        )
+        self.assertIsNone(select_latest_stable_release(('v0.6.0-beta.1',)))
+
+    def test_ipc_addition_is_compatible_without_protocol_bump(self) -> None:
+        """Verifies an optional field remains additive.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        old = _ipc_schema({'value': {'type': 'string'}}, ['value'])
+        new = _ipc_schema(
+            {'value': {'type': 'string'}, 'optional': {'type': 'integer'}}, ['value']
+        )
+        self.assertEqual(ipc_breaking_changes(old, new), ())
+        report = compare_manifests(_release_manifest(old), _release_manifest(new))
+        self.assertEqual(report.errors, ())
+
+    def test_breaking_ipc_requires_and_accepts_explicit_bump(self) -> None:
+        """Verifies required additions fail without but pass with an IPC bump.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        old = _ipc_schema({'value': {'type': 'string'}}, ['value'])
+        new = _ipc_schema(
+            {'value': {'type': 'string'}, 'required_new': {'type': 'integer'}},
+            ['value', 'required_new'],
+        )
+        previous = _release_manifest(old)
+        current = _release_manifest(new)
+        self.assertTrue(compare_manifests(previous, current).errors)
+        cast(dict[str, object], current['ipc'])['current'] = IPC_PROTOCOL_VERSION + 1
+        self.assertEqual(compare_manifests(previous, current).errors, ())
+
+    def test_ipc_checker_detects_route_field_type_and_enum_breaks(self) -> None:
+        """Verifies deterministic IPC breaking-change classifications.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        old = _ipc_schema(
+            {
+                'kept': {'type': 'string'},
+                'removed': {'type': 'integer'},
+                'choice': {'type': 'string', 'enum': ['a', 'b']},
+            },
+            ['kept'],
+        )
+        removed_route = {'definitions': {}, 'commands': {}, 'events': {}}
+        self.assertIn(
+            'IPC command removed: example', ipc_breaking_changes(old, removed_route)
+        )
+
+        changed = _ipc_schema(
+            {
+                'kept': {'type': 'integer'},
+                'choice': {'type': 'string', 'enum': ['a']},
+                'required_new': {'type': 'boolean'},
+            },
+            ['kept', 'required_new'],
+        )
+        changes = ipc_breaking_changes(old, changed)
+        self.assertIn('IPC field removed: example.removed', changes)
+        self.assertIn('IPC required field added: example.required_new', changes)
+        self.assertIn('IPC field type narrowed: example.kept', changes)
+        self.assertIn('IPC field type narrowed: example.choice', changes)
+
+    def test_first_release_establishes_baseline_without_automatic_bumps(self) -> None:
+        """Verifies no-history validation preserves every explicit generation.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        manifest = _release_manifest(_ipc_schema({'value': {'type': 'string'}}))
+        before: str = json.dumps(manifest, sort_keys=True)
+        report = compare_manifests(None, manifest)
+        self.assertEqual(report.errors, ())
+        self.assertIn('baseline', report.notes[0])
+        self.assertEqual(json.dumps(manifest, sort_keys=True), before)
+
+    def test_invalid_minimum_and_unversioned_database_change_block_release(
+        self,
+    ) -> None:
+        """Verifies minimum and persistent-schema gates fail closed.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        schema = _ipc_schema({'value': {'type': 'string'}})
+        previous = _release_manifest(schema)
+        current = _release_manifest(schema)
+        cast(dict[str, object], current['database'])['schema'] = {
+            'tables': [{'name': 'new_table'}]
+        }
+        cast(dict[str, object], current['peer'])['minimum_supported'] = 2
+        report = compare_manifests(previous, current)
+        self.assertTrue(any('minimum supported exceeds' in e for e in report.errors))
+        self.assertTrue(any('SQL schema changed' in e for e in report.errors))
+
+    def test_peer_contract_change_requires_explicit_classification(self) -> None:
+        """Verifies peer semantic review cannot be inferred from a source diff.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        schema = _ipc_schema({'value': {'type': 'string'}})
+        previous = _release_manifest(schema)
+        current = _release_manifest(schema)
+        cast(dict[str, object], current['peer'])['contract'] = {'frame': 'expanded'}
+        self.assertTrue(compare_manifests(previous, current).errors)
+        self.assertEqual(
+            compare_manifests(previous, current, 'additive').errors,
+            (),
+        )
+
+    def test_all_built_wheels_report_central_application_version(self) -> None:
+        """Builds and validates Base, SDK, Terminal, and GUI wheel metadata.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        root: Path = Path(__file__).resolve().parents[1]
+        with TemporaryDirectory() as temp_dir:
+            wheel_dir: Path = Path(temp_dir)
+            for source in (
+                root,
+                root / 'packaging' / 'sdk',
+                root / 'packaging' / 'terminal',
+                root / 'packaging' / 'gui',
+            ):
+                subprocess.run(
+                    [
+                        sys.executable,
+                        '-m',
+                        'pip',
+                        'wheel',
+                        '--no-deps',
+                        '--no-build-isolation',
+                        str(source),
+                        '-w',
+                        str(wheel_dir),
+                    ],
+                    cwd=root,
+                    check=True,
+                    stdout=subprocess.DEVNULL,
+                )
+            self.assertEqual(
+                validate_wheel_versions(tuple(wheel_dir.glob('*.whl'))), ()
+            )
+            for wheel_path in wheel_dir.glob('*.whl'):
+                with ZipFile(wheel_path) as archive:
+                    owns_versioning = (
+                        'metor/versioning/__init__.py' in archive.namelist()
+                    )
+                    self.assertEqual(
+                        owns_versioning, wheel_path.name.startswith('metor_sdk-')
+                    )
+                    metadata_name: str = next(
+                        name
+                        for name in archive.namelist()
+                        if name.endswith('.dist-info/METADATA')
+                    )
+                    metadata: str = archive.read(metadata_name).decode('utf-8')
+                    if wheel_path.name.startswith('metor-'):
+                        self.assertIn(
+                            f'Requires-Dist: metor-sdk=={APP_VERSION}', metadata
+                        )
+                    if wheel_path.name.startswith('metor_ui_terminal-'):
+                        self.assertIn(f'Requires-Dist: metor=={APP_VERSION}', metadata)
+                        self.assertIn(
+                            f'Requires-Dist: metor-sdk=={APP_VERSION}', metadata
+                        )
+                    if wheel_path.name.startswith('metor_ui_gui-'):
+                        self.assertIn(f'Requires-Dist: metor=={APP_VERSION}', metadata)
+                        self.assertIn(
+                            f'Requires-Dist: metor-sdk=={APP_VERSION}', metadata
+                        )
+                        entry_points_name = next(
+                            name
+                            for name in archive.namelist()
+                            if name.endswith('.dist-info/entry_points.txt')
+                        )
+                        entry_points = archive.read(entry_points_name).decode('utf-8')
+                        self.assertIn('[gui_scripts]', entry_points)
+                        self.assertIn('metor-gui = metor.main:gui_main', entry_points)
+
+    def test_wheel_validator_requires_all_variants(self) -> None:
+        """Verifies package validation rejects an incomplete release wheel set.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        errors = validate_wheel_versions(())
+        self.assertTrue(errors)
+        self.assertIn('metor-ui-gui', errors[0])
+
+    def test_wheel_validator_rejects_duplicate_distribution_identity(self) -> None:
+        """Rejects two wheel files claiming the same coordinated distribution.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        names = ('metor', 'metor-sdk', 'metor-ui-terminal', 'metor-ui-gui', 'metor')
+        paths = tuple(Path(f'{index}.whl') for index in range(len(names)))
+
+        def metadata(path: Path) -> tuple[str, str, tuple[str, ...]]:
+            name = names[int(path.stem)]
+            requirements: tuple[str, ...] = ()
+            if name == 'metor':
+                requirements = (f'metor-sdk=={APP_VERSION}',)
+            elif name.startswith('metor-ui-'):
+                requirements = (
+                    f'metor=={APP_VERSION}',
+                    f'metor-sdk=={APP_VERSION}',
+                )
+            return name, APP_VERSION, requirements
+
+        with (
+            patch('scripts.validate_wheel_versions.wheel_metadata', metadata),
+            patch(
+                'scripts.validate_wheel_versions.wheel_owned_files', return_value=set()
+            ),
+        ):
+            errors = validate_wheel_versions(paths)
+        self.assertIn('Duplicate Metor wheel identity: metor.', errors)
+
+
+class DocumentationReleaseArchitectureTests(unittest.TestCase):
+    """Covers canonical generated paths and dry-run workflow isolation."""
+
+    def test_generated_artifacts_have_one_canonical_location(self) -> None:
+        """Verifies generated references live only in their ownership directory.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        root: Path = Path(__file__).resolve().parents[1]
+        self.assertEqual(GENERATED_DOCS_DIR, root / 'docs' / 'generated')
+        for path in (
+            API_DOC_PATH,
+            SETTINGS_DOC_PATH,
+            API_SCHEMA_PATH,
+            COMPATIBILITY_MANIFEST_PATH,
+        ):
+            self.assertTrue(path.is_file())
+        for stale_name in (
+            'API.md',
+            'SETTINGS.md',
+            'api.schema.json',
+            'compatibility.json',
+        ):
+            self.assertFalse((root / 'docs' / stale_name).exists())
+        self.assertFalse((root / 'docs' / 'README.md').exists())
+        for generated_markdown in (API_DOC_PATH, SETTINGS_DOC_PATH):
+            self.assertTrue(
+                generated_markdown.read_text(encoding='utf-8').startswith(
+                    '<!-- GENERATED FILE. DO NOT EDIT MANUALLY. -->'
+                )
+            )
+
+    def test_release_dry_run_cannot_reach_repository_mutations(self) -> None:
+        """Verifies commits, tags, pushes, and releases are publish-job-only.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        root: Path = Path(__file__).resolve().parents[1]
+        workflow: str = (root / '.github' / 'workflows' / 'release.yml').read_text(
+            encoding='utf-8'
+        )
+        validation_jobs: str = workflow.split('\n  publish:', maxsplit=1)[0]
+        self.assertNotIn('git commit ', validation_jobs)
+        self.assertNotIn('git tag ', validation_jobs)
+        self.assertNotIn('git push ', validation_jobs)
+        self.assertNotIn('gh release create ', validation_jobs)
+        self.assertIn('if: inputs.dry_run == false', workflow)
+
+    def test_release_workflow_scopes_writes_and_generates_all_artifacts(
+        self,
+    ) -> None:
+        """Verifies publishing guards and generated-document release inputs.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        root: Path = Path(__file__).resolve().parents[1]
+        workflow: str = (root / '.github' / 'workflows' / 'release.yml').read_text(
+            encoding='utf-8'
+        )
+        workflow_inputs: str = workflow.split('\njobs:', maxsplit=1)[0]
+        validation_jobs, publish_job = workflow.split('\n  publish:', maxsplit=1)
+        self.assertNotIn('\npermissions:\n  contents: write', workflow)
+        self.assertIn('Reject non-main publish requests', validation_jobs)
+        self.assertIn("$GITHUB_REF_NAME\" != 'main'", validation_jobs)
+        self.assertIn('contents: read', validation_jobs)
+        self.assertIn('contents: write', publish_job)
+        self.assertIn("github.ref_name == 'main'", publish_job)
+        quality_action = (
+            root / '.github' / 'actions' / 'python-quality' / 'action.yml'
+        ).read_text(encoding='utf-8')
+        self.assertIn('uses: ./.github/actions/python-quality', validation_jobs)
+        self.assertIn(
+            'actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38',
+            quality_action,
+        )
+        self.assertIn('node-version: "22.17.1"', quality_action)
+        self.assertIn('npm ci', quality_action)
+        self.assertIn('python scripts/validate_generated_docs.py', validation_jobs)
+        self.assertIn('docs/generated/SETTINGS.md', workflow)
+        self.assertIn('if ! git diff --cached --quiet; then', publish_job)
+        self.assertIn('--select-baseline', validation_jobs)
+        self.assertNotIn('prerelease:', workflow)
+        self.assertNotIn('--prerelease', workflow)
+        self.assertIn('release_type:', workflow_inputs)
+        self.assertIn('dry_run:', workflow_inputs)
+        self.assertNotIn('peer_compatibility:', workflow_inputs)
+        self.assertNotIn('crypto_migration_reviewed:', workflow_inputs)
+        self.assertIn('python scripts/validate_release_installers.py', validation_jobs)
+        self.assertIn('uses: ./.github/actions/gui-acceptance', validation_jobs)
+        gui_action = (
+            root / '.github' / 'actions' / 'gui-acceptance' / 'action.yml'
+        ).read_text(encoding='utf-8')
+        ci_workflow = (root / '.github' / 'workflows' / 'ci.yml').read_text(
+            encoding='utf-8'
+        )
+        self.assertIn('uses: ./.github/actions/gui-acceptance', ci_workflow)
+        for native_workflow in (ci_workflow, validation_jobs):
+            windows_step = next(
+                step
+                for step in native_workflow.split('\n      - name:')
+                if 'scripts/validate_installed_artifacts.py' in step
+                and '--windows-launch' in step
+            )
+            self.assertIn("if: runner.os == 'Windows'", windows_step)
+            self.assertIn('KIVY_GL_BACKEND: angle_sdl2', windows_step)
+        self.assertIn('tests/gui_native_core.py --width 360', gui_action)
+        self.assertIn('tests/gui_native_core.py --width 1180', gui_action)
+        self.assertIn('tests/gui_native_scrolling.py --output', gui_action)
+        self.assertIn('tests/gui_stream_pressure.py', gui_action)
+        self.assertIn(
+            'dbus-run-session -- python tests/gui_native_accessibility.py', gui_action
+        )
+        self.assertIn('timeout --kill-after=5s 90s', gui_action)
+        self.assertIn('XDG_RUNTIME_DIR=', gui_action)
+        self.assertIn('tail -c 65536', gui_action)
+        self.assertIn('set -euo pipefail', gui_action)
+        self.assertIn('metor-ui-gui-wheelhouse-', validation_jobs)
+        self.assertNotIn('metor-daemon', validation_jobs)
+        self.assertNotIn('metor.daemon_main', validation_jobs)
+        self.assertIn('candidate_sha:', workflow)
+        self.assertIn('main moved after release validation', publish_job)
+        self.assertIn('python -m scripts.release.refs', publish_job)
+        self.assertIn('--branch main', publish_job)
+        self.assertNotIn('git push origin HEAD:refs/heads/main', publish_job)
+        ref_publisher = (root / 'scripts' / 'release' / 'refs.py').read_text(
+            encoding='utf-8'
+        )
+        self.assertIn("'--atomic'", ref_publisher)
+        self.assertIn("f'HEAD:refs/heads/{branch}'", ref_publisher)
+
+    def test_atomic_release_ref_push_rejects_branch_and_leaves_no_tag(self) -> None:
+        """A remote branch rejection cannot publish only the release tag.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+
+        def git(repository: Path, *args: str) -> str:
+            """Runs one isolated Git command and returns its stripped stdout.
+
+            Args:
+                repository: Disposable working tree or bare repository.
+                args: Exact Git operands.
+            Returns:
+                str: Captured standard output.
+            """
+            return subprocess.run(
+                ['git', *args],
+                cwd=repository,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            remote, repository = root / 'remote.git', root / 'source'
+            remote.mkdir()
+            repository.mkdir()
+            git(remote, 'init', '--bare')
+            git(repository, 'init', '-b', 'main')
+            git(repository, 'config', 'user.name', 'Release Test')
+            git(repository, 'config', 'user.email', 'release@example.invalid')
+            (repository / 'candidate.txt').write_text('initial\n', encoding='utf-8')
+            git(repository, 'add', 'candidate.txt')
+            git(repository, 'commit', '-m', 'initial')
+            git(repository, 'remote', 'add', 'origin', str(remote))
+            git(repository, 'push', 'origin', 'HEAD:refs/heads/main')
+            original = git(remote, 'rev-parse', 'refs/heads/main')
+
+            (repository / 'candidate.txt').write_text('release\n', encoding='utf-8')
+            git(repository, 'commit', '-am', 'release')
+            git(repository, 'tag', '-a', 'v9.9.9', '-m', 'release')
+            hook = remote / 'hooks' / 'pre-receive'
+            hook.write_text(
+                '#!/bin/sh\n'
+                'while read old new ref; do\n'
+                '  if [ "$ref" = refs/heads/main ]; then exit 1; fi\n'
+                'done\n'
+                'exit 0\n',
+                encoding='utf-8',
+            )
+            hook.chmod(0o755)
+
+            with self.assertRaises(subprocess.CalledProcessError):
+                push_atomic_release_refs(repository, 'origin', 'main', 'v9.9.9')
+
+            self.assertEqual(git(remote, 'rev-parse', 'refs/heads/main'), original)
+            missing_tag = subprocess.run(
+                ['git', 'rev-parse', '--verify', 'refs/tags/v9.9.9'],
+                cwd=remote,
+                capture_output=True,
+                text=True,
+            )
+            self.assertNotEqual(missing_tag.returncode, 0)
+
+    def test_external_actions_are_commit_pinned_and_permissions_are_explicit(
+        self,
+    ) -> None:
+        """Rejects mutable action tags and implicit token permissions.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        root = Path(__file__).resolve().parents[1]
+        action_files = tuple((root / '.github').rglob('*.yml'))
+        expected = {
+            'actions/checkout': 'd23441a48e516b6c34aea4fa41551a30e30af803',
+            'actions/setup-python': 'ece7cb06caefa5fff74198d8649806c4678c61a1',
+            'actions/setup-node': '249970729cb0ef3589644e2896645e5dc5ba9c38',
+            'actions/upload-artifact': 'ea165f8d65b6e75b540449e92b4886f43607fa02',
+            'actions/download-artifact': 'd3f86a106a0bac45b974a628896c90dbdf5c8093',
+        }
+        for path in action_files:
+            source = path.read_text(encoding='utf-8')
+            for owner, sha in expected.items():
+                for match in re.findall(rf'{re.escape(owner)}@([^\s#]+)', source):
+                    self.assertEqual(match, sha, f'{path}: {owner}')
+            if '/workflows/' in path.as_posix():
+                self.assertIn('permissions:', source, path.as_posix())
+
+    def test_canonical_release_workflow_replaces_legacy_bundle_workflow(
+        self,
+    ) -> None:
+        """Verifies bundle publishing has one canonical release workflow.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        root: Path = Path(__file__).resolve().parents[1]
+        workflows_dir: Path = root / '.github' / 'workflows'
+        self.assertTrue((workflows_dir / 'release.yml').is_file())
+        self.assertFalse((workflows_dir / 'release_wheel_bundles.yml').exists())
+
+    def test_release_candidate_generates_before_tests_and_freshness_check(
+        self,
+    ) -> None:
+        """Requires candidate references before tests inspect generated state.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        root = Path(__file__).resolve().parents[1]
+        workflow = (root / '.github' / 'workflows' / 'release.yml').read_text(
+            encoding='utf-8'
+        )
+        quality = workflow.split('\n  quality:', maxsplit=1)[1].split(
+            '\n  publish:', maxsplit=1
+        )[0]
+
+        generator = quality.index('npm run generate:docs')
+        validator = quality.index('python scripts/validate_generated_docs.py')
+        tests = quality.index('python scripts/run_tests.py --suite all')
+        self.assertLess(generator, validator)
+        self.assertLess(validator, tests)
+
+    def test_generated_freshness_restores_stale_and_unchanged_inputs(self) -> None:
+        """Keeps normal validation nonmutating while stale content still fails.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with TemporaryDirectory() as directory:
+            artifact = Path(directory) / 'generated.json'
+            for original, generated, expected in (
+                (b'current\n', b'current\n', ()),
+                (b'stale\n', b'current\n', (artifact,)),
+            ):
+                with self.subTest(original=original):
+                    artifact.write_bytes(original)
+
+                    def generate() -> None:
+                        artifact.write_bytes(generated)
+
+                    with (
+                        patch.object(
+                            validate_generated_docs,
+                            'GENERATED_ARTIFACT_PATHS',
+                            (artifact,),
+                        ),
+                        patch.object(
+                            validate_generated_docs, 'run_generators', generate
+                        ),
+                    ):
+                        self.assertEqual(
+                            validate_generated_docs.validate_reproducibility(),
+                            expected,
+                        )
+                    self.assertEqual(artifact.read_bytes(), original)
+
+    def test_intentional_generation_leaves_a_verifiable_change(self) -> None:
+        """Separates an update write from the following nonmutating validation.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with TemporaryDirectory() as directory:
+            artifact = Path(directory) / 'generated.json'
+            artifact.write_bytes(b'stale\n')
+
+            def generate() -> None:
+                artifact.write_bytes(b'current\n')
+
+            generate()
+            self.assertEqual(artifact.read_bytes(), b'current\n')
+            with (
+                patch.object(
+                    validate_generated_docs,
+                    'GENERATED_ARTIFACT_PATHS',
+                    (artifact,),
+                ),
+                patch.object(validate_generated_docs, 'run_generators', generate),
+            ):
+                self.assertEqual(validate_generated_docs.validate_reproducibility(), ())
+            self.assertEqual(artifact.read_bytes(), b'current\n')
+
+    def test_patch_and_minor_candidates_generate_stable_matching_manifests(
+        self,
+    ) -> None:
+        """Exercises candidate manifests without changing repository release state.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        previous = json.loads(COMPATIBILITY_MANIFEST_PATH.read_text(encoding='utf-8'))
+        with TemporaryDirectory() as directory:
+            output = Path(directory) / 'compatibility.json'
+            for release_type in ('patch', 'minor'):
+                candidate = calculate_next_version(
+                    APP_VERSION, release_type, previous_release=f'v{APP_VERSION}'
+                )
+                with self.subTest(release_type=release_type, candidate=candidate):
+                    with patch('scripts.release.manifest.APP_VERSION', candidate):
+                        write_compatibility_manifest(API_SCHEMA_PATH, output)
+                        first = output.read_bytes()
+                        write_compatibility_manifest(API_SCHEMA_PATH, output)
+                    self.assertEqual(output.read_bytes(), first)
+                    current = json.loads(first)
+                    self.assertEqual(current['application_version'], candidate)
+                    self.assertEqual(compare_manifests(previous, current).errors, ())
+
+
+if __name__ == '__main__':
+    unittest.main()

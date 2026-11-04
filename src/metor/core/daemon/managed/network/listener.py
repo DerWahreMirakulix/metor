@@ -44,6 +44,11 @@ from metor.data import (
     SettingKey,
 )
 from metor.utils import Constants
+from metor.versioning import (
+    PEER_PROTOCOL_MIN_SUPPORTED,
+    PEER_PROTOCOL_VERSION,
+    negotiate_protocol_generation,
+)
 
 # Local Package Imports
 from metor.core.daemon.managed.network.state import (
@@ -79,6 +84,10 @@ class InboundListener:
         enqueue_live_reconnect_callback: Callable[[str], bool],
         stop_flag: threading.Event,
         config: 'Config',
+        call_transport_callback: Optional[
+            Callable[[str, socket.socket, TcpStreamReader], None]
+        ] = None,
+        operation_lock: Optional[threading.RLock] = None,
     ) -> None:
         """
         Initializes the InboundListener.
@@ -118,6 +127,8 @@ class InboundListener:
         )
         self._stop_flag: threading.Event = stop_flag
         self._config: 'Config' = config
+        self._call_transport = call_transport_callback
+        self._operation_lock = operation_lock or threading.RLock()
         self._listener_thread: Optional[threading.Thread] = None
         self._startup_event: threading.Event = threading.Event()
         self._startup_lock: threading.Lock = threading.Lock()
@@ -231,8 +242,8 @@ class InboundListener:
         )
         try:
             self._listener_thread.start()
-        except Exception as exc:
-            self._set_startup_error(str(exc).strip() or exc.__class__.__name__)
+        except Exception:
+            self._set_startup_error('Inbound listener thread could not start.')
 
         ready: bool = self._startup_event.wait(Constants.LISTENER_READY_TIMEOUT)
         with self._startup_lock:
@@ -269,14 +280,14 @@ class InboundListener:
                     conn, _ = listener.accept()
                 except socket.timeout:
                     continue
-                except OSError as e:
+                except OSError:
                     if self._stop_flag.is_set():
                         break
                     self._hm.log_event(
                         HistoryEvent.STREAM_CORRUPTED,
                         None,
                         actor=HistoryActor.SYSTEM,
-                        detail_text=str(e).strip() or e.__class__.__name__,
+                        detail_text='Inbound listener accept failed.',
                     )
                     continue
 
@@ -299,7 +310,7 @@ class InboundListener:
                         )
                     )
                     try:
-                        conn.close()
+                        self._state.retire_connection(conn)
                     except Exception:
                         pass
                     continue
@@ -312,7 +323,7 @@ class InboundListener:
                 except Exception:
                     self._state.remove_unauthenticated_connection(conn)
                     try:
-                        conn.close()
+                        self._state.retire_connection(conn)
                     except Exception:
                         pass
                     self._hm.log_event(
@@ -322,16 +333,16 @@ class InboundListener:
                         detail_text='Inbound listener failed to start handler thread.',
                     )
                     continue
-        except MemoryError as e:
-            self._set_startup_error(str(e))
+        except MemoryError:
+            self._set_startup_error('Inbound listener ran out of memory.')
             self._hm.log_event(
                 HistoryEvent.STREAM_CORRUPTED,
                 None,
                 actor=HistoryActor.SYSTEM,
-                detail_text=str(e),
+                detail_text='Inbound listener ran out of memory.',
             )
-        except Exception as e:
-            error_text: str = str(e).strip() or e.__class__.__name__
+        except Exception:
+            error_text = 'Inbound listener failed.'
             self._set_startup_error(error_text)
             self._hm.log_event(
                 HistoryEvent.STREAM_CORRUPTED,
@@ -360,32 +371,49 @@ class InboundListener:
         auth_successful: bool = False
         onion: Optional[str] = None
         is_async: bool = False
+        is_call: bool = False
         stream: Optional[TcpStreamReader] = None
 
         try:
             tor_timeout: float = self._config.get_float(SettingKey.TOR_TIMEOUT)
+            deadline = time.monotonic() + tor_timeout
             conn.settimeout(tor_timeout)
             challenge: str = secrets.token_hex(Constants.TOR_HANDSHAKE_CHALLENGE_BYTES)
-            conn.sendall(
-                HandshakeProtocol.build_challenge_line(challenge).encode('utf-8')
+            self._state.send_frame(
+                conn,
+                HandshakeProtocol.build_challenge_line(challenge).encode('utf-8'),
             )
 
             stream = TcpStreamReader(conn)
-            line: Optional[str] = stream.read_line()
+            line: Optional[str] = stream.read_line(deadline=deadline)
 
             if line:
-                remote_onion, signature, is_async, has_recovery_hint = (
-                    HandshakeProtocol.parse_auth_line(line)
+                is_call = line.split()[-1] == Constants.CALL_AUTH_FLAG
+                (
+                    remote_onion,
+                    signature,
+                    peer_current,
+                    peer_minimum,
+                    is_async,
+                    has_recovery_hint,
+                ) = HandshakeProtocol.parse_auth_line(line)
+                negotiated_version: int | None = negotiate_protocol_generation(
+                    PEER_PROTOCOL_VERSION,
+                    PEER_PROTOCOL_MIN_SUPPORTED,
+                    peer_current,
+                    peer_minimum,
                 )
+                if negotiated_version is None:
+                    raise ValueError('Peer protocol ranges do not overlap')
                 if self._crypto.verify_signature(remote_onion, challenge, signature):
                     onion = remote_onion
                     auth_successful = True
-        except MemoryError as e:
+        except MemoryError:
             self._hm.log_event(
                 HistoryEvent.STREAM_CORRUPTED,
                 onion,
                 actor=HistoryActor.SYSTEM,
-                detail_text=str(e),
+                detail_text='Inbound handshake exceeded memory limit.',
             )
         except Exception:
             pass
@@ -394,9 +422,16 @@ class InboundListener:
 
         if not auth_successful or not onion or not stream:
             try:
-                conn.close()
+                self._state.retire_connection(conn)
             except Exception:
                 pass
+            return
+
+        if is_call:
+            if self._call_transport is None:
+                self._state.retire_connection(conn)
+            else:
+                self._call_transport(onion, conn, stream)
             return
 
         if is_async:
@@ -470,7 +505,7 @@ class InboundListener:
         )
 
         try:
-            conn.close()
+            self._state.retire_connection(conn)
         except Exception:
             pass
 
@@ -528,8 +563,24 @@ class InboundListener:
         """
         alias: Optional[str] = self._cm.ensure_alias_for_onion(onion)
         if not alias:
-            conn.close()
+            self._state.retire_connection(conn)
             return
+        with self._operation_lock, self._state.snapshot_barrier():
+            self._admit_live_incoming(conn, stream, onion, alias, has_recovery_hint)
+
+    def _admit_live_incoming(
+        self,
+        conn: socket.socket,
+        stream: TcpStreamReader,
+        onion: str,
+        alias: str,
+        has_recovery_hint: bool,
+    ) -> None:
+        """Serializes inbound consent decisions with End and competing admission.
+
+        The caller holds the state barrier; socket writes are queued through
+        the sole bounded writer rather than physical I/O under this lock.
+        """
 
         is_outbound_attempt: bool = self._state.has_active_or_recent_outbound_attempt(
             onion
@@ -539,29 +590,39 @@ class InboundListener:
         )
 
         transport_state = self._state.get_peer_transport_state(onion)
-        grace_reconnect: bool = self._state.has_live_reconnect_grace(onion)
-        retunnel_reconnect: bool = transport_state.is_retunneling
-        scheduled_auto_reconnect: bool = self._state.has_scheduled_auto_reconnect(onion)
-        trusted_recovery_hint: bool = False
-        if has_recovery_hint:
-            trusted_recovery_hint = (
-                grace_reconnect
-                or retunnel_reconnect
-                or scheduled_auto_reconnect
-                or transport_state.live_state is SessionState.CONNECTED
-            )
+        accepted_generation = self._state.accepted_live_context_generation(onion)
+        grace_reconnect: bool = (
+            accepted_generation is not None
+            and self._state.has_live_reconnect_grace(onion)
+        )
+        retunnel_reconnect: bool = (
+            accepted_generation is not None and transport_state.is_retunneling
+        )
+        scheduled_auto_reconnect: bool = (
+            accepted_generation is not None
+            and self._state.has_scheduled_auto_reconnect(onion)
+        )
+        trusted_recovery_hint: bool = (
+            has_recovery_hint and accepted_generation is not None
+        )
 
-        if has_recovery_hint and self._state.has_local_recovery_opt_out(onion):
+        if has_recovery_hint and (
+            self._state.has_local_recovery_opt_out(onion)
+            or (
+                accepted_generation is None
+                and self._state.known_live_context_generation(onion) is not None
+            )
+        ):
             try:
-                conn.sendall(
+                self._state.finish_connection(
+                    conn,
                     (
                         f'{TorCommand.REJECT.value} '
                         f'{RejectIntent.MANUAL.value} {self._tm.onion}\n'
-                    ).encode('utf-8')
+                    ).encode('utf-8'),
                 )
             except Exception:
-                pass
-            conn.close()
+                self._state.retire_connection(conn)
             return
 
         duplicate_reason_code: Optional[HistoryReasonCode] = None
@@ -582,12 +643,12 @@ class InboundListener:
 
         if should_reject:
             try:
-                conn.sendall(
-                    f'{TorCommand.REJECT.value} {self._tm.onion}\n'.encode('utf-8')
+                self._state.finish_connection(
+                    conn,
+                    f'{TorCommand.REJECT.value} {self._tm.onion}\n'.encode('utf-8'),
                 )
             except Exception:
-                pass
-            conn.close()
+                self._state.retire_connection(conn)
 
             if duplicate_reason_code is not None:
                 self._hm.log_event(
@@ -635,6 +696,7 @@ class InboundListener:
         contact_auto_accept: bool = (
             alias in self._cm.get_all_contacts()
             and self._config.get_bool(SettingKey.AUTO_ACCEPT_CONTACTS)
+            and not (has_recovery_hint and accepted_generation is None)
         )
         incoming_origin: ConnectionOrigin = ConnectionOrigin.INCOMING
         if grace_reconnect:
@@ -674,11 +736,19 @@ class InboundListener:
         if should_auto_accept_now and allow_immediate_accept:
             if grace_reconnect:
                 self._state.consume_live_reconnect_grace(onion)
-            self._state.add_active_connection(onion, conn)
+            if self._stop_flag.is_set() or not self._state.add_active_connection(
+                onion,
+                conn,
+                expected_context_generation=accepted_generation,
+            ):
+                self._state.retire_connection(conn)
+                return
             accepted_now = True
         else:
             try:
-                conn.sendall(f'{TorCommand.PENDING.value}\n'.encode('utf-8'))
+                self._state.send_frame(
+                    conn, f'{TorCommand.PENDING.value}\n'.encode('utf-8')
+                )
             except Exception:
                 pass
             if should_auto_accept_now:
@@ -693,6 +763,7 @@ class InboundListener:
                 reason=pending_reason,
                 origin=incoming_origin,
                 expiry_deadline=pending_deadline,
+                expected_context_generation=accepted_generation,
             )
             if not pending_registered:
                 return
@@ -704,7 +775,9 @@ class InboundListener:
 
         if accepted_now:
             try:
-                conn.sendall(f'{TorCommand.ACCEPTED.value}\n'.encode('utf-8'))
+                self._state.send_frame(
+                    conn, f'{TorCommand.ACCEPTED.value}\n'.encode('utf-8')
+                )
             except Exception:
                 pass
 
@@ -755,6 +828,7 @@ class InboundListener:
             if pending_reason is PendingConnectionReason.USER_ACCEPT:
                 self._broadcast(
                     IncomingConnectionEvent(
+                        action_handle=self._state.pending_token(onion, conn),
                         alias=alias,
                         onion=onion,
                         origin=ConnectionOrigin.INCOMING,

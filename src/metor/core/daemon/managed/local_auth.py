@@ -7,14 +7,14 @@ import threading
 import time
 from typing import Dict, Optional
 
-from metor.utils import (
-    Constants,
+from metor.core.auth import (
     create_session_auth_salt,
     create_session_auth_challenge,
     derive_session_auth_proof_key,
-    secure_clear_buffer,
     verify_session_auth_proof,
 )
+from metor.shared import secure_clear_buffer
+from metor.utils import Constants
 
 
 @dataclass(frozen=True)
@@ -113,6 +113,68 @@ class LocalAuthTracker:
         """
         with self._lock:
             return self._context is not None
+
+    def proof_salt(self) -> Optional[str]:
+        """Returns the active profile-password proof salt.
+
+        Args:
+            None
+
+        Returns:
+            Optional[str]: Runtime salt when password proof is enabled.
+        """
+        with self._lock:
+            return self._context.salt_hex if self._context is not None else None
+
+    def verify_proof_key(self, challenge: str, proof: str) -> bool:
+        """Verifies a proof against the active profile-password proof key.
+
+        Args:
+            challenge (str): One-use challenge.
+            proof (str): HMAC proof digest.
+
+        Returns:
+            bool: True when the active password verifier matches.
+        """
+        with self._lock:
+            if self._context is None:
+                return False
+            return verify_session_auth_proof(self._context.proof_key, challenge, proof)
+
+    def verify_challenge_proof(
+        self,
+        conn: socket.socket,
+        challenge: str,
+        proof: str,
+        lockout_seconds: float,
+        failure_limit: int,
+    ) -> SessionAuthAttemptResult:
+        """Verifies an externally issued challenge under shared failure policy.
+
+        Args:
+            conn (socket.socket): IPC connection owning the proof attempt.
+            challenge (str): One-use challenge issued for reauthorization.
+            proof (str): Client-supplied password proof.
+            lockout_seconds (float): Cross-connection cooldown duration.
+            failure_limit (int): Per-connection failure ceiling.
+
+        Returns:
+            SessionAuthAttemptResult: Auth result and disconnect requirement.
+        """
+        with self._lock:
+            if (
+                self._context is None
+                or self._get_retry_after_seconds_locked() is not None
+            ):
+                return SessionAuthAttemptResult(False, False)
+            if verify_session_auth_proof(self._context.proof_key, challenge, proof):
+                self._failure_counts.pop(conn, None)
+                self._reset_rate_limit_locked()
+                return SessionAuthAttemptResult(True, False)
+            should_disconnect = self._increment_failures_locked(
+                conn, lockout_seconds, failure_limit
+            )
+            return SessionAuthAttemptResult(False, should_disconnect)
 
     def clear_connection(self, conn: socket.socket) -> None:
         """

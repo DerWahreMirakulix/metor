@@ -19,6 +19,7 @@ from metor.core.api import (
     GetHistoryCommand,
     GetInboxCommand,
     GetMessagesCommand,
+    ListRetainedMessagesCommand,
     GetRawHistoryCommand,
     GetSettingCommand,
     GetSettingsListCommand,
@@ -41,6 +42,20 @@ from metor.data import DatabaseCorruptedError, SettingKey
 
 # Local Package Imports
 from metor.core.daemon.headless.protocols import HeadlessDaemonProtocol
+
+
+def is_profile_lifecycle_command(cmd: IpcCommand) -> bool:
+    """Reports commands whose catalog owner supplies its own lifecycle guards."""
+    return isinstance(
+        cmd,
+        (
+            AddProfileCommand,
+            MigrateProfileSecurityCommand,
+            RemoveProfileCommand,
+            RenameProfileCommand,
+            SetDefaultProfileCommand,
+        ),
+    )
 
 
 def _requires_headless_config_password(daemon: HeadlessDaemonProtocol) -> bool:
@@ -120,16 +135,7 @@ def process_command(
         daemon._send(conn, daemon._config_handler.handle(cmd))
         return
 
-    if isinstance(
-        cmd,
-        (
-            AddProfileCommand,
-            MigrateProfileSecurityCommand,
-            RemoveProfileCommand,
-            RenameProfileCommand,
-            SetDefaultProfileCommand,
-        ),
-    ):
+    if is_profile_lifecycle_command(cmd):
         daemon._send(conn, daemon._profile_handler.handle(cmd))
         return
 
@@ -146,6 +152,7 @@ def process_command(
             GetRawHistoryCommand,
             ClearHistoryCommand,
             GetMessagesCommand,
+            ListRetainedMessagesCommand,
             ClearMessagesCommand,
             GetInboxCommand,
             MarkReadCommand,

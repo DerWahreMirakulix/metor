@@ -3,7 +3,7 @@
 import socket
 import threading
 import time
-from typing import TYPE_CHECKING, Callable, Dict, List, Optional
+from typing import TYPE_CHECKING, Callable, Dict, List, Optional, Tuple
 
 from metor.core.api import (
     AutoReconnectScheduledEvent,
@@ -16,6 +16,8 @@ from metor.core.api import (
     RuntimeErrorCode,
     create_event,
     get_current_request_id,
+    Delivery,
+    ContentType,
 )
 from metor.core.tor import TorManager
 from metor.core.daemon.managed.crypto import Crypto
@@ -28,7 +30,6 @@ from metor.data import (
     MessageManager,
     MessageDirection,
     MessageStatus,
-    MessageType,
     SettingKey,
 )
 from metor.utils import Constants
@@ -50,6 +51,7 @@ class ConnectionControllerSupportMixin:
     _hm: HistoryManager
     _mm: MessageManager
     _crypto: Crypto
+    _retain_call_transport: Optional[Callable[[socket.socket], Optional[str]]]
     _state: StateTracker
     _router: MessageRouter
     _broadcast: Callable[[IpcEvent], None]
@@ -57,8 +59,9 @@ class ConnectionControllerSupportMixin:
     _stop_flag: threading.Event
     _config: 'Config'
     _receiver: Optional['StreamReceiver']
-    _live_reconnect_queue: List[str]
+    _live_reconnect_queue: List[Tuple[str, Optional[int]]]
     _live_reconnect_lock: threading.Lock
+    _operation_lock: threading.RLock
 
     def _is_inflight_outbound_socket(self, onion: str, sock: socket.socket) -> bool:
         """
@@ -90,18 +93,20 @@ class ConnectionControllerSupportMixin:
         Returns:
             None
         """
+        accepted_generation = self._state.accepted_live_context_generation(onion)
         self._state.clear_retunnel_flow(onion)
-        self._broadcast(
-            create_event(
-                EventType.DISCONNECTED,
-                {
-                    'alias': alias,
-                    'onion': onion,
-                    'actor': ConnectionActor.SYSTEM,
-                    'origin': ConnectionOrigin.RETUNNEL,
-                },
+        if accepted_generation is None:
+            self._broadcast(
+                create_event(
+                    EventType.DISCONNECTED,
+                    {
+                        'alias': alias,
+                        'onion': onion,
+                        'actor': ConnectionActor.SYSTEM,
+                        'origin': ConnectionOrigin.RETUNNEL,
+                    },
+                )
             )
-        )
         params: Dict[str, JsonValue] = {'alias': alias, 'onion': onion}
         params['error_code'] = RuntimeErrorCode.RETUNNEL_RECONNECT_FAILED
         if error:
@@ -130,7 +135,8 @@ class ConnectionControllerSupportMixin:
                 )
             return
 
-        self._convert_unacked_live_to_drops(alias, onion)
+        if accepted_generation is None:
+            self._convert_unacked_live_to_drops(alias, onion)
 
     def _broadcast_retunnel_preserved_failure(
         self,
@@ -273,8 +279,8 @@ class ConnectionControllerSupportMixin:
         unacked = self._state.pop_unacked_messages(onion)
         get_pending_live_outbox = getattr(self._mm, 'get_pending_live_outbox', None)
         if callable(get_pending_live_outbox):
-            for _, _, payload, msg_id, timestamp in get_pending_live_outbox(onion):
-                unacked.setdefault(msg_id, (payload, timestamp))
+            for record in get_pending_live_outbox(onion):
+                unacked.setdefault(record.msg_id, (record.payload, record.timestamp))
         if not unacked:
             return False
 
@@ -283,7 +289,8 @@ class ConnectionControllerSupportMixin:
             self._mm.queue_message(
                 contact_onion=onion,
                 direction=MessageDirection.OUT,
-                msg_type=MessageType.DROP_TEXT,
+                delivery=Delivery.DROP,
+                content_type=ContentType.TEXT,
                 payload=content,
                 status=MessageStatus.PENDING,
                 msg_id=msg_id,

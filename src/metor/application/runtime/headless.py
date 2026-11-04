@@ -1,9 +1,9 @@
 """Application-layer helpers for ephemeral local headless daemon execution."""
 
+import socket
 from typing import Callable, Optional, TypeVar
 
 from metor.core.daemon.headless import HeadlessDaemon
-from metor.data import Settings
 from metor.data.profile import ProfileManager
 
 
@@ -13,21 +13,19 @@ ResultT = TypeVar('ResultT')
 def run_with_headless_daemon(
     pm: ProfileManager,
     password: Optional[str],
-    port_handler: Callable[[int], ResultT],
+    socket_handler: Callable[[socket.socket], ResultT],
 ) -> ResultT:
     """
-    Starts one ephemeral headless daemon and executes a callback against its port.
+    Starts one ephemeral daemon and lends its private IPC socket to the callback.
 
     Args:
         pm (ProfileManager): The active profile manager.
         password (Optional[str]): The optional master password.
-        port_handler (Callable[[int], ResultT]): Callback executed with the IPC port.
+        socket_handler: Callback using the private connected IPC socket. The
+            runtime closes the channel and joins the worker before returning.
 
     Returns:
         ResultT: The callback result.
     """
-    Settings.validate_integrity()
-    pm.validate_integrity()
-
     with HeadlessDaemon(pm, password) as headless_daemon:
-        return port_handler(headless_daemon.port)
+        return socket_handler(headless_daemon.client_socket)

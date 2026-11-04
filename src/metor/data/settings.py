@@ -7,11 +7,19 @@ Prevents silent overwrites of corrupted JSON configurations.
 
 from dataclasses import dataclass
 import json
+import os
 from enum import Enum
 from pathlib import Path
-from typing import Dict, Optional, Tuple, TypeGuard, TypedDict, Union
+import tempfile
+from typing import Dict, Optional, Tuple, TypeGuard, TypedDict, Union, cast
 
-from metor.utils import Constants, FileLock, TypeCaster, validate_json_file
+from metor.utils import (
+    Constants,
+    FileLock,
+    TypeCaster,
+    create_private_directory_tree,
+    validate_json_file,
+)
 
 
 # Types
@@ -45,6 +53,7 @@ class SettingKey(str, Enum):
 
     # 1. Client (paradigm-neutral)
     DEFAULT_PROFILE = 'client.default_profile'
+    DEFAULT_UI = 'client.default_ui'
     IPC_TIMEOUT = 'client.ipc_timeout'
     CHAT_DAEMON_AUTOSTART = 'client.chat_daemon_autostart'
     HISTORY_LIMIT = 'client.history_limit'
@@ -61,8 +70,10 @@ class SettingKey(str, Enum):
     ENABLE_TOR_LOGGING = 'daemon.enable_tor_logging'
     ENABLE_SQL_LOGGING = 'daemon.enable_sql_logging'
     ENABLE_RUNTIME_DB_MIRROR = 'daemon.enable_runtime_db_mirror'
+    ALLOW_PLAINTEXT_PROFILES = 'daemon.allow_plaintext_profiles'
     AUTO_ACCEPT_CONTACTS = 'daemon.auto_accept_contacts'
     REQUIRE_LOCAL_AUTH = 'daemon.require_local_auth'
+    SELF_DESTRUCT_REQUIRES_UNLOCK = 'daemon.self_destruct_requires_unlock'
     LOCAL_AUTH_FAILURE_LIMIT = 'daemon.local_auth_failure_limit'
     LOCAL_AUTH_LOCKOUT_TIMEOUT = 'daemon.local_auth_lockout_timeout'
     ALLOW_DROPS = 'daemon.allow_drops'
@@ -70,6 +81,10 @@ class SettingKey(str, Enum):
     RECORD_LIVE_HISTORY = 'daemon.record_live_history'
     RECORD_DROP_HISTORY = 'daemon.record_drop_history'
     FALLBACK_TO_DROP = 'daemon.fallback_to_drop'
+    SEND_READ_RECEIPTS = 'daemon.send_read_receipts'
+    MAX_PENDING_LIVE_MSGS = 'daemon.max_pending_live_msgs'
+    MAX_PENDING_LIVE_BYTES = 'daemon.max_pending_live_bytes'
+    MAX_LIVE_VOICE_BUFFER_BYTES = 'daemon.max_live_voice_buffer_bytes'
     MAX_UNSEEN_DROP_MSGS = 'daemon.max_unseen_drop_msgs'
     MAX_UNSEEN_LIVE_MSGS = 'daemon.max_unseen_live_msgs'
     EXPOSE_DROP_REJECTION = 'daemon.expose_drop_rejection'
@@ -229,6 +244,15 @@ class Settings:
             description='Selects the profile used when the CLI is started without `-p`.',
             constraints='Non-empty profile name using letters, numbers, `-`, or `_`.',
             allow_profile_override=False,
+            allow_empty_string=True,
+        ),
+        SettingKey.DEFAULT_UI: SettingSpec(
+            key=SettingKey.DEFAULT_UI,
+            default='terminal',
+            category='Client',
+            description='Selects the interactive frontend used by `metor chat`.',
+            constraints='Non-empty installed frontend identifier.',
+            allow_profile_override=False,
             allow_empty_string=False,
         ),
         SettingKey.IPC_TIMEOUT: SettingSpec(
@@ -344,17 +368,26 @@ class Settings:
             key=SettingKey.ENABLE_RUNTIME_DB_MIRROR,
             default=False,
             category='Core Daemon',
-            description='Exports a plaintext runtime copy of the encrypted database for local inspection tools.',
+            description='DEBUG/DEVELOPMENT ONLY: exports a plaintext runtime copy of the encrypted database for local inspection tools.',
             constraints='Boolean.',
-            security_note='Creates a plaintext database on disk while enabled. Keep disabled unless you explicitly need local inspection tooling.',
+            security_note='Creates plaintext data that PMK destruction cannot retroactively protect. Keep disabled and prohibit it on hardened devices.',
+        ),
+        SettingKey.ALLOW_PLAINTEXT_PROFILES: SettingSpec(
+            key=SettingKey.ALLOW_PLAINTEXT_PROFILES,
+            default=False,
+            category='Core Daemon',
+            description='DEVELOPMENT/DEBUG ONLY: permits creation or migration of local plaintext profiles without cryptographic at-rest protection.',
+            constraints='Boolean.',
+            security_note='Plaintext profiles have no at-rest confidentiality and no cryptographic erase guarantee. Hardened deployments should keep this disabled.',
+            allow_profile_override=False,
         ),
         SettingKey.AUTO_ACCEPT_CONTACTS: SettingSpec(
             key=SettingKey.AUTO_ACCEPT_CONTACTS,
-            default=True,
+            default=False,
             category='Core Daemon',
             description='Automatically accepts incoming live sessions from saved contacts.',
             constraints='Boolean.',
-            security_note='Improves convenience for known contacts, but reduces explicit confirmation on inbound reconnects.',
+            security_note='Keep disabled when explicit confirmation of every inbound LIVE session is required.',
         ),
         SettingKey.REQUIRE_LOCAL_AUTH: SettingSpec(
             key=SettingKey.REQUIRE_LOCAL_AUTH,
@@ -363,6 +396,13 @@ class Settings:
             description='Requires every UI session to authenticate even when the daemon is already running.',
             constraints='Boolean.',
             security_note='Enabled by default for encrypted profiles. Disable it only on trusted single-user hosts.',
+        ),
+        SettingKey.SELF_DESTRUCT_REQUIRES_UNLOCK: SettingSpec(
+            key=SettingKey.SELF_DESTRUCT_REQUIRES_UNLOCK,
+            default=True,
+            category='Core Daemon',
+            description='Requires normal client reauthorization before a restricted device-lifecycle session may request profile destruction.',
+            constraints='Boolean. New and unauthenticated clients are always denied.',
         ),
         SettingKey.LOCAL_AUTH_FAILURE_LIMIT: SettingSpec(
             key=SettingKey.LOCAL_AUTH_FAILURE_LIMIT,
@@ -420,6 +460,41 @@ class Settings:
             description='Falls back unacknowledged live messages into the offline drop queue when possible.',
             constraints='Boolean.',
         ),
+        SettingKey.SEND_READ_RECEIPTS: SettingSpec(
+            key=SettingKey.SEND_READ_RECEIPTS,
+            default=False,
+            category='Core Daemon',
+            description='Sends optional remote read receipts after local consume. Disabled by default.',
+            constraints='Boolean.',
+            security_note='Enabling reveals message-consumption metadata to remote peers.',
+        ),
+        SettingKey.MAX_PENDING_LIVE_MSGS: SettingSpec(
+            key=SettingKey.MAX_PENDING_LIVE_MSGS,
+            default=100,
+            category='Core Daemon',
+            description='Caps retained outbound pending LIVE logical messages per profile. `0` refuses retention and `-1` removes this guard.',
+            constraints='Integer >= -1.',
+            security_note='Bounds durable recovery state; existing pending messages are never overwritten.',
+            min_value=-1,
+        ),
+        SettingKey.MAX_PENDING_LIVE_BYTES: SettingSpec(
+            key=SettingKey.MAX_PENDING_LIVE_BYTES,
+            default=16777216,
+            category='Core Daemon',
+            description='Caps retained outbound pending LIVE payload bytes per profile. `0` refuses retention and `-1` removes this guard.',
+            constraints='Integer >= -1 bytes.',
+            security_note='Bounds durable recovery storage, including retained media payloads.',
+            min_value=-1,
+        ),
+        SettingKey.MAX_LIVE_VOICE_BUFFER_BYTES: SettingSpec(
+            key=SettingKey.MAX_LIVE_VOICE_BUFFER_BYTES,
+            default=67108864,
+            category='Core Daemon',
+            description='Caps retained local LIVE Voice bytes per profile at 64 MiB. `0` disables Voice retention and `-1` removes this guard.',
+            constraints='Integer >= -1 bytes.',
+            security_note='Finite by default to bound authenticated peer and local capture storage pressure; data is never overwritten.',
+            min_value=-1,
+        ),
         SettingKey.MAX_UNSEEN_DROP_MSGS: SettingSpec(
             key=SettingKey.MAX_UNSEEN_DROP_MSGS,
             default=20,
@@ -448,7 +523,7 @@ class Settings:
             key=SettingKey.NOTIFICATION_SINK,
             default='',
             category='Core Daemon',
-            description='JSON sink configuration for detached notifications, e.g. `{"type": "file", "path": "/tmp/metor-notify.jsonl"}` or `{"type": "webhook", "url": "https://..."}`. Empty disables the notification sink.',
+            description='Opt-in JSON sink configuration for detached notification metadata. `{"type": "file", "path": "/private/path/metor-notify.jsonl"}` appends plaintext peer metadata to an owner-private regular file. `{"type": "webhook", "url": "https://..."}` uses direct host networking, not Tor, and exposes host IP and notification metadata to the endpoint. Empty disables the notification sink.',
             constraints='JSON string or empty.',
             allow_profile_override=True,
         ),
@@ -456,7 +531,7 @@ class Settings:
             key=SettingKey.MAX_CONCURRENT_CONNECTIONS,
             default=50,
             category='Advanced Network Resilience',
-            description='Limits simultaneous authenticated and unauthenticated live sockets handled by the daemon.',
+            description='Limits admission of incoming peer connections and outgoing LIVE connections. The capacity check counts all tracked handshakes and authenticated LIVE, DROP, and CALL transports once across ownership transitions.',
             constraints='Integer >= 1.',
             min_value=1,
         ),
@@ -628,7 +703,7 @@ class Settings:
                     f"Invalid type for '{key.value}'. Expected str, got {type(value).__name__}."
                 )
 
-            if key is SettingKey.DEFAULT_PROFILE:
+            if key in {SettingKey.DEFAULT_PROFILE, SettingKey.DEFAULT_UI}:
                 normalized = value.strip()
             elif key is SettingKey.CHAT_DAEMON_AUTOSTART:
                 normalized = value.strip().lower()
@@ -650,7 +725,7 @@ class Settings:
                         f"Setting '{key.value}' must be a valid JSON string or empty."
                     ) from exc
 
-            if key is SettingKey.DEFAULT_PROFILE:
+            if key in {SettingKey.DEFAULT_PROFILE, SettingKey.DEFAULT_UI}:
                 safe_name: str = ''.join(
                     c for c in normalized if c.isalnum() or c in ('-', '_')
                 )
@@ -692,8 +767,43 @@ class Settings:
             Path: Absolute path object to settings.json.
         """
         data_dir: Path = Constants.DATA
-        data_dir.mkdir(parents=True, exist_ok=True)
+        data_dir.parent.mkdir(parents=True, exist_ok=True)
+        create_private_directory_tree(data_dir, ())
         return data_dir / Constants.SETTINGS_FILE
+
+    @staticmethod
+    def _write_settings(path: Path, data: Dict[str, Dict[str, SettingValue]]) -> None:
+        """Replace a settings document only after a private temporary copy is complete.
+
+        Args:
+            path (Path): Destination in the private settings directory.
+            data (Dict[str, Dict[str, SettingValue]]): Validated settings document.
+
+        Returns:
+            None
+        """
+        document = json.dumps(data, indent=4)
+        descriptor, temp_name = tempfile.mkstemp(
+            prefix=f'.{path.name}.', suffix='.tmp', dir=path.parent
+        )
+        temp_path = Path(temp_name)
+        try:
+            with os.fdopen(descriptor, 'w', encoding='utf-8') as handle:
+                handle.write(document)
+                handle.flush()
+                os.fsync(handle.fileno())
+            temp_path.replace(path)
+            if os.name != 'nt':
+                try:
+                    directory_descriptor = os.open(path.parent, os.O_RDONLY)
+                    try:
+                        os.fsync(directory_descriptor)
+                    finally:
+                        os.close(directory_descriptor)
+                except OSError:
+                    pass
+        finally:
+            temp_path.unlink(missing_ok=True)
 
     @classmethod
     def _read_raw_settings_data(cls) -> Dict[str, object]:
@@ -900,6 +1010,7 @@ class Settings:
         cls,
         *,
         persist_defaults: bool = True,
+        path: Optional[Path] = None,
     ) -> Dict[str, Dict[str, SettingValue]]:
         """
         Loads the settings from the JSON file into a nested structure.
@@ -907,24 +1018,37 @@ class Settings:
         Prevents overwriting the file if a JSONDecodeError occurs on an existing file.
 
         Args:
-            None
+            persist_defaults (bool): Persist the defaults when the file is absent.
+            path (Optional[Path]): Exact path already selected by a locked writer.
 
         Returns:
             Dict[str, Dict[str, SettingValue]]: The loaded settings dictionary partitioned by domain.
         """
-        path: Path = cls.get_global_settings_path()
+        path = path or (
+            cls.get_global_settings_path()
+            if persist_defaults
+            else Constants.DATA / Constants.SETTINGS_FILE
+        )
         if path.exists():
             try:
                 with path.open('r', encoding='utf-8') as f:
-                    data: Dict[str, Dict[str, SettingValue]] = json.load(f)
-
-                    for domain in ('ui', 'client', 'daemon'):
-                        if domain not in data:
-                            data[domain] = {}
-
-                    return data
-            except (json.JSONDecodeError, IOError):
-                pass
+                    loaded: object = json.load(f)
+            except (json.JSONDecodeError, UnicodeError, OSError):
+                raise SettingValidationError(
+                    'Global settings file is unreadable or invalid.'
+                ) from None
+            if not isinstance(loaded, dict) or any(
+                domain in loaded and not isinstance(loaded[domain], dict)
+                for domain in ('ui', 'client', 'daemon')
+            ):
+                raise SettingValidationError(
+                    'Global settings file is unreadable or invalid.'
+                )
+            data = cast(Dict[str, Dict[str, SettingValue]], loaded)
+            for domain in ('ui', 'client', 'daemon'):
+                if domain not in data:
+                    data[domain] = {}
+            return data
 
         data = {'ui': {}, 'client': {}, 'daemon': {}}
         for key_enum, val in cls._DEFAULTS.items():
@@ -935,23 +1059,54 @@ class Settings:
 
         if persist_defaults and not path.exists():
             with FileLock(path):
-                with path.open('w', encoding='utf-8') as f:
-                    json.dump(data, f, indent=4)
+                if path.exists():
+                    return cls._load_settings(persist_defaults=False, path=path)
+                cls._write_settings(path, data)
 
         return data
 
     @classmethod
-    def get(cls, key: SettingKey) -> Optional[SettingValue]:
+    def _load_validated_settings_for_write(
+        cls, path: Path
+    ) -> Dict[str, Dict[str, SettingValue]]:
+        """Read the locked target only when its existing document is valid.
+
+        Args:
+            path (Path): Exact settings path held by the caller's file lock.
+
+        Returns:
+            Dict[str, Dict[str, SettingValue]]: Valid settings or fresh defaults.
+        """
+        if path.exists():
+            try:
+                cls.validate_integrity()
+            except (OSError, ValueError, TypeError):
+                raise SettingValidationError(
+                    'Global settings file is unreadable or invalid.'
+                ) from None
+        return cls._load_settings(persist_defaults=False, path=path)
+
+    @classmethod
+    def get(
+        cls,
+        key: SettingKey,
+        *,
+        persist_defaults: bool = True,
+    ) -> Optional[SettingValue]:
         """
         Retrieves a setting value by its strongly-typed key. Uses default if not found.
 
         Args:
             key (SettingKey): The setting key enum to retrieve.
+            persist_defaults (bool): Whether a missing settings file should be
+                created while resolving the default value.
 
         Returns:
             Optional[SettingValue]: The value of the setting, or None if completely missing.
         """
-        data: Dict[str, Dict[str, SettingValue]] = cls._load_settings()
+        data: Dict[str, Dict[str, SettingValue]] = cls._load_settings(
+            persist_defaults=persist_defaults,
+        )
         category: str
         sub_key: str
         category, sub_key = key.value.split('.', 1)
@@ -966,17 +1121,27 @@ class Settings:
         return cls._DEFAULTS.get(key.value)
 
     @classmethod
-    def get_str(cls, key: SettingKey) -> str:
+    def get_str(
+        cls,
+        key: SettingKey,
+        *,
+        persist_defaults: bool = True,
+    ) -> str:
         """
         Retrieves a setting and guarantees a string return type.
 
         Args:
             key (SettingKey): The setting key enum.
+            persist_defaults (bool): Whether a missing settings file should be
+                created while resolving the default value.
 
         Returns:
             str: The configuration value as a string.
         """
-        val: Optional[SettingValue] = cls.get(key)
+        val: Optional[SettingValue] = cls.get(
+            key,
+            persist_defaults=persist_defaults,
+        )
         if val is not None:
             return TypeCaster.to_str(val)
 
@@ -1038,7 +1203,13 @@ class Settings:
         return TypeCaster.to_bool(default_val)
 
     @classmethod
-    def set(cls, key: SettingKey, value: SettingValue) -> None:
+    def set(
+        cls,
+        key: SettingKey,
+        value: SettingValue,
+        *,
+        expected_value: Optional[SettingValue] = None,
+    ) -> None:
         """
         Updates a setting value and saves it safely to the nested JSON file using a lock.
         Enforces strict type validation against the default configuration schema.
@@ -1046,6 +1217,8 @@ class Settings:
         Args:
             key (SettingKey): The setting key enum to update.
             value (SettingValue): The new value for the setting.
+            expected_value (Optional[SettingValue]): Optional effective value to
+                compare under the same file lock before changing it.
 
         Raises:
             TypeError: If the provided value does not match the expected type schema.
@@ -1058,17 +1231,22 @@ class Settings:
         path: Path = cls.get_global_settings_path()
 
         with FileLock(path):
-            data: Dict[str, Dict[str, SettingValue]] = cls._load_settings(
-                persist_defaults=False,
+            data: Dict[str, Dict[str, SettingValue]] = (
+                cls._load_validated_settings_for_write(path)
             )
             category: str
             sub_key: str
             category, sub_key = key.value.split('.', 1)
 
+            if (
+                expected_value is not None
+                and data[category].get(sub_key, cls._DEFAULTS[key]) != expected_value
+            ):
+                raise SettingValidationError('Setting changed elsewhere.')
+
             data[category][sub_key] = value
 
-            with path.open('w', encoding='utf-8') as f:
-                json.dump(data, f, indent=4)
+            cls._write_settings(path, data)
 
     @classmethod
     def set_namespace(cls, key: str, value: SettingValue) -> None:
@@ -1106,8 +1284,8 @@ class Settings:
         path: Path = cls.get_global_settings_path()
 
         with FileLock(path):
-            data: Dict[str, Dict[str, SettingValue]] = cls._load_settings(
-                persist_defaults=False,
+            data: Dict[str, Dict[str, SettingValue]] = (
+                cls._load_validated_settings_for_write(path)
             )
             category: str
             sub_key: str
@@ -1115,8 +1293,7 @@ class Settings:
 
             data[category][sub_key] = normalized
 
-            with path.open('w', encoding='utf-8') as f:
-                json.dump(data, f, indent=4)
+            cls._write_settings(path, data)
 
     @classmethod
     def get_namespace_value(cls, key: str) -> SettingValue:

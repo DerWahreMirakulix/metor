@@ -1,45 +1,63 @@
 # A Tor Messenger Framework
 
-**Metor** is a highly secure, Tor-based terminal messenger written in Python. It provides a persistent Tor Hidden Service (.onion address) along with an interactive, multiplexed live chat and asynchronous offline messaging.
+**Metor** is a Tor-based messenger framework written in Python. It provides a
+persistent Tor Onion Service, typed SDK, general CLI and daemon, an interactive
+Terminal frontend, and a native desktop GUI. LIVE communication and
+asynchronous offline Drops share the same daemon-owned transport and durable
+state.
 
-Built on a robust **Client-Daemon Architecture** and structured via **Domain-Driven Design (DDD)**, the user interface is completely stateless. You can manage multiple secure connections simultaneously, maintain an address book, queue offline messages, and view connection history — all seamlessly from the console, whether running locally or remotely.
+Built on a **Client-Daemon Architecture**, frontends own interaction and presentation while the daemon owns transport, durable delivery and authorization. You can manage connections, maintain an address book, queue offline messages and view connection history locally or remotely.
 
-## 📚 Repository Guide
+## 📚 Documentation
 
-Use this README as the landing page, then jump to the specialized documents below:
+This README is the human starting point. Follow the architecture guide for the
+system model, then use the focused references when you need exact contracts.
 
-- [ARCHITECTURE.md](docs/ARCHITECTURE.md): Canonical architecture decisions guide covering system boundaries, config routing, IPC contracts, OPSEC guardrails, and transport invariants.
-- [GLOSSARY.md](docs/GLOSSARY.md): Canonical terminology — the two dimensions (message semantics `live`/`drop`, connection types `session`/`tunnel`/`direct`) and the settings namespaces.
-- [SETTINGS.md](docs/SETTINGS.md): Generated reference for all supported `settings` and profile `config` keys, including defaults, constraints, and security notes.
-- [API.md](docs/API.md): Generated IPC contract reference for all daemon commands and events.
-- [AUDIT.md](docs/AUDIT.md): Security and architecture audit checklist used for every critical change.
-- [CONTRIBUTE.md](docs/CONTRIBUTE.md): Coding standards, import rules, docstring requirements, and security-focused contribution constraints.
+- Understand Metor through the [architecture guide](docs/ARCHITECTURE.md) and
+  [canonical terminology](docs/GLOSSARY.md).
+- Build against the daemon with the generated [IPC API reference](docs/generated/API.md)
+  and [settings reference](docs/generated/SETTINGS.md).
+- Use the native GUI through its [GUI contract and startup guide](docs/contracts/GUI.md).
+- Connect a Python application with the [SDK example](docs/contracts/FRONTENDS.md#connecting-a-python-client),
+  or use the same [frontend contract](docs/contracts/FRONTENDS.md) from another client.
+- Contribute and review security-sensitive changes with the
+  [contribution guide](docs/CONTRIBUTE.md).
+- Prepare a release with the [release and versioning guide](docs/RELEASING.md).
+
+**First release baseline.** The four Metor packages report `1.0.0`; IPC, peer
+and storage formats start at generation 1. A checkout reporting this version
+does not mean a release has been published. Until the first tagged bundle is
+available, use the [source installation](#3-install-from-a-source-checkout).
+For a profile created on an earlier development snapshot, keep the original
+data and create a fresh profile. Metor does not upgrade development databases.
 
 ## 🌟 Key Features
 
-- **Client-Daemon Architecture (Stateless UI):**
-  The heavy lifting (Tor process management, cryptography, network sockets, outbox routing) runs in the background as a headless daemon. The Chat UI merely acts as a client communicating via a strictly typed IPC interface. You can close the UI at any time without dropping active Tor connections.
+- **Client-Daemon Architecture (Daemon-owned operational state):**
+  The heavy lifting (Tor process management, cryptography, network sockets, outbox routing) runs in the background as a headless daemon. The Chat UI acts as a client communicating via a strictly typed IPC interface. A separately started daemon keeps running when a UI closes; an automatically started daemon stops after its last participating frontend exits.
 - **Asynchronous Offline Messaging ("Drops"):**
   Send messages even when your contact is offline. The daemon safely queues outgoing messages in a local SQLite Outbox and automatically delivers them in the background as soon as the peer comes online (Drop & Go).
 - **Network Resilience & Retunneling:**
   Built-in auto-reconnect logic handles intermittent network drops. If a route stalls completely, you can manually force a Tor circuit rotation (`NEWNYM`) and seamlessly retunnel the active connection to your peer on the fly.
-- **Zero-Trace & Ephemeral Messages:**
-  Configurable "Burn-After-Read" policies. Read messages can be permanently destroyed using cryptographic file shredding to meet strict OPSEC requirements.
+- **Retention and Local Deletion:**
+  Configurable read/release policies remove local retained content. File overwrite and Python memory clearing are best effort; storage snapshots, backups, SSD wear leveling and remote copies prevent an unconditional physical-erasure guarantee.
 - **Cryptographic Peer Authentication:**
-  Connections are secured by a deterministic Ed25519 Challenge-Response handshake. Identity spoofing is mathematically impossible—every peer must cryptographically prove ownership of their `.onion` key before a session is established.
+  Connections use an Ed25519 challenge-response handshake: each peer must prove ownership of its `.onion` key. This depends on key secrecy, correct implementation and the underlying cryptographic assumptions; it is not unconditional protection against endpoint compromise.
 - **Multi-Profile Support:**
-  Manage completely isolated identities (`metor -p work`, `metor -p private`). Each profile gets its own cryptographic keys, its own `.onion` address, and an isolated SQLCipher-encrypted database (Argon2i + SecretBox).
+  Manage completely isolated identities (`metor -p work`, `metor -p private`). Each encrypted profile gets a random Profile Master Key (PMK), its own `.onion` address, a SQLCipher-encrypted database, and authenticated external blob storage.
 - **Dynamic Contact Management:**
   Unknown incoming connections are assigned volatile RAM aliases (e.g., `exw4kj1`) dynamically. These "Discovered Peers" can be promoted to permanent contacts on the fly. Deleting a contact during an active chat invokes a "Downgrade Delete"—the connection is not dropped, but gracefully downgraded back to a volatile alias.
 - **Remote Capability (VPS / SSH):**
   Run the Metor daemon 24/7 on a secure remote server and securely connect your local laptop UI to it via an SSH tunnel forwarding the IPC port.
 
-## Supported Hosts
+## Supported hosts
 
-- **Linux:** Fully supported. GitHub Releases publish a compiler-free runtime wheel bundle and the source install path uses the prebuilt `sqlcipher3-binary` wheel.
-- **Windows:** Fully supported. GitHub Releases publish a compiler-free runtime wheel bundle; source installs still build `sqlcipher3` from source.
+Desktop and simulator claims are capability- and evidence-based. The [GUI contract](docs/contracts/GUI.md) describes current capabilities. No physical appliance, universal
+audio route, speaker AEC, or complete screen-reader certification is claimed.
 
-For Windows source installs from a checkout, make sure the Microsoft C++ Build Tools are available before running `pip install`.
+The pinned dependencies provide wheels for the supported CPython and x86-64
+combinations. A custom Windows SQLCipher source build additionally requires
+Microsoft C++ Build Tools.
 
 ## 🏗️ Architecture & API
 
@@ -47,14 +65,14 @@ Metor strictly separates presentation (UI) from domain logic (Core/Data). Commun
 
 Recommended reading order:
 
-- [ARCHITECTURE.md](docs/ARCHITECTURE.md) for the high-level design and long-lived decisions.
-- [SETTINGS.md](docs/SETTINGS.md) for all supported settings, defaults, constraints, and security notes.
-- [API.md](docs/API.md) for the exact IPC schema used between UI and daemon.
-- [AUDIT.md](docs/AUDIT.md) and [CONTRIBUTE.md](docs/CONTRIBUTE.md) if you are reviewing or changing code.
+- [Architecture guide](docs/ARCHITECTURE.md) for the high-level design and long-lived decisions.
+- [Settings reference](docs/generated/SETTINGS.md) for all supported settings, defaults, constraints, and security notes.
+- [IPC API reference](docs/generated/API.md) for the exact client-daemon wire contract.
+- [Contribution guide](docs/CONTRIBUTE.md) for development, testing, and review rules.
 
 ### OPSEC & Security Concepts
 
-- **Data-at-Rest Encryption:** All local data (history, address book, queues) are stored in an SQLite database encrypted via SQLCipher. Master keys are heavily derived using Argon2i and protected via NaCL SecretBoxes.
+- **Data-at-Rest Encryption:** Argon2id derives a password-based KEK that authenticates and unwraps a random PMK. Domain-separated `DB_KEY`, `SECRET_KEY`, and `BLOB_KEY` values are derived from that PMK; the password itself is never the SQLCipher key.
 - **Network Anti-DoS:** Incoming TCP streams (both Tor and local IPC) enforce strict stream framing and length limitations (`MAX_STREAM_BYTES`) to thwart Out-Of-Memory (OOM) and UTF-8 fragmentation attacks.
 - **Thread Safety:** Address book mutations and session state transitions are safeguarded by deterministic locks (`FileLock` across processes, `threading.Lock` in memory) preventing race conditions and database corruption.
 
@@ -62,15 +80,30 @@ Recommended reading order:
 
 For security reasons and to prevent supply-chain attacks, Metor **does not** bundle the Tor binary. You must install it from the official Tor Project sources.
 
+The Linux GUI and simulator require an SDL2/OpenGL display, access to system
+D-Bus, and a logind-registered login session for the GUI process. A display alone
+is insufficient in containers, SSH or WSL sessions without that login binding.
+See the [GUI startup prerequisites](docs/contracts/GUI.md#installation-and-startup)
+for the exact Linux requirements and Windows graphics setup.
+
 ### Distribution Matrix
 
-Metor is split into three modular packages to support different deployment roles:
+Metor is split into four non-overlapping packages:
 
-| Package            | Contents                                                                                 | Typical Use Case                          | Install Target             |
-| :----------------- | :--------------------------------------------------------------------------------------- | :---------------------------------------- | :------------------------- |
-| **`metor`**        | Terminal UI, CLI dispatcher, headless daemon, and SDK                                    | Full desktop/laptop installation          | `pip install metor`        |
-| **`metor-daemon`** | Headless Tor runtime, SQLCipher database, and profile management (**no UI code**)        | 24/7 background daemon on a VPS or server | `pip install metor-daemon` |
-| **`metor-sdk`**    | Lightweight IPC client library and typed wire contract (**no SQLCipher, no Tor, no UI**) | Custom app development, GUIs, or bots     | `pip install metor-sdk`    |
+| Package                 | Contents                                                                                     | Typical Use Case                                             | Install Target                  |
+| :---------------------- | :------------------------------------------------------------------------------------------- | :----------------------------------------------------------- | :------------------------------ |
+| **`metor-sdk`**         | IPC client, typed API/wire DTOs, proof helpers, and the public frontend launcher contract    | Client integration or a third-party frontend                 | `pip install metor-sdk`         |
+| **`metor`**             | General CLI, daemon, storage, Tor and local profile/process orchestration; no interactive UI | Headless/base installation                                   | `pip install metor`             |
+| **`metor-ui-terminal`** | Interactive Terminal chat, slash-command help, rendering, theme and frontend resources       | Terminal interactive frontend                                | `pip install metor-ui-terminal` |
+| **`metor-ui-gui`**      | Native Kivy desktop/simulator GUI and bundled local assets                                   | Desktop GUI within the [GUI contract](docs/contracts/GUI.md) | `pip install metor-ui-gui`      |
+
+Official package versions are coordinated exactly. `metor` depends on the
+matching SDK; installing either frontend pulls in matching base and SDK
+packages. Neither base nor SDK depends on an interactive UI.
+The install targets identify distribution names; the current release workflow
+publishes GitHub wheel bundles, not packages to PyPI. Use the matching bundle
+or the local project paths below until an official package-index publication is
+announced. SDK-only clients need no local Tor or SQLCipher installation.
 
 Choose the install path that matches your role:
 
@@ -81,13 +114,16 @@ The wheel bundle is a **release artifact**, not a normal repository file. A plai
 
 ### 1. Install Tor
 
-- **Windows (Manual Security Install):** Download the [Tor Expert Bundle](https://www.torproject.org/download/tor/). Extract it and either set `METOR_TOR_PATH=C:\path\to\tor.exe` in your environment or a local `.env` file, or copy `tor.exe` into `C:\Users\YourName\.metor\tor.exe`. If `METOR_TOR_PATH` is unset, Metor first tries `tor.exe` from `PATH` and then falls back to `.metor\tor.exe`.
+- **Windows (Manual Security Install):** Download the [Tor Expert Bundle](https://www.torproject.org/download/tor/). Extract it and either set `METOR_TOR_PATH=C:\path\to\tor.exe` in your environment or a local `.env` file, or copy `tor.exe` into `C:\Users\YourName\.metor\tor.exe`. Without an override, Metor uses `tor.exe` in its data directory. Choose a profile data path that the Windows system code page can represent. Set `METOR_DATA_DIR_PARENT` before creating profiles if you need a different location.
 - **Linux (Debian/Ubuntu):** `sudo apt update && sudo apt install tor`
 - **Linux (Fedora):** `sudo dnf install tor`
 
 ### 2. Install From The Release Wheel Bundle
 
-GitHub Releases publish one wheel bundle per supported host platform. Each archive contains the Metor wheel plus all Python runtime wheels needed for an offline install, including the SQLCipher backend.
+The release workflow builds separate SDK, base, base-plus-Terminal, and
+base-plus-GUI wheelhouses for each supported host. Each archive resolves one
+explicit install target and its pinned dependencies; installers never install
+every wheel by glob.
 
 This path is intended for end users consuming an official release. If you cloned the repository directly, use the source checkout path below instead.
 
@@ -99,15 +135,34 @@ This path is intended for end users consuming an official release. If you cloned
 sh install.sh
 ```
 
-On Windows, run `install.cmd` from the extracted bundle folder.
+On Windows, run `install.cmd` from the extracted bundle folder. On both
+platforms, start with a fresh extraction and an installed Python outside
+that directory on PATH.
 
-The installer creates a local `.venv` inside the extracted bundle and installs Metor entirely from the bundled wheelhouse, including the pinned `pip` wheel. This path is the recommended runtime install for both Linux and Windows because it does not require a local C/C++ build toolchain or package index access during installation.
+Use the installed environment for the commands below. On Linux run
+`source .venv/bin/activate`; in Windows PowerShell run
+`.\.venv\Scripts\Activate.ps1`. Alternatively invoke `.venv/bin/metor` or
+`.venv\Scripts\metor.exe` directly. For the GUI, open
+`.venv\Scripts\metor-gui.exe` on Windows or run
+`.venv/bin/metor chat --ui gui --start-daemon` on Linux.
+
+The installer first checks the exact CPython minor/ABI, OS, architecture, and
+every file listed in `SHA256SUMS.txt`, including the pinned `pip` wheel. It then
+creates a local `.venv` and installs entirely from the bundled wheelhouse. For
+a reinstall or a retry after a partial installation, extract the archive
+again into a new directory. The installer rejects any existing `.venv`
+without running it or changing its contents. Checksums detect incomplete
+or modified archive contents; they are not a signature or proof of publisher
+identity. This path requires neither a local C/C++ build toolchain nor package
+index access during installation.
 
 This self-contained installer is intentionally local to the extracted bundle folder. If you want the old "global command on my chosen environment" behavior, use the source checkout path below or run `pip install --no-index --find-links wheelhouse metor` inside your own already activated venv or user-managed Python environment.
 
 ### 3. Install From A Source Checkout
 
-Python 3.11 or higher is required.
+Metor requires CPython 3.11 through 3.13. CI checks Linux and Windows x86-64
+on 3.11 and 3.13; offline bundles use 3.11. Other platforms and architectures
+need separate validation. See [the support and test policy](docs/CONTRIBUTE.md#python-and-platform-policy).
 
 This is the normal path for developers, contributors, and advanced users who want to choose their own Python environment instead of using the release bundle installer.
 
@@ -117,34 +172,72 @@ git clone https://github.com/DerWahreMirakulix/metor.git
 
 # Enter the repository
 cd metor
+
+# Create an isolated environment (use py -3.11 on Windows if needed)
+python -m venv .venv
 ```
+
+Activate it with `source .venv/bin/activate` on Linux or
+`.\.venv\Scripts\Activate.ps1` in Windows PowerShell before continuing.
 
 ```bash
-# Recommended security-conscious runtime installation
-python -m pip install --upgrade pip==26.0.1
-pip install -r requirements/runtime.lock
-pip install --no-deps --no-build-isolation .
-
-# Recommended security-conscious developer installation
-python -m pip install --upgrade pip==26.0.1
-pip install -r requirements/dev.lock
-pip install --no-deps --no-build-isolation -e .
+# Complete developer installation in the selected Python environment, from the repository root
+python -m pip install -r requirements/dev.txt
+python -m pip check
+python -m metor chat --list-uis
 ```
+
+The manifest explicitly selects all four Metor projects from this checkout and
+reuses the pinned third-party dependencies. `python -m pip install .` or
+`python -m pip install -e .` alone installs only the Base project; neither is a
+checkout-wide install. Isolated builds may obtain build requirements from the
+configured package index. The Metor projects in this checkout need not be
+published there.
+
+For Base and SDK only, install the applicable pins and both local projects:
+
+```bash
+python -m pip install -r requirements/base.lock
+python -m pip install -e ./packaging/sdk -e .
+python -m pip check
+```
+
+For a non-editable source installation, pass the desired local projects together
+without `-e` and leave build isolation enabled:
+
+```bash
+python -m pip install -r requirements/gui.lock -r requirements/terminal.lock ./packaging/sdk . ./packaging/terminal ./packaging/gui
+python -m pip check
+```
+
+SDK-only users may install `./packaging/sdk` independently.
+Source visibility alone does not register frontend entry points. Managed daemon
+startup uses the base-owned `metor daemon` command and remains distinct from the
+short-lived offline executor used by applicable one-shot CLI commands.
 
 The lock files pin the full tested dependency set so normal resolver drift does not silently pull newer transitive packages.
 
-Unlike the release bundle installer, this path installs into whichever Python environment you chose before running `pip install`.
+Unlike the release bundle installer, this path installs into whichever Python environment you chose before running `python -m pip`.
 
-On Linux the source install path selects the prebuilt `sqlcipher3-binary` wheel. On Windows it selects `sqlcipher3`, which builds the bundled SQLCipher sources locally. If you maintain your own SQLCipher toolchain, Metor also accepts `pysqlcipher3` as a manual fallback backend.
+On Linux the source install path selects the prebuilt `sqlcipher3-binary` wheel.
+On supported Windows combinations it selects the `sqlcipher3` wheel. A platform
+without a matching wheel needs a separate SQLCipher build toolchain and is
+outside the tested installation matrix. Metor also accepts `pysqlcipher3` as a
+manually provisioned fallback backend.
 
 ## 💻 Usage & Commands
 
-All data (databases, keys, configurations) are safely stored in your `~/.metor/` directory.
+Local profiles, keys and configuration use `~/.metor/` by default.
 _Tip: Append `-p <profile_name>` to any command to use an isolated identity._
+
+For a new GUI installation, run `metor chat --ui gui --start-daemon` and use
+the graphical profile creation flow. For Terminal or CLI use, create your first
+encrypted profile with `metor profiles add personal` before starting a daemon;
+the first created profile becomes the default.
 
 ### 1. Start the Daemon
 
-Before chatting, the background daemon must be started:
+To run a daemon independently of any frontend, start it in its own terminal:
 
 ```bash
 metor daemon
@@ -158,14 +251,14 @@ If you want the daemon to expose IPC first and defer all key/database access unt
 metor daemon --locked
 ```
 
-For daemon-only deployments (no UI code, e.g. on a VPS or in minimal bundles) a headless entry is available:
+The base `metor` package starts daemons without installing UI code:
 
 ```bash
-# Encrypted profiles (default) require locked startup in headless mode:
-metor-daemon -p my_server --locked daemon
+# Encrypted profiles can expose IPC before any key/database access:
+metor -p my_server daemon --locked
 
 # Plaintext profiles can start unlocked directly:
-metor-daemon -p my_server daemon
+metor -p my_server daemon
 ```
 
 Use `metor unlock` only to unlock a daemon that was explicitly started in locked mode:
@@ -178,34 +271,97 @@ Encrypted profiles enable `daemon.require_local_auth` by default, so every CLI c
 
 ### 2. The Live Chat (Multiplexed UI)
 
-Open a second terminal window to start the interactive user interface:
+Start the interactive user interface:
 
 ```bash
 metor chat
 ```
 
-Inside the Chat UI, you have access to the following slash commands:
+Select an installed frontend explicitly when needed:
 
-| Command                         | Description                                                          |
-| :------------------------------ | :------------------------------------------------------------------- |
-| `/connect <onion\|alias>`       | Establishes a new secure Tor connection to a peer.                   |
-| `/accept [onion\|alias]`        | Accepts an incoming background connection request.                   |
-| `/reject [onion\|alias]`        | Rejects an incoming connection request.                              |
-| `/switch [..\|<onion\|alias>]`  | Switches focus between active chats (use `..` to unfocus).           |
-| `/end [onion\|alias]`           | Terminates the connection to the specified peer.                     |
-| `/fallback [onion\|alias]`      | Forces unacknowledged live messages into the offline drop queue.     |
-| `/sessions`                     | Lists all active and pending sessions.                               |
-| `/retunnel [onion\|alias]`      | Forces a Tor circuit rotation (`NEWNYM`) and reconnects to the peer. |
-| `/inbox [onion\|alias]`         | Shows inbox counts or consumes unread messages for one peer.         |
-| `/transport [onion\|alias]`     | Shows the current transport state (session/tunnel, focus, pending).  |
-| `/clear`                        | Clears the current chat display.                                     |
-| `/contacts list`                | Displays the address book and temporary discovered peers.            |
-| `/contacts add <alias> [onion]` | Saves a temporary RAM peer permanently to disk.                      |
-| `/contacts rm <onion\|alias>`   | Removes a saved contact or demotes an active peer gracefully.        |
-| `/contacts rename <old> <new>`  | Renames a saved or discovered peer.                                  |
-| `/exit`                         | Closes the UI (the daemon remains active in the background).         |
+```bash
+metor chat --ui terminal
+metor chat --ui gui
+```
 
-### 3. Headless CLI Commands
+On Windows, start `metor-gui.exe` from the installed environment's `Scripts`
+directory to open the GUI without a console window. In a release GUI bundle,
+that is `.venv\Scripts\metor-gui.exe`.
+
+The GUI opens its graphical Create profile or picker view even with no existing
+profile or daemon. `-p NAME` chooses only its initial profile; creation,
+selection, authentication and later switching stay graphical, including when
+started from a shell. Terminal chat requires a usable profile before its chat
+loop and directs a fresh installation to `metor profiles add NAME`. The first
+successfully created profile becomes the default; a sole survivor is selected
+automatically. Automatically started daemons are shared by long-lived local
+frontends and stop after the last one exits. Separately started daemons remain
+running when chat closes. Use
+`--start-daemon` to start a missing local daemon upon activation,
+`--no-start-daemon` to prevent that start, and `--debug` for safe extra fatal
+startup locations. Native display and Tor prerequisites must be installed
+separately.
+
+GUI-specific installation, simulator/device selection, ordinary operation, and
+troubleshooting are consolidated in the [GUI contract](docs/contracts/GUI.md).
+
+Choose the interface that fits the task. The one-shot CLI ships in Base;
+Terminal and GUI are independently installed frontends of the same Core.
+
+| Capability                        | Base CLI                                   | Terminal                                              | GUI                                                 |
+| :-------------------------------- | :----------------------------------------- | :---------------------------------------------------- | :-------------------------------------------------- |
+| Text DROP                         | Send, inbox and history commands           | Interactive send and receive                          | Conversation view                                   |
+| Text LIVE                         | Use an installed interactive frontend      | Connect, accept, chat and end                         | Connect, accept, chat and end                       |
+| Voice messages                    | History metadata; no recording or playback | Incoming notice; no recording or playback             | Record, review, send and play with configured audio |
+| Telephone calls                   | Use a capable frontend                     | Signaling and rejection; no start or audio acceptance | Start, accept and talk with configured duplex audio |
+| Profile and daemon administration | Full command interface                     | Uses CLI setup                                        | Graphical profile setup and settings                |
+
+GUI and Terminal exchange text with each other, and CLI text DROPs arrive in
+either frontend. A DROP needs no LIVE connection. Terminal selects text delivery
+from the peer's LIVE state; the GUI offers explicit DROP and LIVE views. Voice
+stays unread when a text-only interface displays its notice. Accepting a LIVE
+chat never accepts a telephone call. Terminal can reject an incoming call but
+cannot take over a call started or accepted by another frontend: cancel,
+hangup and mute controls require the exact client that owns it. See the
+[shared frontend contract](docs/contracts/FRONTENDS.md) for exact permissions,
+retention and interoperability rules.
+
+Inside the running Terminal UI, you have access to the following slash commands:
+
+| Command                         | Description                                                           |
+| :------------------------------ | :-------------------------------------------------------------------- |
+| `/connect <onion\|alias>`       | Requests a LIVE text chat with a peer.                                |
+| `/accept [onion\|alias]`        | Accepts an incoming LIVE text-chat request.                           |
+| `/reject [onion\|alias]`        | Rejects an incoming LIVE text-chat request.                           |
+| `/switch [..\|<onion\|alias>]`  | Switches focus between active chats (use `..` to unfocus).            |
+| `/end [onion\|alias]`           | Ends the LIVE text chat; an independently accepted call can continue. |
+| `/fallback [onion\|alias]`      | Forces unacknowledged live messages into the offline drop queue.      |
+| `/sessions`                     | Lists all active and pending sessions.                                |
+| `/retunnel [onion\|alias]`      | Forces a Tor circuit rotation (`NEWNYM`) and reconnects to the peer.  |
+| `/inbox [onion\|alias]`         | Shows inbox counts or consumes unread messages for one peer.          |
+| `/transport [onion\|alias]`     | Shows the current transport state (session/tunnel, focus, pending).   |
+| `/calls`                        | Shows telephone signaling without accepting audio.                    |
+| `/call reject <call-id>`        | Rejects that exact incoming telephone call.                           |
+| `/clear`                        | Clears the current chat display.                                      |
+| `/contacts list`                | Displays the address book and temporary discovered peers.             |
+| `/contacts add <alias> [onion]` | Saves a temporary RAM peer permanently to disk.                       |
+| `/contacts rm <onion\|alias>`   | Removes a saved contact or demotes an active peer gracefully.         |
+| `/contacts rename <old> <new>`  | Renames a saved or discovered peer.                                   |
+| `/exit`                         | Closes the UI and releases its daemon participation.                  |
+
+Enter sends the current input. Ctrl-N inserts a newline; arrows, Home, End and
+Delete edit the draft. POSIX terminals also support Alt-Enter for a newline and
+bracketed paste with embedded newlines without sending. Ctrl-C exits, and
+Ctrl-D exits an empty prompt. Incoming messages and contact changes preserve the
+current draft. Long drafts scroll within the available terminal viewport while
+keeping the cursor visible, including after a resize.
+
+Quote aliases containing spaces in slash commands, for example
+`/switch "Alice Smith"` or `/contacts rename "Alice Smith" "Mc Alice"`. Commands
+use shell-style quoting; malformed quotes or unexpected extra arguments produce
+usage guidance without executing a command.
+
+### 3. One-shot CLI Commands
 
 You don't need to enter the Chat UI to use Metor. It can act as an asynchronous CLI messenger (similar to email).
 
@@ -219,12 +375,35 @@ You don't need to enter the Chat UI to use Metor. It can act as an asynchronous 
 | `metor messages show <onion\|alias>`        | Prints the chat history with a contact directly to the console.              |
 | `metor transport [onion\|alias]`            | Prints the transport state (session/tunnel, focus count, pending live).      |
 
+Authentication and transport failures, rejected arguments and failed profile
+password creation return a nonzero exit status. Unexpected extra arguments are rejected
+before mutation. If the daemon disconnects before confirming a command, the CLI
+reports an unknown outcome; check its status before retrying.
+
+For scripts, use the exit status to distinguish confirmed success (`0`) from
+failure (nonzero). Command failures use `1`; launcher/parser failures may use
+`2`, and an interruption handled at the launcher may use `130`. Cancelling a
+profile migration returns failure without changing the profile. Output is
+human-readable text and may contain ANSI formatting. Redirected stdout and stderr
+use UTF-8 on every supported platform; terminal streams retain their native encoding.
+There is no JSON output mode. Use the typed SDK or documented IPC for structured
+results and stable field names. Put `--` before literal option-looking operands,
+for example `metor send alice -- "--help"` sends the text `--help` instead of
+requesting command help.
+
+Password prompts hide terminal input. Redirected stdin must use UTF-8; each password
+prompt reads one line without echo, including on Windows. Confirmation prompts need a second
+line. Spaces are preserved and the line ending is removed. Each redirected secret
+is limited to 4,096 bytes when encoded as UTF-8. EOF, invalid text or an oversized secret
+aborts the operation with a nonzero status, without using a truncated credential.
+Scripts should supply credentials through stdin rather than command arguments.
+
 ### 4. Profile Management & Remote Setup
 
 Local profiles support two structural storage modes:
 
-- `encrypted` (default): keys and the SQLite database stay encrypted at rest and support daemon lock plus per-session local auth.
-- `plaintext`: create with `metor profiles add <name> --plaintext` when you intentionally do not want password protection at rest.
+- `encrypted` (default): the database, private secrets, and external blobs are encrypted at rest and support daemon lock plus per-session local auth.
+- `plaintext`: a development/debug-only mode in which the database, private secrets, and external blobs are plaintext on disk and provide no at-rest confidentiality.
 
 Security mode is structural profile metadata, not a normal `config set` key. To change it later, use the dedicated migration flow:
 
@@ -232,9 +411,15 @@ Security mode is structural profile metadata, not a normal `config set` key. To 
 metor profiles migrate <name> --to <encrypted|plaintext>
 ```
 
+Migration transforms the database, private secrets, keyslot, metadata, and all
+persistent blobs in one failure-atomic staged transaction. Blob IDs and database
+references remain unchanged. Non-durable temporary blob spool state is discarded
+while the profile is offline. Password changes instead validate and rewrap the
+same PMK; they do not rewrite the database, secrets, or blobs.
+
 Want to run Metor on a server and connect securely from your laptop?
 
-1. **On the Server (VPS):** Run `metor-daemon -p my_server --locked daemon` (using the headless `metor-daemon` package).
+1. **On the Server (VPS):** Install `metor`, then run `metor -p my_server daemon --locked`.
 2. **On your Laptop:** Run `metor profiles add remote_node --remote --port 50051`.
 3. **Establish SSH Tunnel:** `ssh -N -L 50051:127.0.0.1:50051 user@server_ip`.
 4. **Start Chatting:** Run `metor -p remote_node chat` (Your local UI now securely controls the remote daemon over the forwarded port).
@@ -242,13 +427,16 @@ Want to run Metor on a server and connect securely from your laptop?
 ### 5. Emergency & Cleanup
 
 - `metor cleanup`: Kills zombie Tor processes (`tor.pid`) and clears stale ghost locks.
-- `metor purge`: **WARNING!** Permanently wipes the entire `.metor` directory, completely destroying all databases, histories, and private keys (irreversible).
+- `metor purge`: **WARNING!** Destroys protected key access for encrypted
+  profiles before best-effort removal of the `.metor` tree. Filesystem,
+  snapshot, backup, and flash-remanence limits still apply; see the
+  [architecture guide](docs/ARCHITECTURE.md#lock-versus-purge-and-self-destruct).
 
 ## ⚙️ Settings & Configuration
 
 Metor's configuration system uses a cascading architecture. You can define **global settings** that apply to all profiles, or create **profile-specific overrides**.
 
-🔗 **Full Settings Reference:** See [SETTINGS.md](docs/SETTINGS.md) for the generated key-by-key reference, including defaults, constraints, scope, and security notes.
+🔗 **Full Settings Reference:** See the generated [settings reference](docs/generated/SETTINGS.md) for defaults, constraints, scope, and security notes.
 
 ### Global Settings (`settings`)
 
@@ -286,11 +474,11 @@ When interacting with a remote daemon over SSH, Metor's CLI acts as a smart rout
 - `daemon.allow_drops` (bool): Globally allows or blocks the reception of asynchronous offline messages.
 - `daemon.max_unseen_live_msgs` (int): Caps unread crash-safe live backlog per peer. `0` disables headless live backlog, `-1` removes the limit.
 - `daemon.reuse_live_for_drops` (bool): Routes queued drop messages over an existing live session channel when available, avoiding a second circuit. Paired with `daemon.allow_drop_standby_on_live` as one drop-delivery policy.
-- `daemon.notification_sink` (str): Optional JSON sink config (`file` or `webhook`) for structured notifications when no UI is connected, e.g. `{"type": "file", "path": "/tmp/metor-notify.jsonl"}`.
+- `daemon.notification_sink` (str): Optional JSON sink config (`file` or `webhook`) for structured notifications when no UI is connected. File exports contain plaintext peer metadata; webhooks use direct host networking, not Tor, and disclose host/network and peer metadata to the configured service. See the [notification sink contract](docs/ARCHITECTURE.md#notification-sinks) before enabling an export.
 - `ui.terminal.inbox_notification_delay` (float): Delays and aggregates unread-message notifications for unfocused peers on this local UI.
 - `ui.terminal.chat_limit` (int): Maximum number of messages kept in the UI's volatile RAM display buffer.
 
-The full list, including all network and transport tuning knobs, is documented in [SETTINGS.md](docs/SETTINGS.md).
+The full list, including all network and transport tuning knobs, is documented in the generated [settings reference](docs/generated/SETTINGS.md).
 
 ## 🧰 Development Workflow
 
@@ -298,14 +486,15 @@ The release bundle workflow is separate from the normal developer workflow. Day-
 
 Generated documentation is part of the project maintenance pipeline.
 
-- `npm run docs`: Regenerates [API.md](docs/API.md) and [SETTINGS.md](docs/SETTINGS.md).
-- `npm run ready`: Formats code and markdown, runs linting and type checking, then regenerates the generated docs.
+- `npm run generate:docs` (or `npm run docs`): Regenerates the [IPC API](docs/generated/API.md), [settings](docs/generated/SETTINGS.md), and machine-readable compatibility references under `docs/generated/`.
+- `npm run check` (or `npm run ready`): Runs nonmutating Markdown/Python format checks, linting, type checking, dependency boundaries, generated-reference freshness, and the supervised full test suite.
+- `npm run format:md`, `npm run format:py`, and `npm run fix:py`: Apply intentional Markdown formatting, Python formatting, or Ruff fixes; these mutating commands are separate from readiness checks.
 
-Before changing architecture, security boundaries, or contributor-facing workflows, review [ARCHITECTURE.md](docs/ARCHITECTURE.md), [AUDIT.md](docs/AUDIT.md), and [CONTRIBUTE.md](docs/CONTRIBUTE.md).
+Before changing architecture or security boundaries, read the [architecture guide](docs/ARCHITECTURE.md) and the [security review guidance](docs/CONTRIBUTE.md#10-security-and-architecture-review).
 
 ## 🛡️ Security Disclaimer
 
-While Metor leverages the Tor network for anonymity and relies on strong modern cryptography (Ed25519, Argon2i, SQLCipher), this software is provided "as-is". **Do not use this software for communication where your life or liberty depends on absolute operational security.** The codebase has not undergone a formal third-party security audit.
+While Metor leverages the Tor network for anonymity and relies on strong modern cryptography (Ed25519, Argon2id, SQLCipher), this software is provided "as-is". **Do not use this software for communication where your life or liberty depends on absolute operational security.** The codebase has not undergone a formal third-party security audit.
 
 ## 📄 License
 

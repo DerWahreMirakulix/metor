@@ -1,0 +1,257 @@
+# Releasing Metor
+
+This is the canonical release and compatibility-version policy for Metor. The
+only authoritative version values are in `src/metor/versioning/__init__.py`. Application
+releases and compatibility generations are independent.
+
+The first stable application is **1.0.0**. All four distributions share that
+version and pin their Metor dependencies to the same release. IPC, peer wire,
+database schema, keyslots, blobs and both key-derivation domains begin at
+generation 1. Generation 1 is the only supported value on each axis.
+The local frontend launch and platform adapter contracts also start at 1.
+
+## Version axes
+
+| Axis                   | Meaning                                                        | Bump when                                                                  |
+| ---------------------- | -------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| Application            | Version of the Metor product and all four Python distributions | An explicit product release is prepared                                    |
+| Frontend launch        | SDK entry point for independent GUI and Terminal clients       | The frontend and its host require an incompatible launch contract          |
+| Platform adapter       | SDK entry point for installed local platform adapters          | The provider and frontend require an incompatible adapter contract         |
+| IPC protocol           | Typed client-daemon NDJSON wire contract                       | A breaking command, event, field, type, or wire-semantics change is made   |
+| Peer protocol          | Daemon-to-daemon Tor wire and handshake contract               | A breaking peer-wire or peer-semantics change is made                      |
+| DB schema              | Durable SQL tables, columns, constraints, and indexes          | Any persistent SQL schema changes, including additive changes              |
+| Keyslot format         | Persisted password-protected PMK document                      | Its serialized contract becomes incompatible                               |
+| Blob format            | Authenticated encrypted-blob framing                           | Its persisted framing or authenticated interpretation becomes incompatible |
+| Profile-key derivation | PMK-to-database, identity-secret, and blob-root domains        | Those domain labels or derivation behavior become incompatible             |
+| Blob-object derivation | Per-object key domain                                          | That domain label or derivation behavior becomes incompatible              |
+
+`*_MIN_SUPPORTED` is the oldest generation the current implementation can
+actually read or negotiate. It is independent of the current writer/protocol
+generation and must increase only when old support is intentionally removed.
+Keyslot and blob readers currently accept exactly their current generation, so
+their minimum and current values remain equal until multi-generation readers
+exist.
+
+Cryptographic derivation bumps are security and persistence changes: they
+produce different keys. They require an explicit migration/support design and
+release acknowledgement; changing a label is never cosmetic.
+
+## Application Semantic Versioning
+
+The first stable application version is `1.0.0`. After publication, compatible
+bug fixes increment PATCH, compatible features increment MINOR, and incompatible
+public product or API changes increment MAJOR.
+
+Do not tie application SemVer to any protocol or storage generation. A release
+may leave every compatibility generation unchanged, and an explicit format
+bump does not prescribe the application version.
+
+For the first public release choose `current`; the workflow rejects an initial
+`patch`, `minor` or `major` bump. The application and all four packages ship as
+`1.0.0`; each independent protocol, storage format and adapter contract starts
+at generation `1`. With no previous stable release, the generated
+`docs/generated/compatibility.json` establishes the baseline. Use new profiles
+for this baseline: databases created by development builds are not upgraded.
+
+The supported release types are `current`, `patch`, `minor`, and `major`.
+Prerelease channels are intentionally unsupported until an explicit
+release-sequencing design introduces them.
+
+## Database lifecycle
+
+`PRAGMA user_version` stores the database schema generation.
+`PRAGMA application_id` identifies the stable Metor format (ASCII `METR`).
+The SQLCipher key is applied before reading either field.
+
+- An empty, unmarked database receives both fields in the schema creation
+  transaction, after all tables and indexes are created.
+- An existing database opens only with the supported schema and application
+  marker. Unsupported development and foreign databases are rejected without
+  converting or restamping them, even when their schema number is also 1.
+- The release has no historical schema upgrades. The transactional migration
+  registry in `src/metor/data/sql/migrations.py` is reserved for future
+  adjacent generations if a release explicitly supports an upgrade.
+- The explicit encrypted/plaintext profile conversion is a separate user
+  operation. It preserves both database fields and the profile instance.
+
+When introducing schema generation N, add every adjacent migration required by
+the advertised support range and tests for success and rollback. Any persistent
+schema change requires a DB generation bump, even when additive.
+
+## Developer commands
+
+Inspect and validate all values:
+
+```console
+python scripts/versioning.py status
+python scripts/versioning.py validate
+```
+
+Make an explicit compatibility decision in the single registry:
+
+```console
+python scripts/versioning.py bump ipc
+python scripts/versioning.py bump peer
+python scripts/versioning.py bump db-schema
+python scripts/versioning.py bump keyslot
+python scripts/versioning.py bump blob
+python scripts/versioning.py set-min ipc 2
+```
+
+The CLI edits only `src/metor/versioning/__init__.py`. Review the implementation and
+migration implications before invoking it. `set-app` is reserved for release
+automation.
+
+Regenerate the machine-readable baseline after generating the IPC schema:
+
+```console
+python scripts/generate_api_docs.py
+python scripts/generate_settings_docs.py
+python scripts/generate_compatibility_manifest.py
+python scripts/check_release_compatibility.py --current docs/generated/compatibility.json
+```
+
+Acceptance gates run on each native host, after the full four-distribution
+developer install described in the README:
+
+```console
+python scripts/check_boundaries.py
+python scripts/validate_generated_docs.py
+python scripts/build_release_wheelhouse.py --variant all --skip-pip-upgrade --output-dir closure-bundles
+python scripts/validate_installed_artifacts.py closure-bundles
+python scripts/validate_release_installers.py closure-bundles
+```
+
+The installed-consumer gate uses fresh non-editable environments outside the
+checkout, offline wheel resolution, positive and intentionally negative strict
+SDK typechecks, dynamic IPC through a non-shipped frontend, and uninstall/reinstall
+checks. The installer gate executes each actual ZIP installer on its native host.
+Do not run concurrent source-wheel builds in one checkout: setuptools shares its
+build directory. Packaging cleanup preserves unrelated `build/` reports and
+release output; bundle destinations inside setuptools-owned `build/lib`,
+`build/bdist.*` or `build/temp.*` directories are rejected before mutation. Generated-reference validation checks the original bytes as well
+as repeated generation; an initially stale file fails even if generation is stable.
+
+## Automated release process
+
+Start **Release Metor** manually in GitHub Actions and select:
+
+- application bump (`current` for the first release, otherwise patch/minor/major);
+- dry-run or publish.
+
+Peer-wire and cryptographic derivation changes remain fail-closed under the
+compatibility checker defaults. They require an explicit future release design
+before they can be published.
+
+CI and release validation share the `gui-acceptance` composite action for Linux
+rendering, text scaling, keyboard interaction, compact and desktop Core-backed
+windows, and bounded stream-pressure fixtures. Those checks run on the release
+candidate before its archives become publishable. Both native installer variants
+are exercised through `validate_release_installers.py`, whose checked subprocess
+results fail the job; there is no second shell-only installer inventory to drift
+or mask failures. GUI screenshots and structured results are retained as workflow
+artifacts, including when a fixture fails.
+
+The shared Linux action also queries the actual AT-SPI accessibility tree from a
+separate process on a private D-Bus session. It verifies native action/focus
+dispatch, password nondisclosure and revocation of a retained private node before
+repaint. Its temporary XDG directories are private and writable, its execution
+has an external deadline, and the retained log is capped at 64 KiB. This is a
+native accessibility contract check, not certification of every screen reader
+or evidence for Windows UIA.
+
+The workflow discovers every non-draft GitHub Release and selects the highest
+valid stable `vMAJOR.MINOR.PATCH` tag through parsed SemVer ordering. Prerelease
+tags do not establish the normal stable release baseline. It calculates and
+writes `APP_VERSION`, then runs Ruff, Ruff format, Mypy, the complete test
+suite, all generated-document producers twice for reproducibility, compatibility
+gates, Linux and Windows jobs, all four package builds, and wheel-metadata
+validation. The canonical generated outputs are `API.md`, `SETTINGS.md`,
+`api.schema.json`, and `compatibility.json`. Only a non-dry-run request from
+`main` can commit those release changes, create the application release tag,
+and publish a GitHub Release containing the generated compatibility matrix. A
+dry run performs the same gates from any branch without repository or release
+writes. When a first `current` release already has the correct registry and
+generated outputs, no release commit is created; the validated checked-out
+commit is tagged directly.
+
+Release validation checks out the immutable requested candidate, applies the
+proposed version, and builds and accepts the native archives from that modified
+candidate. Publication downloads those archives from the same workflow run and
+refuses to update `main` if it moved after validation. It does not substitute a
+prior CI run or rebuild release assets from an untested branch state. Normal CI
+checks generated references without writing them; maintainers run
+`npm run generate:docs` when intentionally changing the API or settings. There
+is no branch-specific documentation bot that commits generated files after CI.
+The mandatory installed daemon acceptance starts a locked local daemon without
+the public Tor network. An optional native Tor startup check is described in
+[CONTRIBUTE.md](./CONTRIBUTE.md#portable-local-environments) and requires a
+separately provisioned Tor binary.
+
+Publication updates the validated `main` branch and its annotated version tag
+in one required atomic Git push. A server that cannot perform the transaction,
+or rejects either ref, fails closed without a non-atomic fallback. GitHub
+Release creation remains a separate downstream operation and is not described
+as part of that ref transaction.
+
+The first stable tag is `v1.0.0`. With no previous stable tag, select the
+default `current` release type to use the registry version. Patch, minor and
+major bumps require an existing stable release tag. Protocol and format
+generations are metadata in each product release, not separate tags.
+
+The four package builds are `metor-sdk`, the headless/base `metor`,
+`metor-ui-terminal`, and `metor-ui-gui`. Their wheels must have no overlapping files and must use
+the same application version. Each distribution includes the GPL license text.
+The three subproject-local `LICENSE` copies are packaging inputs from the root
+license, necessary for independent wheel roots and Windows checkouts without
+symlink support. Installed-artifact acceptance checks each wheel's license bytes
+against the root document. The release builder accepts `sdk`, `base`,
+`terminal`, `gui`, or `all`; UI variants create base-plus-UI wheelhouses. The
+obsolete separate daemon distribution and `daemon` bundle variant do not
+exist. The base package exposes daemon startup through the canonical `metor`
+entry point.
+Offline installers select the intended distribution by name from the
+wheelhouse, allowing pip to resolve only its exact dependencies.
+Each native archive declares and verifies its exact CPython minor/ABI, OS, and
+architecture. Its installer verifies the complete `SHA256SUMS.txt` inventory,
+including the bundled pip wheel, before reserving a new `.venv`. Unpack into
+a fresh directory for every installation; existing environments, files and
+links at that path are refused without execution or modification. The checksum
+manifest provides integrity detection, not origin authentication or a release
+signature.
+
+The `metor-ui-gui` distribution uses `requirements/gui.lock`. The canonical
+`all` builder, CI and release workflow include its package, dependency closure,
+installed-consumer and ZIP-installer checks. Desktop and simulator capabilities are described in [GUI.md](./contracts/GUI.md). Workflow inclusion is not release approval; record native lifecycle and media results as release evidence.
+Wheel metadata validation checks GUI ownership and matching versions whenever
+a GUI wheel is supplied. Full installed-artifact acceptance requires all four.
+
+## Compatibility gates and human decisions
+
+The release manifest is generated from the registry and implementation
+descriptors. The checker:
+
+- accepts additive IPC schema evolution and detects removed routes/fields,
+  newly required fields, type narrowing, and detectable enum restriction;
+- rejects detected breaking IPC changes unless IPC current increased;
+- rejects any normalized persistent SQL schema change unless DB current
+  increased, then checks the advertised migration path;
+- records peer framing and command descriptors and requires an explicit peer
+  classification when the descriptor changes;
+- rejects keyslot/blob descriptor changes without an explicit format bump and
+  checks that current reader support matches the advertised minimum; and
+- rejects derivation-context drift without its own bump and explicit migration
+  review.
+
+Automation cannot reliably identify every semantic restriction, peer behavior
+change, cryptographic migration property, or safe backwards-reader claim.
+Developers and agents must classify those architectural changes, update the
+central generation only when warranted, implement migration/support, and add
+fixtures or golden vectors. The release workflow verifies that decision; it
+never blindly increments protocol, schema, storage, or derivation versions.
+
+Generated release references live under `docs/generated/` and are first-class
+human documentation as well as machine baselines. Their ownership is the source
+definitions and generators: do not edit them manually. Release comparison uses
+[compatibility.json](./generated/compatibility.json), whose embedded IPC contract
+comes from [api.schema.json](./generated/api.schema.json).

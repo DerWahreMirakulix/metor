@@ -4,6 +4,9 @@
 
 import argparse
 import importlib
+import io
+import json
+import shutil
 import subprocess
 import sys
 import unittest
@@ -16,25 +19,33 @@ from zipfile import ZipFile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
-from metor.utils.release_bundle import (
+from scripts.release.bundle import (
+    BUNDLE_METADATA_NAME,
+    BUNDLE_VERIFIER_NAME,
+    CHECKSUM_FILE_NAME,
     PIP_VERSION,
+    build_bundle_metadata,
     build_bundle_name,
+    build_sha256_manifest,
     clean_packaging_artifacts,
+    validate_output_directory,
     build_install_guide,
     build_release_wheelhouse,
     build_install_shell_script,
     build_install_windows_script,
 )
+from scripts.release.paths import PROJECT_ROOT
+from scripts.release.verify_bundle import verify_bundle
 from metor.data.profile import (
     ProfileManager,
 )
 from metor.data.profile.config import Config
 from metor.data.profile.models import ProfileSecurityMode
 from metor.data.sql import SqlCipherDbApi, _load_sqlcipher_dbapi
-from metor.data.sql.schema import ensure_core_schema
+from metor.data.sql.schema import create_core_schema
 from metor.data.settings import Settings, SettingKey
-from metor.ui.cli.dispatcher import CliDispatcher
-from metor.ui.cli.proxy import CliProxy
+from metor.cli.dispatcher import CliDispatcher
+from metor.cli.proxy import CliProxy
 
 
 class _DummyProfileManager:
@@ -285,7 +296,7 @@ class ReleaseContractTests(unittest.TestCase):
 
         with (
             patch(
-                'metor.ui.cli.dispatcher.profiles.CliProxy.add_profile',
+                'metor.cli.dispatcher.profiles.CliProxy.add_profile',
                 return_value='ok',
             ) as add_profile,
             patch('builtins.print'),
@@ -316,11 +327,12 @@ class ReleaseContractTests(unittest.TestCase):
 
         with (
             patch(
-                'metor.ui.cli.dispatcher.profiles.CliProxy.add_profile',
+                'metor.cli.dispatcher.profiles.CliProxy.add_profile',
                 return_value='ok',
             ) as add_profile,
             patch('builtins.print'),
-            patch('getpass.getpass', side_effect=['test-pw-123', 'test-pw-123']),
+            patch('sys.stdin', io.StringIO('test-pw-123\ntest-pw-123\n')),
+            patch('sys.stderr', io.StringIO()),
         ):
             dispatcher.dispatch()
 
@@ -390,7 +402,7 @@ class ReleaseContractTests(unittest.TestCase):
 
         with (
             patch(
-                'metor.ui.cli.dispatcher.base.CliProxy.handle_settings_list',
+                'metor.cli.dispatcher.base.CliProxy.handle_settings_list',
                 return_value='settings-list',
             ) as handle_settings_list,
             patch('builtins.print') as print_mock,
@@ -428,11 +440,19 @@ class ReleaseContractTests(unittest.TestCase):
         )
 
         with patch(
-            'metor.ui.cli.dispatcher.base.CommandHandlers.handle_chat'
+            'metor.cli.dispatcher.base.CommandHandlers.handle_chat'
         ) as handle_chat:
             dispatcher.dispatch()
 
-        handle_chat.assert_called_once_with(pm, start_daemon_override=True)
+        handle_chat.assert_called_once_with(
+            pm,
+            start_daemon_override=True,
+            frontend_id=None,
+            list_uis=False,
+            device_config=None,
+            simulator=False,
+            debug=False,
+        )
 
     def test_config_defaults_to_list_when_no_subcommand_is_given(self) -> None:
         """
@@ -461,7 +481,7 @@ class ReleaseContractTests(unittest.TestCase):
 
         with (
             patch(
-                'metor.ui.cli.dispatcher.base.CliProxy.handle_config_list',
+                'metor.cli.dispatcher.base.CliProxy.handle_config_list',
                 return_value='config-list',
             ) as handle_config_list,
             patch('builtins.print') as print_mock,
@@ -500,7 +520,7 @@ class ReleaseContractTests(unittest.TestCase):
 
         cursor = _RecordingCursor()
 
-        ensure_core_schema(cursor)
+        create_core_schema(cursor)
 
         self.assertFalse(
             any('DROP TABLE IF EXISTS' in query for query in cursor.queries)
@@ -565,7 +585,7 @@ class ReleaseContractTests(unittest.TestCase):
         proxy = CliProxy(cast(ProfileManager, _DummyUiProfileManager('9.5')))
 
         with patch(
-            'metor.ui.cli.proxy.settings.Settings.get_str',
+            'metor.cli.proxy.settings.Settings.get_str',
             return_value='7.5',
         ):
             result = proxy.handle_settings_get(SettingKey.IPC_TIMEOUT.value)
@@ -606,7 +626,21 @@ class ReleaseContractTests(unittest.TestCase):
 
         self.assertEqual(bundle_name, 'metor-wheelhouse-windows-x86_64-py311')
 
-    def test_release_bundle_name_supports_daemon_and_sdk_variants(self) -> None:
+    def test_public_release_builder_command_loads_repository_tooling(self) -> None:
+        """The documented wrapper resolves its non-runtime owner from the checkout."""
+        repo_root = Path(__file__).resolve().parents[1]
+        result = subprocess.run(
+            [sys.executable, 'scripts/build_release_wheelhouse.py', '--help'],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('--variant {base,terminal,sdk,gui,all}', result.stdout)
+        self.assertEqual(PROJECT_ROOT, repo_root)
+
+    def test_release_bundle_name_supports_terminal_and_sdk_variants(self) -> None:
         """
         Verifies that release bundle names distinguish daemon and SDK variants.
 
@@ -616,10 +650,15 @@ class ReleaseContractTests(unittest.TestCase):
         Returns:
             None
         """
-        daemon_bundle = build_bundle_name('Linux', 'x86_64', 3, 11, variant='daemon')
+        terminal_bundle = build_bundle_name(
+            'Linux', 'x86_64', 3, 11, variant='terminal'
+        )
         sdk_bundle = build_bundle_name('Linux', 'x86_64', 3, 11, variant='sdk')
 
-        self.assertEqual(daemon_bundle, 'metor-daemon-wheelhouse-linux-x86_64-py311')
+        self.assertEqual(
+            terminal_bundle,
+            'metor-ui-terminal-wheelhouse-linux-x86_64-py311',
+        )
         self.assertEqual(sdk_bundle, 'metor-sdk-wheelhouse-linux-x86_64-py311')
 
     def test_release_install_guide_uses_offline_bundle_install(self) -> None:
@@ -638,10 +677,18 @@ class ReleaseContractTests(unittest.TestCase):
         self.assertIn('sh install.sh', guide)
         self.assertIn('install.cmd', guide)
         self.assertIn(
-            '--no-index --find-links wheelhouse --upgrade pip==26.0.1',
+            '--no-index --find-links wheelhouse --upgrade pip==26.2.1',
             guide,
         )
         self.assertIn('requires no package index access', guide)
+        self.assertIn('"$PYTHON" -I -S verify_bundle.py . &&', guide)
+        self.assertIn('including the bundled pip wheel', guide)
+        self.assertIn('not a signature', guide)
+
+        gui_guide = build_install_guide(
+            'metor-ui-gui-wheelhouse-windows-x86_64-py313', 'metor-ui-gui'
+        )
+        self.assertIn('.venv\\Scripts\\metor-gui.exe', gui_guide)
 
     def test_release_shell_installer_uses_local_wheelhouse(self) -> None:
         """
@@ -655,14 +702,16 @@ class ReleaseContractTests(unittest.TestCase):
         """
 
         script = build_install_shell_script()
+        target = f'{sys.version_info.major}.{sys.version_info.minor}'
 
-        self.assertIn('python3 python', script)
+        self.assertIn(f'python{target} python3 python', script)
+        self.assertIn('verify_bundle.py', script)
+        self.assertIn('--target-only', script)
+        self.assertIn('extract the archive into a fresh directory', script)
+        self.assertNotIn('sys.version_info >=', script)
+        self.assertNotIn('rm -', script)
         self.assertIn(
-            'sys.version_info >= (3, 11)',
-            script,
-        )
-        self.assertIn(
-            '--no-index --find-links "$script_dir/wheelhouse" --upgrade pip==26.0.1',
+            '--no-index --find-links "$script_dir/wheelhouse" --upgrade pip==26.2.1',
             script,
         )
         self.assertIn('--no-index --find-links "$script_dir/wheelhouse" metor', script)
@@ -680,18 +729,192 @@ class ReleaseContractTests(unittest.TestCase):
         """
 
         script = build_install_windows_script()
+        target = f'{sys.version_info.major}.{sys.version_info.minor}'
 
+        self.assertIn('verify_bundle.py', script)
+        self.assertIn('--target-only', script)
+        self.assertIn(f'set "PY_OPTION=-{target}"', script)
+        self.assertIn('$PATH:py.exe', script)
+        self.assertIn('$PATH:python.exe', script)
+        self.assertIn('extract the archive into a fresh directory', script)
+        self.assertNotIn('sys.version_info >=', script)
+        self.assertNotIn('rd /s /q', script)
         self.assertIn(
-            'VERSION_CHECK=import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)',
+            '--no-index --find-links "%BUNDLE_DIR%\\wheelhouse" --upgrade pip==26.2.1',
             script,
         )
-        self.assertIn('py -3.11 -m venv', script)
         self.assertIn(
-            '--no-index --find-links "%SCRIPT_DIR%wheelhouse" --upgrade pip==26.0.1',
-            script,
+            '--no-index --find-links "%BUNDLE_DIR%\\wheelhouse" metor', script
         )
-        self.assertIn('--no-index --find-links "%SCRIPT_DIR%wheelhouse" metor', script)
         self.assertIn('Scripts\\metor.exe --help', script)
+        self.assertIn('popd\nexit /b 0', script)
+
+        gui_script = build_install_windows_script('metor-ui-gui')
+        self.assertIn('Scripts\\metor-gui.exe', gui_script)
+
+    def test_bundle_verifier_rejects_tampering_missing_files_and_wrong_target(
+        self,
+    ) -> None:
+        """Validates the complete hash set and exact native build target.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with TemporaryDirectory() as directory:
+            bundle = Path(directory)
+            wheel = bundle / 'wheelhouse' / 'pip-26.2.1-py3-none-any.whl'
+            wheel.parent.mkdir()
+            wheel.write_bytes(b'pip wheel')
+            (bundle / BUNDLE_METADATA_NAME).write_text(
+                build_bundle_metadata('sdk', 'metor-sdk'), encoding='utf-8'
+            )
+            (bundle / BUNDLE_VERIFIER_NAME).write_text(
+                '# verifier fixture\n', encoding='utf-8'
+            )
+            (bundle / CHECKSUM_FILE_NAME).write_text(
+                build_sha256_manifest(bundle), encoding='utf-8'
+            )
+
+            verify_bundle(bundle)
+            wheel.write_bytes(b'tampered')
+            with self.assertRaisesRegex(ValueError, 'Checksum mismatch'):
+                verify_bundle(bundle)
+            wheel.write_bytes(b'pip wheel')
+            wheel.unlink()
+            with self.assertRaisesRegex(ValueError, 'Missing bundle files'):
+                verify_bundle(bundle)
+
+            wheel.write_bytes(b'pip wheel')
+            original_metadata = json.loads(
+                (bundle / BUNDLE_METADATA_NAME).read_text(encoding='utf-8')
+            )
+            for field, value, diagnostic in (
+                ('python', '9.9', 'Python minor'),
+                ('machine', 'unsupported-architecture', 'architecture'),
+            ):
+                with self.subTest(field=field):
+                    metadata = dict(original_metadata)
+                    metadata[field] = value
+                    (bundle / BUNDLE_METADATA_NAME).write_text(
+                        json.dumps(metadata), encoding='utf-8'
+                    )
+                    with self.assertRaisesRegex(ValueError, diagnostic):
+                        verify_bundle(bundle, target_only=True)
+
+    def test_bundle_inventory_covers_nested_manifest_names(self) -> None:
+        """Only the root manifest and local virtualenv fall outside the payload."""
+        with TemporaryDirectory() as directory:
+            bundle = Path(directory)
+            (bundle / BUNDLE_METADATA_NAME).write_text(
+                build_bundle_metadata('sdk', 'metor-sdk'), encoding='utf-8'
+            )
+            (bundle / CHECKSUM_FILE_NAME).write_text(
+                build_sha256_manifest(bundle), encoding='utf-8'
+            )
+            extra = bundle / 'wheelhouse' / CHECKSUM_FILE_NAME
+            extra.parent.mkdir()
+            extra.write_bytes(b'unlisted file')
+            with self.assertRaisesRegex(ValueError, 'Unhashed bundle files'):
+                verify_bundle(bundle)
+
+    @unittest.skipIf(
+        sys.platform == 'win32', 'Portable symlink creation requires Unix.'
+    )
+    def test_bundle_rejects_external_payload_even_if_its_digest_matches(self) -> None:
+        """An external file must not be substituted after manifest creation."""
+        with TemporaryDirectory() as directory:
+            bundle = Path(directory) / 'bundle'
+            bundle.mkdir()
+            (bundle / BUNDLE_METADATA_NAME).write_text(
+                build_bundle_metadata('sdk', 'metor-sdk')
+            )
+            payload = bundle / 'package.whl'
+            payload.write_bytes(b'trusted wheel')
+            (bundle / CHECKSUM_FILE_NAME).write_text(
+                build_sha256_manifest(bundle), encoding='utf-8'
+            )
+            outside = Path(directory) / 'outside'
+            payload.rename(outside)
+            payload.symlink_to(outside)
+            with self.assertRaisesRegex(ValueError, 'Linked bundle entry'):
+                verify_bundle(bundle)
+
+    def test_verifier_refuses_existing_environment_before_any_target_probe(
+        self,
+    ) -> None:
+        """An environment directory, ordinary file, or dangling link is never a fresh extraction."""
+        for entry in ('directory', 'file', 'link'):
+            if entry == 'link' and sys.platform == 'win32':
+                continue  # Native link creation requires a separately granted host privilege.
+            with self.subTest(entry=entry), TemporaryDirectory() as directory:
+                bundle = Path(directory)
+                existing = bundle / '.venv'
+                if entry == 'directory':
+                    existing.mkdir()
+                elif entry == 'file':
+                    existing.write_text('unchanged', encoding='utf-8')
+                else:
+                    existing.symlink_to(
+                        bundle / 'missing-target', target_is_directory=True
+                    )
+                for target_only in (True, False):
+                    with self.assertRaisesRegex(ValueError, 'Existing .venv'):
+                        verify_bundle(bundle, target_only=target_only)
+
+    @unittest.skipIf(sys.platform == 'win32', 'Shell installer is validated on Unix.')
+    def test_shell_installer_refuses_existing_venv_without_execution(self) -> None:
+        """Refuses an old target environment without deleting or changing it.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with TemporaryDirectory() as directory:
+            bundle = Path(directory)
+            metadata = json.loads(build_bundle_metadata('sdk', 'metor-sdk'))
+            metadata['python'] = '9.9'
+            (bundle / BUNDLE_METADATA_NAME).write_text(
+                json.dumps(metadata), encoding='utf-8'
+            )
+            shutil.copyfile(
+                PROJECT_ROOT / 'scripts' / 'release' / BUNDLE_VERIFIER_NAME,
+                bundle / BUNDLE_VERIFIER_NAME,
+            )
+            installer = bundle / 'install.sh'
+            installer.write_text(
+                build_install_shell_script('metor-sdk'), encoding='utf-8'
+            )
+            installer.chmod(0o755)
+            (bundle / CHECKSUM_FILE_NAME).write_text(
+                build_sha256_manifest(bundle), encoding='utf-8'
+            )
+            venv_bin = bundle / '.venv' / 'bin'
+            venv_bin.mkdir(parents=True)
+            probe = venv_bin / 'python'
+            probe.write_text(
+                '#!/bin/sh\ntouch "$PWD/venv-python-ran"\nexit 1\n', encoding='utf-8'
+            )
+            probe.chmod(0o755)
+            sentinel = bundle / '.venv' / 'preserve-me'
+            sentinel.write_text('unchanged', encoding='utf-8')
+
+            result = subprocess.run(
+                ['sh', str(installer)],
+                cwd=bundle,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('fresh directory', result.stderr)
+            self.assertEqual(sentinel.read_text(encoding='utf-8'), 'unchanged')
+            self.assertFalse((bundle / 'venv-python-ran').exists())
 
     def test_release_builder_downloads_pip_wheel_for_offline_installs(self) -> None:
         """
@@ -725,11 +948,11 @@ class ReleaseContractTests(unittest.TestCase):
             output_dir = Path(temp_dir)
             with (
                 patch(
-                    'metor.utils.release_bundle.run_command',
+                    'scripts.release.bundle.run_command',
                     side_effect=fake_run_command,
                 ),
                 patch(
-                    'metor.utils.release_bundle.archive_bundle',
+                    'scripts.release.bundle.archive_bundle',
                     return_value=output_dir / 'bundle.zip',
                 ),
             ):
@@ -744,7 +967,46 @@ class ReleaseContractTests(unittest.TestCase):
             )
         )
 
-    def test_release_builder_supports_sdk_and_daemon_variants(self) -> None:
+    def test_packaging_cleanup_preserves_reports_and_release_outputs(self) -> None:
+        """Building another variant must not erase prior archives or test evidence."""
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            report = root / 'build/test-report.txt'
+            archive = root / 'build/audit/bundles/sdk.zip'
+            stale_module = root / 'build/lib/metor/obsolete.py'
+            stale_frontend = root / 'packaging/gui/build/lib/metor/obsolete.py'
+            for path in (report, archive, stale_module, stale_frontend):
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text('retain-or-clean', encoding='utf-8')
+            clean_packaging_artifacts(root)
+            clean_packaging_artifacts(root)
+            self.assertEqual(report.read_text(encoding='utf-8'), 'retain-or-clean')
+            self.assertEqual(archive.read_text(encoding='utf-8'), 'retain-or-clean')
+            self.assertFalse(stale_module.exists())
+            self.assertFalse(stale_frontend.exists())
+            self.assertEqual(
+                validate_output_directory(archive.parent, root),
+                archive.parent.resolve(),
+            )
+
+    def test_release_output_rejects_setuptools_owned_directory_before_build(
+        self,
+    ) -> None:
+        """An unsafe destination is rejected before cleanup or package commands."""
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            for relative in ('build/lib/releases', 'packaging/sdk/build/bdist.any'):
+                output = root / relative
+                with (
+                    patch('scripts.release.bundle.PROJECT_ROOT', root),
+                    patch('scripts.release.bundle.run_command') as command,
+                    self.assertRaises(ValueError),
+                ):
+                    build_release_wheelhouse(output, skip_pip_upgrade=True)
+                command.assert_not_called()
+                self.assertFalse(output.exists())
+
+    def test_release_builder_supports_sdk_and_terminal_variants(self) -> None:
         """
         Verifies that release builder targets variant-specific lockfiles and packages.
 
@@ -755,7 +1017,7 @@ class ReleaseContractTests(unittest.TestCase):
             None
         """
         commands_sdk: list[list[str]] = []
-        commands_daemon: list[list[str]] = []
+        commands_terminal: list[list[str]] = []
 
         def fake_run_sdk(command: Sequence[str], cwd: Path) -> None:
             """
@@ -771,7 +1033,7 @@ class ReleaseContractTests(unittest.TestCase):
             del cwd
             commands_sdk.append(list(command))
 
-        def fake_run_daemon(command: Sequence[str], cwd: Path) -> None:
+        def fake_run_terminal(command: Sequence[str], cwd: Path) -> None:
             """
             Records fake commands executed for the Daemon variant.
 
@@ -783,17 +1045,17 @@ class ReleaseContractTests(unittest.TestCase):
                 None
             """
             del cwd
-            commands_daemon.append(list(command))
+            commands_terminal.append(list(command))
 
         with TemporaryDirectory() as temp_dir:
             output_dir = Path(temp_dir)
             with (
                 patch(
-                    'metor.utils.release_bundle.run_command',
+                    'scripts.release.bundle.run_command',
                     side_effect=fake_run_sdk,
                 ),
                 patch(
-                    'metor.utils.release_bundle.archive_bundle',
+                    'scripts.release.bundle.archive_bundle',
                     return_value=output_dir / 'bundle.zip',
                 ),
             ):
@@ -803,16 +1065,16 @@ class ReleaseContractTests(unittest.TestCase):
 
             with (
                 patch(
-                    'metor.utils.release_bundle.run_command',
-                    side_effect=fake_run_daemon,
+                    'scripts.release.bundle.run_command',
+                    side_effect=fake_run_terminal,
                 ),
                 patch(
-                    'metor.utils.release_bundle.archive_bundle',
+                    'scripts.release.bundle.archive_bundle',
                     return_value=output_dir / 'bundle.zip',
                 ),
             ):
                 build_release_wheelhouse(
-                    output_dir, skip_pip_upgrade=True, variant='daemon'
+                    output_dir, skip_pip_upgrade=True, variant='terminal'
                 )
 
         self.assertTrue(
@@ -829,20 +1091,51 @@ class ReleaseContractTests(unittest.TestCase):
         )
         self.assertTrue(
             any(
-                'requirements/daemon.lock' in command and 'wheel' in command
-                for command in commands_daemon
+                'requirements/terminal.lock' in command and 'wheel' in command
+                for command in commands_terminal
             )
         )
         self.assertTrue(
             any(
-                'packaging/daemon' in command and 'wheel' in command
-                for command in commands_daemon
+                'packaging/terminal' in command and 'wheel' in command
+                for command in commands_terminal
             )
         )
 
-    def test_project_wheel_excludes_legacy_cli_proxy_module(self) -> None:
+    def test_bundle_copies_exact_prebuilt_local_wheels(self) -> None:
+        """A platform bundle must carry the staged Metor wheel bytes."""
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            sdk = root / 'metor_sdk-staged.whl'
+            base = root / 'metor-staged.whl'
+            sdk.write_bytes(b'synthetic-sdk-wheel')
+            base.write_bytes(b'synthetic-base-wheel')
+            output = root / 'bundles'
+            with (
+                patch('scripts.release.bundle.run_command') as command,
+                patch('scripts.release.bundle.clean_packaging_artifacts'),
+                patch(
+                    'scripts.release.bundle.archive_bundle',
+                    return_value=output / 'bundle.zip',
+                ),
+            ):
+                bundle = build_release_wheelhouse(
+                    output,
+                    skip_pip_upgrade=True,
+                    variant='base',
+                    prebuilt_wheels={'packaging/sdk': sdk, '.': base},
+                )
+            self.assertEqual(
+                (bundle / 'wheelhouse' / sdk.name).read_bytes(), sdk.read_bytes()
+            )
+            self.assertEqual(
+                (bundle / 'wheelhouse' / base.name).read_bytes(), base.read_bytes()
+            )
+            self.assertEqual(command.call_count, 2)
+
+    def test_project_wheel_uses_terminal_frontend_package(self) -> None:
         """
-        Verifies that project wheel excludes legacy cli proxy module.
+        Verifies that the wheel contains only the canonical terminal CLI path.
 
         Args:
             None
@@ -863,6 +1156,7 @@ class ReleaseContractTests(unittest.TestCase):
                     'wheel',
                     '.',
                     '--no-deps',
+                    '--no-build-isolation',
                     '-w',
                     str(output_dir),
                 ],
@@ -878,15 +1172,61 @@ class ReleaseContractTests(unittest.TestCase):
 
             with ZipFile(wheel_files[0]) as wheel_archive:
                 archive_names = set(wheel_archive.namelist())
+                record_name = next(
+                    name for name in archive_names if name.endswith('.dist-info/RECORD')
+                )
+                wheel_record = wheel_archive.read(record_name).decode('utf-8')
 
-            self.assertIn('metor/ui/cli/proxy/core.py', archive_names)
-            self.assertNotIn('metor/ui/cli/proxy.py', archive_names)
+            self.assertIn('metor/cli/proxy/core.py', archive_names)
+            self.assertNotIn('metor/ui/terminal/help.py', archive_names)
+            self.assertNotIn('metor/utils/release_bundle.py', archive_names)
+            self.assertFalse(any(name.startswith('scripts/') for name in archive_names))
+            self.assertNotIn('release_bundle', wheel_record)
+            self.assertNotIn('scripts/release', wheel_record)
 
-    def test_release_bundle_import_avoids_optional_runtime_utils_dependencies(
-        self,
-    ) -> None:
+    def test_terminal_wheel_contains_only_interactive_frontend(self) -> None:
+        """Verifies the Terminal wheel owns its UI and not base runtime modules.
+
+        Args:
+            None
+
+        Returns:
+            None
         """
-        Verifies that release bundle import avoids optional runtime utils dependencies.
+        repo_root = Path(__file__).resolve().parents[1]
+        with TemporaryDirectory() as temp_dir:
+            output_dir = Path(temp_dir)
+            clean_packaging_artifacts(repo_root)
+            subprocess.run(
+                [
+                    sys.executable,
+                    '-m',
+                    'pip',
+                    'wheel',
+                    'packaging/terminal',
+                    '--no-deps',
+                    '--no-build-isolation',
+                    '-w',
+                    str(output_dir),
+                ],
+                check=True,
+                cwd=repo_root,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            wheel_files = sorted(output_dir.glob('metor_ui_terminal-*.whl'))
+            self.assertEqual(len(wheel_files), 1)
+            with ZipFile(wheel_files[0]) as wheel_archive:
+                archive_names = set(wheel_archive.namelist())
+
+            self.assertIn('metor/ui/terminal/launcher.py', archive_names)
+            self.assertIn('metor/ui/terminal/help.py', archive_names)
+            self.assertNotIn('metor/core/profile_keys.py', archive_names)
+            self.assertNotIn('metor/data/blob/store.py', archive_names)
+
+    def test_release_bundle_is_repository_tooling_outside_runtime_utils(self) -> None:
+        """
+        Verifies release tooling imports without restoring a runtime-module copy.
 
         Args:
             None
@@ -896,7 +1236,7 @@ class ReleaseContractTests(unittest.TestCase):
         """
 
         module_names: tuple[str, ...] = (
-            'metor.utils.release_bundle',
+            'scripts.release.bundle',
             'metor.utils',
             'metor.utils.auth',
             'metor.utils.lock',
@@ -948,7 +1288,7 @@ class ReleaseContractTests(unittest.TestCase):
 
         try:
             with patch('builtins.__import__', side_effect=guarded_import):
-                imported_module = importlib.import_module('metor.utils.release_bundle')
+                imported_module = importlib.import_module('scripts.release.bundle')
         finally:
             for name in module_names:
                 sys.modules.pop(name, None)
@@ -958,6 +1298,8 @@ class ReleaseContractTests(unittest.TestCase):
         self.assertIsNotNone(imported_module)
         assert imported_module is not None
         self.assertTrue(hasattr(imported_module, 'build_release_wheelhouse'))
+        with self.assertRaises(ModuleNotFoundError):
+            importlib.import_module('metor.utils.release_bundle')
 
     def test_sqlcipher_loader_prefers_sqlcipher3(self) -> None:
         """
@@ -1102,7 +1444,7 @@ class ReleaseContractTests(unittest.TestCase):
             exit_code = dispatcher.dispatch()
         self.assertEqual(exit_code, 1)
 
-    def test_unknown_frontend_flag_exits_with_code_2(self) -> None:
+    def test_ui_flag_is_not_consumed_by_general_help(self) -> None:
         """
         Verifies that an unknown --ui frontend id exits with code 2.
 
@@ -1115,18 +1457,19 @@ class ReleaseContractTests(unittest.TestCase):
         from metor.main import main as frontend_main
 
         with (
-            patch('sys.argv', ['metor', '--ui', 'unbekannt', 'help']),
+            patch('sys.argv', ['metor', 'help', '--ui', 'unbekannt']),
+            patch('sys.stdout'),
             patch('sys.stderr'),
             patch('sys.exit', side_effect=_raise_system_exit),
         ):
             with self.assertRaises(SystemExit) as ctx:
                 frontend_main()
 
-        self.assertEqual(ctx.exception.code, 2)
+        self.assertEqual(ctx.exception.code, 0)
 
-    def test_daemon_main_unlock_guard_exits_with_code_1(self) -> None:
+    def test_retired_daemon_child_marker_is_not_an_execution_mode(self) -> None:
         """
-        Verifies that metor-daemon unlock delegates to the terminal UI.
+        Verifies that the removed marker remains ordinary command data.
 
         Args:
             None
@@ -1134,21 +1477,17 @@ class ReleaseContractTests(unittest.TestCase):
         Returns:
             None
         """
-        from metor import daemon_main
+        from metor.cli.parser import CliParser
 
-        with (
-            patch('sys.argv', ['metor-daemon', 'unlock']),
-            patch('sys.stderr'),
-            patch('sys.exit', side_effect=_raise_system_exit),
-        ):
-            with self.assertRaises(SystemExit) as ctx:
-                daemon_main.main()
+        args, extra = CliParser.parse(['send', 'alice', '--', '--daemon-child'])
+        self.assertEqual(args.command, 'send')
+        self.assertEqual(args.subcommand, 'alice')
+        self.assertEqual(extra, ['--daemon-child'])
+        self.assertFalse(args.non_interactive)
 
-        self.assertEqual(ctx.exception.code, 1)
-
-    def test_daemon_main_missing_profile_exits_with_code_1(self) -> None:
+    def test_noninteractive_daemon_missing_profile_exits_with_code_1(self) -> None:
         """
-        Verifies that metor-daemon rejects a non-existent profile cleanly.
+        Verifies that the noninteractive child rejects a missing profile cleanly.
 
         Regression guard: the encrypted-startup guard fired before the
         profile-existence check, producing a misleading error message.
@@ -1159,27 +1498,32 @@ class ReleaseContractTests(unittest.TestCase):
         Returns:
             None
         """
-        from metor import daemon_main
+        from metor.application import DaemonProfileMissingError
+        from metor.cli.entry import run_cli
 
         with (
             patch(
-                'metor.daemon_main.ProfileManager.load_default_profile',
-                return_value='default',
+                'metor.cli.entry.initialize_runtime_environment',
             ),
-            patch('sys.argv', ['metor-daemon', '-p', 'existiert-nicht', 'daemon']),
+            patch(
+                'metor.cli.entry.ProfileManager',
+                return_value=cast(ProfileManager, _DummyProfileManager()),
+            ),
+            patch(
+                'metor.cli.handlers.prepare_managed_daemon_start',
+                side_effect=DaemonProfileMissingError('does not exist'),
+            ),
             patch('builtins.print') as print_mock,
-            patch('sys.exit', side_effect=_raise_system_exit),
         ):
-            with self.assertRaises(SystemExit) as ctx:
-                daemon_main.main()
+            result = run_cli(['-p', 'existiert-nicht', 'daemon', '--non-interactive'])
 
-        self.assertEqual(ctx.exception.code, 1)
+        self.assertEqual(result, 1)
         printed = ' '.join(str(call) for call in print_mock.call_args_list)
         self.assertIn('does not exist', printed)
 
-    def test_daemon_main_parser_parity_with_daemon_launch_command(self) -> None:
+    def test_daemon_parser_parity_with_launch_command(self) -> None:
         """
-        Verifies that daemon_main CLI parser supports all flags produced by daemon launch.
+        Verifies that the child parser supports every internal launch flag.
 
         Args:
             None
@@ -1187,25 +1531,30 @@ class ReleaseContractTests(unittest.TestCase):
         Returns:
             None
         """
-        from metor import daemon_main
+        from metor.cli.parser import CliParser
 
-        parser = daemon_main._build_parser()
         for start_locked in (True, False):
             for startup_session_auth_stdin in (True, False):
-                argv: list[str] = ['-p', 'test_profile']
+                argv: list[str] = [
+                    '-p',
+                    'test_profile',
+                    'daemon',
+                    '--non-interactive',
+                ]
                 if start_locked:
                     argv.append('--locked')
                 if startup_session_auth_stdin:
                     argv.append('--startup-session-auth-stdin')
-                argv.append('daemon')
 
-                args = parser.parse_args(argv)
+                args, extra = CliParser.parse(argv)
                 self.assertEqual(args.profile, 'test_profile')
                 self.assertEqual(args.locked, start_locked)
                 self.assertEqual(
                     args.startup_session_auth_stdin, startup_session_auth_stdin
                 )
+                self.assertTrue(args.non_interactive)
                 self.assertEqual(args.command, 'daemon')
+                self.assertEqual(extra, [])
 
     def test_messages_show_error_rendering_exits_nonzero(self) -> None:
         """

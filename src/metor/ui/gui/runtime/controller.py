@@ -1,0 +1,832 @@
+"""Bounded SDK operations and generation-safe UI result installation."""
+
+import threading
+from collections.abc import Callable
+
+from metor.client import (
+    FrontendLaunchContext,
+    FrontendProfileManagement,
+    FrontendSelection,
+    FrontendSelectionKind,
+    MetorClient,
+)
+from metor.core.api import (
+    DaemonLockedEvent,
+    Delivery,
+    EventType,
+    GuiPreferencesEvent,
+    GuiPreferencesRejectedEvent,
+    InitEvent,
+    IpcCommand,
+    IpcEvent,
+    MessagesDataEvent,
+    RuntimeSnapshotEvent,
+    RuntimeStateChangedEvent,
+    SelfDestructInitiatedEvent,
+    VoiceOwnerRegisteredEvent,
+)
+from metor.ui.gui.constants import GuiLimits
+from metor.ui.gui.state import GuiState, Route
+from metor.ui.gui.state.mailbox import Mailbox, Update
+
+# Local Package Imports
+from .activation import ProfileActivation
+from .calls import CallActions
+from .contacts import ContactFlow
+from .device import DeviceLifecycle
+from .drop import DropActions
+from .handoff import TextHandoff
+from .history import ActivityHistory
+from .interaction import Interactions
+from .live import LiveActions
+from .live_invitation import LiveInvitations
+from .notifications import Notifications
+from .operations import OperationScheduler
+from .pages import ArchivePages, InventoryPages
+from .playback import PlaybackController
+from .preferences import PreferenceBridge
+from .profiles import ProfileCatalog, ProfileIdentity, ProfileTransition
+from .purge import PurgeMonitor
+from .receipts import ReceiptReconciliation
+from .resend import ResendActions
+from .security import SecurityController
+from .settings import CoreSettings
+from .text import TextController
+from .transcript import Transcript
+from .voice import InputBridge, VoiceController, VoiceOwnerLease
+
+
+class GuiController:
+    """Coordinates public clients; workers never manipulate toolkit widgets."""
+
+    def __init__(
+        self,
+        context: FrontendLaunchContext,
+        simulator: bool = False,
+        *,
+        clipboard_own_address: bool = False,
+        native_audio: bool = True,
+    ) -> None:
+        """Creates an inert controller; no host/transport starts before Open.
+
+        Args:
+            context: Injected public host and typed launch options.
+            simulator: Explicit isolated mode; host/client creation is prohibited.
+            clipboard_own_address: Whether explicit own-address export is permitted.
+            native_audio: Whether desktop endpoint selection is allowed by deployment.
+        Returns:
+            None
+        """
+        self.context = context
+        self.simulator = simulator
+        self.clipboard_own_address = clipboard_own_address
+        self.native_audio = native_audio
+        self._native_lifecycle_failed = False
+        self.state = GuiState()
+        self.mailbox = Mailbox()
+        self.interactions = Interactions(self.state.generation, self.mailbox)
+        self.client: MetorClient | None = None
+        self.messages: MessagesDataEvent | None = None
+        self.preferences = PreferenceBridge(self)
+        self.core_settings = CoreSettings(self)
+        self.history = ActivityHistory(self)
+        self.security = SecurityController(self)
+        self._worker: threading.Thread | None = None
+        self._operations = OperationScheduler(self.mailbox, debug=context.debug)
+        self._guard = threading.Lock()
+        self._refresh_needed: bool = False
+        self._messages_needed: bool = False
+        self._navigation_identity: tuple[int, Route, Delivery] = (
+            self.state.generation,
+            self.state.route,
+            self.state.root_delivery,
+        )
+        self.text = TextController(self)
+        self.drop = DropActions(self)
+        self.live = LiveActions(self)
+        self.voice_owner = VoiceOwnerLease()
+        self.voice = VoiceController(self)
+        self.inputs = InputBridge()
+        self.activation = ProfileActivation(self)
+        self.playback = PlaybackController(self)
+        self.transcript = Transcript(self)
+        self.handoff = TextHandoff(self)
+        self.archive = ArchivePages(self)
+        self.inventory = InventoryPages(self)
+        self.contacts = ContactFlow(self)
+        self.notifications = Notifications(self)
+        self.live_invitations = LiveInvitations(self)
+        self.calls = CallActions(self)
+        self._unknown_actions: set[str] = set()
+        self.profiles = ProfileCatalog(self)
+        self.initial_missing_profile: str | None = None
+        if not simulator:
+            selection = context.host.initial_selection()
+            if selection.kind is not FrontendSelectionKind.RESOLVED:
+                available = selection.kind is FrontendSelectionKind.CHOICE_REQUIRED
+                if selection.kind is FrontendSelectionKind.REQUESTED_MISSING:
+                    try:
+                        available = (
+                            bool(context.host.profile_catalog(limit=1).entries)
+                            if isinstance(context.host, FrontendProfileManagement)
+                            else True
+                        )
+                    except (OSError, ValueError):
+                        selection = FrontendSelection(
+                            FrontendSelectionKind.UNAVAILABLE,
+                            selection.requested,
+                            None,
+                            None,
+                        )
+                self.state.route = Route(
+                    'V02'
+                    if available or selection.kind is FrontendSelectionKind.UNAVAILABLE
+                    else 'V03'
+                )
+                self.initial_missing_profile = (
+                    selection.requested
+                    if selection.kind is FrontendSelectionKind.REQUESTED_MISSING
+                    else None
+                )
+                if selection.kind is FrontendSelectionKind.UNAVAILABLE:
+                    self.state.status = (
+                        'Some profiles are unavailable or damaged. '
+                        'Choose another profile or create one.'
+                    )
+                elif not available:
+                    self.state.status = 'No profiles exist yet.'
+                    if self.initial_missing_profile is not None:
+                        self.state.status = (
+                            f"Profile '{self.initial_missing_profile}' is unavailable. "
+                            + self.state.status
+                        )
+                elif self.initial_missing_profile is not None:
+                    self.state.status = (
+                        f"Profile '{self.initial_missing_profile}' is unavailable. "
+                        'Choose or create a profile.'
+                    )
+                else:
+                    self.state.status = 'Choose a profile to continue.'
+                if available:
+                    self.profiles.reload()
+        self.lifecycle = ProfileTransition(self)
+        self.identity = ProfileIdentity(self)
+        self.resend = ResendActions(self)
+        self.receipts = ReceiptReconciliation(self)
+        self.purge = PurgeMonitor(self)
+        self.device = DeviceLifecycle(self, context.platform)
+
+    def native_departure(self) -> None:
+        """Revokes focus-owned input and media without changing authorization.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        self.inputs.focus_lost()
+        self.voice.depart()
+        self.playback.stop()
+        self.device.focus_lost()
+
+    @property
+    def native_lifecycle_failed(self) -> bool:
+        """Require a new GUI process after its native security monitor is lost."""
+        return self._native_lifecycle_failed
+
+    def fail_native_lifecycle(self) -> None:
+        """Permanently fence this GUI and detach only its own communication client.
+
+        The latch outlives profile/security resets. An already accepted purge
+        keeps its separate read-only observer; no new producer or recovery can
+        restore authorization after the native source has stopped.
+        """
+        with self._guard:
+            if self._native_lifecycle_failed:
+                return
+            self._native_lifecycle_failed = True
+        self.state.covered = True
+        if self.purge.active:
+            self.purge.poll()
+        else:
+            self.close()
+
+    def suspend(self) -> None:
+        """Covers private state and keeps input revoked until fresh native events.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        self.calls.suspend()
+        self.screen_lock()
+
+    def screen_lock(self) -> None:
+        """Covers messages and stops their media while an accepted call continues.
+
+        A desktop lock or display cover does not imply system suspend. Only the
+        existing exact call can keep its separately authorized audio streams.
+        """
+        self.native_departure()
+        self.security.lock()
+
+    def resume(self) -> None:
+        """Retain the cover and recheck transport without reconstructing input.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        self.native_departure()
+        if self.client is not None and not self.client.is_connected:
+            self.close()
+            self.state.status = 'Connection lost. Open profile to reconnect.'
+
+    def submit(
+        self,
+        operation: str,
+        work: Callable[[], IpcEvent | None],
+        *,
+        background: bool = False,
+    ) -> bool:
+        """Admits one foreground action independently of a bounded background read.
+
+        Args:
+            operation: Stable operation/route identity.
+            work: Worker callable using a captured client and target.
+            background: Read-only projection that never owns foreground busy state.
+        Returns:
+            bool: Whether this exact operation was admitted.
+        """
+        with self._guard:
+            if (
+                self.native_lifecycle_failed
+                or self.purge.active
+                or operation in self._unknown_actions
+                or self.state.busy
+            ):
+                return False
+            worker = self._operations.admit(
+                self.state.generation, operation, work, background=background
+            )
+            if worker is None:
+                return False
+            self._worker = worker
+            if not background:
+                self.state.busy = True
+            return True
+
+    def read_is_current(self, update: Update) -> bool:
+        """Checks whether a projection predates a confirmed or admitted mutation.
+
+        Args:
+            update: Typed background response or unsolicited current event.
+        Returns:
+            bool: Whether this activation can install its projection.
+        """
+        return (
+            update.generation == self.state.generation
+            and self._operations.read_is_current(update)
+        )
+
+    def _superseded_projection(self, update: Update) -> bool:
+        """Retries obsolete projection reads while retaining exact outcome and handoff facts.
+
+        Args:
+            update: Generation-valid operation completion.
+        Returns:
+            bool: Whether a newer mutation superseded this projection.
+        """
+        if self.read_is_current(update):
+            return False
+        if update.operation == 'snapshot':
+            current = self.state.snapshot
+            if (
+                isinstance(update.event, RuntimeSnapshotEvent)
+                and current is not None
+                and current.epoch != update.event.epoch
+            ):
+                return False
+            self._refresh_needed = True
+            return True
+        if update.operation.startswith('inventory-page:'):
+            self.inventory.needed = True
+            return True
+        if update.operation == 'core-settings:read':
+            self.core_settings.refresh_needed = True
+            return True
+        return False
+
+    def open_profile(self) -> bool:
+        """Starts deferred graphical profile activation.
+
+        Args:
+            None
+        Returns:
+            bool: Whether activation was admitted.
+        """
+        return (
+            False
+            if self.native_lifecycle_failed or self.purge.active
+            else self.activation.open_profile()
+        )
+
+    def adopt_client(self, client: MetorClient, generation: int) -> bool:
+        """Installs a completed bootstrap only into its still-current activation.
+
+        Args:
+            client: Fully authenticated and initialized SDK client.
+            generation: Generation captured before deferred host interaction.
+        Returns:
+            bool: Whether the client was installed rather than abandoned.
+        """
+        with self._guard:
+            if self.native_lifecycle_failed or generation != self.state.generation:
+                return False
+            self.client = client
+            return True
+
+    def create_profile(self, name: str, password: str) -> bool:
+        """Creates an encrypted profile through the public host boundary.
+
+        Args:
+            name: User-selected profile name.
+            password: One-use creation credential.
+        Returns:
+            bool: Whether creation was admitted.
+        """
+        return (
+            False
+            if self.native_lifecycle_failed or self.purge.active
+            else self.activation.create_profile(name, password)
+        )
+
+    def navigate(self, route: Route, *, from_root: bool = False) -> None:
+        """Opens a projection without a communication-changing command.
+
+        Args:
+            route: Foreground route and canonical peer.
+            from_root: Whether the persistent master pane invoked the destination.
+        Returns:
+            None
+        """
+        if self.state.covered:
+            return
+        previous = self.state.route
+        if route != self.state.route:
+            if previous.view == 'V12' and self.contacts.book.selecting:
+                self.contacts.book.cancel_selection()
+            if previous.view == 'V16' and self.notifications.store.selecting:
+                self.notifications.store.selecting = False
+                self.notifications.store.selected.clear()
+            self.voice.depart()
+            self.playback.stop()
+        self.state.navigate(route, from_root=from_root)
+        if route.view in {'V17', 'V19'}:
+            self.core_settings.reload()
+        if route.view == 'V17':
+            self.device.settings.refresh()
+        if route.view == 'V18':
+            self.history.open(route.history_raw)
+        if route.view == 'V20':
+            self.profiles.reload()
+            self.refresh_state()
+        self.archive.reset(
+            preserve_latest=previous.view in {'V08', 'V09'}
+            and route.view in {'V08', 'V09'}
+            and previous.peer == route.peer
+        )
+        self.inventory.reset()
+        self.handoff.needed = True
+        if route.peer is not None and route.delivery == Delivery.DROP:
+            self.load_messages()
+
+    def back(self) -> None:
+        """Leaves the current page and its selection for the previous projection.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        if not self.state.covered:
+            if self.state.route.view == 'V12' and self.contacts.book.selecting:
+                self.contacts.book.cancel_selection()
+            if self.state.route.view == 'V16' and self.notifications.store.selecting:
+                self.notifications.store.selecting = False
+                self.notifications.store.selected.clear()
+            self.voice.depart()
+            self.playback.stop()
+            self.state.back()
+            if self.state.route.view == 'V18':
+                self.history.open(self.state.route.history_raw)
+            self.handoff.needed = True
+            self.archive.reset()
+            self.inventory.reset()
+            if self.state.route.delivery is Delivery.DROP:
+                self.load_messages()
+
+    def load_messages(self) -> bool:
+        """Reads a bounded DROP page without consuming background Voice.
+
+        Args:
+            None
+        Returns:
+            bool: Whether the exact route request was admitted.
+        """
+        return self.archive.load()
+
+    def refresh_state(self) -> None:
+        """Requests a coalesced authoritative refresh after an explicit mutation.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        self._refresh_needed = True
+        self._messages_needed = True
+
+    def _poll_snapshot(self) -> None:
+        """Admits one coalesced snapshot when its fair read turn becomes available."""
+        if (
+            self._refresh_needed
+            and not self.state.covered
+            and not self.state.busy
+            and self.client is not None
+        ):
+            if self.submit('snapshot', self.client.runtime_snapshot, background=True):
+                self._refresh_needed = False
+
+    def _poll_archive(self) -> None:
+        """Polls the current archive and its coalesced explicit-mutation refresh flag."""
+        self.archive.poll()
+        if (
+            self._messages_needed
+            and not self.state.busy
+            and (
+                self.state.route.peer is None
+                or self.state.route.delivery is not Delivery.DROP
+                or self.load_messages()
+            )
+        ):
+            self._messages_needed = False
+
+    def command(
+        self, action: str, command: IpcCommand, expected: type[IpcEvent]
+    ) -> bool:
+        """Executes an explicit UI action against the current authenticated client.
+
+        Args:
+            action: Stable action/operation ID.
+            command: Exact immutable target captured at activation.
+            expected: Typed success result.
+        Returns:
+            bool: Whether the action was admitted.
+        """
+        client = self.client
+        if self.state.covered or client is None or action in self._unknown_actions:
+            return False
+        return self.submit(action, lambda: client.request(command, expected))
+
+    def send_text(self, peer: str, delivery: Delivery) -> None:
+        """Binds one message ID and retains the draft until confirmed acceptance.
+
+        Args:
+            peer: Canonical peer, never a mutable alias.
+            delivery: Visible composer semantics.
+        Returns:
+            None
+        """
+        self.text.send(peer, delivery)
+
+    def poll(self) -> bool:
+        """Installs generation-valid updates without blanket content revision drops.
+
+        Args:
+            None
+        Returns:
+            bool: Whether the presentation changed.
+        """
+        changed = self.purge.poll()
+        if self.native_lifecycle_failed:
+            self.mailbox.clear()
+            return changed
+        changed = self.device.poll() or changed
+        if self.purge.active:
+            return changed
+        initially_covered = self.state.covered
+        for _ in range(GuiLimits.PAGE_ITEMS):
+            update = self.mailbox.take()
+            if update is None:
+                break
+            foreground_completed = self._operations.complete(update)
+            if update.generation != self.state.generation:
+                continue
+            if foreground_completed:
+                self.state.busy = False
+            changed = True
+            if update.event is not None and self.purge.observe(
+                update.generation, update.event
+            ):
+                self.purge.poll()
+                if self.purge.active:
+                    return True
+                continue
+            if update.event is not None and (
+                (
+                    isinstance(update.event, RuntimeStateChangedEvent)
+                    and update.event.scope != 'messages'
+                )
+                or update.event.event_type
+                in {
+                    EventType.CONTACT_ADDED,
+                    EventType.CONTACT_REMOVED,
+                    EventType.CONTACT_DOWNGRADED,
+                    EventType.CONTACT_REMOVED_DOWNGRADED,
+                    EventType.CONTACTS_CLEARED,
+                    EventType.ALIAS_RENAMED,
+                    EventType.RENAME_SUCCESS,
+                    EventType.PEER_PROMOTED,
+                }
+            ):
+                self._operations.invalidate_reads()
+            if self._superseded_projection(update):
+                continue
+            if self.device.install(update):
+                continue
+            if self.lifecycle.install(update):
+                continue
+            if update.event is not None:
+                self.notifications.observe(update.event)
+                self.live_invitations.observe(update.event)
+                self.calls.observe(update.event)
+                if not self.state.covered and update.event.event_type in {
+                    EventType.CONNECTED,
+                    EventType.DISCONNECTED,
+                    EventType.CONNECTION_CONNECTING,
+                    EventType.CONNECTION_PENDING,
+                    EventType.CONNECTION_AUTO_ACCEPTED,
+                    EventType.CONNECTION_FAILED,
+                    EventType.CONNECTION_REJECTED,
+                    EventType.AUTO_RECONNECT_SCHEDULED,
+                    EventType.INCOMING_CONNECTION,
+                    EventType.PENDING_CONNECTION_EXPIRED,
+                    EventType.RETUNNEL_INITIATED,
+                    EventType.RETUNNEL_SUCCESS,
+                    EventType.RETUNNEL_FAILED,
+                    EventType.LIVE_CONTROL_REJECTED,
+                }:
+                    self._refresh_needed = True
+            if update.operation == 'lost':
+                self.close()
+                self.state.status = 'Connection lost. Unsent drafts were not restored. Open profile to reconnect.'
+                continue
+            covered_status = self.state.status
+            if self.profiles.install(update):
+                continue
+            if self.identity.install(update):
+                continue
+            if self.resend.install(update):
+                continue
+            if self.receipts.install(update):
+                continue
+            if self.live_invitations.install(update):
+                continue
+            if self.calls.install(update):
+                continue
+            if self.core_settings.install(update):
+                continue
+            if self.history.install(update):
+                continue
+            if self.contacts.install(update):
+                continue
+            if self.drop.install(update):
+                continue
+            if self.live.install(update):
+                continue
+            if self.archive.install(update) or self.inventory.install(update):
+                continue
+            if self.handoff.install(update):
+                continue
+            if self.playback.install(update):
+                continue
+            if self.voice.install(update):
+                if self.state.covered:
+                    self.state.status = covered_status
+                continue
+            if self.security.install(update.operation, update.event):
+                continue
+            if isinstance(
+                update.event, (DaemonLockedEvent, SelfDestructInitiatedEvent)
+            ):
+                self.close(purging=isinstance(update.event, SelfDestructInitiatedEvent))
+                continue
+            if isinstance(update.event, GuiPreferencesRejectedEvent):
+                self.preferences.rejected(update.event)
+                continue
+            if self.text.install(update):
+                continue
+            if update.status:
+                self.state.status = update.status
+                if (
+                    update.status == 'Operation could not be confirmed'
+                    and update.operation.startswith('A')
+                ):
+                    self._unknown_actions.add(update.operation)
+                    if update.operation == 'A-settings':
+                        self.preferences.uncertain()
+            if update.status:
+                continue
+            if self.state.covered and self.state.route.view == 'V05':
+                continue
+            if update.event is not None and self.transcript.install(update.event):
+                continue
+            if (
+                isinstance(update.event, InitEvent)
+                and update.operation == 'capabilities'
+            ):
+                self.state.capabilities = frozenset(update.event.capabilities)
+            elif update.operation == 'bootstrap':
+                if isinstance(update.event, RuntimeSnapshotEvent):
+                    self.state.snapshot = update.event
+                    self.state.covered = False
+                    self.security.activity()
+                    preferences = self.state.preferences
+                    self.state.route = Route(
+                        'V04'
+                        if preferences is not None
+                        and not preferences.preferences.setup_complete
+                        else 'V06'
+                    )
+                    self.state.status = ''
+                else:
+                    self.state.status = (
+                        'Could not open profile. Retry or choose a profile.'
+                    )
+            elif update.operation == 'create':
+                self.initial_missing_profile = None
+                self.state.route = Route('V01')
+                self.state.status = 'Profile created. Open profile to continue.'
+            elif isinstance(update.event, GuiPreferencesEvent):
+                if (
+                    self.preferences.install(
+                        update.event, confirmed_save=update.operation == 'A-settings'
+                    )
+                    and update.operation == 'preferences'
+                ):
+                    self._unknown_actions.discard('A-settings')
+            elif isinstance(update.event, VoiceOwnerRegisteredEvent):
+                self.voice_owner.token = update.event.owner_token
+            elif isinstance(update.event, MessagesDataEvent):
+                if (
+                    self.state.route.delivery is Delivery.DROP
+                    and update.operation == 'messages:' + (self.state.route.peer or '')
+                ):
+                    self.messages = update.event
+            elif isinstance(update.event, RuntimeSnapshotEvent):
+                current = self.state.snapshot
+                if current is not None and current.epoch != update.event.epoch:
+                    self.close()
+                    self.state.status = 'Unlock required'
+                elif current is None or (update.event.revision or 0) >= (
+                    current.revision or 0
+                ):
+                    self.state.snapshot = update.event
+            elif isinstance(update.event, RuntimeStateChangedEvent):
+                if update.event.scope == 'messages':
+                    self.archive.changed(update.event.onion)
+                if update.event.scope == 'inbox':
+                    self.handoff.needed = True
+                if update.event.scope in {'messages', 'inbox'} and (
+                    update.event.onion is None
+                    or update.event.onion == self.state.route.peer
+                ):
+                    self._messages_needed = True
+                if update.event.scope == 'ui.gui':
+                    self.preferences.refresh_needed = True
+                else:
+                    self._refresh_needed = True
+                    if self.state.preferences is not None:
+                        self.preferences.refresh_needed = True
+        if self.mailbox.overloaded:
+            self.close()
+            self.state.status = 'Updating state failed. Open profile to reconnect.'
+            changed = True
+        if self._operations.foreground_pending(self.state.generation):
+            self.state.busy = True
+        self.security.poll()
+        # Exact uncertain-action readbacks precede general projection refreshes.
+        # Continuous state notifications must not prevent their confirmation.
+        self.contacts.poll()
+        self.text.poll()
+        self.resend.poll()
+        self.receipts.poll()
+        self.voice.review_actions.poll()
+        self.playback.poll()
+        self.handoff.poll()
+        self.archive.poll_visible()
+        self.drop.poll()
+        self.live.poll()
+        changed = self.notifications.poll() or changed
+        changed = self.live_invitations.poll() or changed
+        changed = (
+            self._operations.poll_reads(
+                (
+                    self._poll_snapshot,
+                    self.preferences.poll,
+                    self.core_settings.poll,
+                    self.history.poll,
+                    self.profiles.poll,
+                    self._poll_archive,
+                    self.inventory.poll,
+                    self.calls.poll,
+                )
+            )
+            or changed
+        )
+        navigation = (
+            self.state.generation,
+            self.state.route,
+            self.state.root_delivery,
+        )
+        changed = navigation != self._navigation_identity or changed
+        self._navigation_identity = navigation
+        return changed or initially_covered != self.state.covered
+
+    def close(
+        self,
+        purging: bool = False,
+        *,
+        preserve_interactions: Interactions | None = None,
+        preserve_purge: bool = False,
+    ) -> None:
+        """Detaches this GUI without global hard lock, profile exit or host power.
+
+        Args:
+            purging: Accepted purge preempts normal producer finalization.
+            preserve_interactions: Fully authenticated replacement's independent bridge.
+            preserve_purge: Keeps only an accepted destruction's separate read-only observer.
+        Returns:
+            None
+        """
+        if preserve_purge and not (purging and self.purge.active):
+            raise ValueError('Only accepted destruction can retain its observer')
+        with self._guard:
+            self.lifecycle.cancel()
+            if self.interactions is not preserve_interactions:
+                self.interactions.cancel()
+        if not preserve_purge:
+            self.purge.dispose()
+            self.purge = PurgeMonitor(self)
+        with self._guard:
+            self.lifecycle.cancel()
+            if self.interactions is not preserve_interactions:
+                self.interactions.cancel()
+            self.calls.clear()
+            self.live_invitations.clear()
+            self.resend.clear()
+            self.contacts.book.stop()
+            self.voice.abandon(purge=purging)
+            self.playback.abandon()
+            client, self.client = self.client, None
+            owner, self.voice_owner.token = self.voice_owner.token, None
+            self.state.abandon()
+            self._operations.invalidate_reads()
+        self.messages = None
+        self.preferences = PreferenceBridge(self)
+        self.core_settings = CoreSettings(self)
+        self.history = ActivityHistory(self)
+        self._messages_needed = False
+        self._refresh_needed = False
+        self.security = SecurityController(self)
+        self.text.clear()
+        self.transcript.clear()
+        self.handoff.clear()
+        self.archive = ArchivePages(self)
+        self.inventory = InventoryPages(self)
+        self.contacts = ContactFlow(self)
+        self.drop = DropActions(self)
+        self.live = LiveActions(self)
+        self.receipts = ReceiptReconciliation(self)
+        self.notifications = Notifications(self)
+        self.live_invitations = LiveInvitations(self)
+        self.calls = CallActions(self)
+        self.profiles = ProfileCatalog(self)
+        self.voice = VoiceController(self)
+        self._unknown_actions.clear()
+        self.playback = PlaybackController(self)
+        self.mailbox.clear()
+        self.identity = ProfileIdentity(self)
+        self.interactions = preserve_interactions or Interactions(
+            self.state.generation, self.mailbox
+        )
+        if client is not None:
+            threading.Thread(
+                target=VoiceOwnerLease.detach,
+                args=(client, owner, purging),
+                name='metor-gui-detach',
+                daemon=True,
+            ).start()

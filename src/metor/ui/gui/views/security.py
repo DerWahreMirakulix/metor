@@ -1,0 +1,356 @@
+"""Private full-viewport application lock and protected lock-method setup views."""
+
+from collections.abc import Callable
+
+from kivy.core.text import Label as TextMeasure
+from kivy.uix.anchorlayout import AnchorLayout
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.gridlayout import GridLayout
+
+from metor.core.api import ClientUnlockMethod, NotificationPrivacy, Delivery
+from metor.ui.gui.runtime import GuiController
+from metor.ui.gui.state import Route
+from metor.ui.gui.widgets import Action, Label, SecretInput
+
+# Local Package Imports
+from .cover import PrivateForm
+
+
+class LockedActivity(Action):
+    """Updates a content-free activity cue without recreating the native unlock field.
+
+    No historical count is inferred from the unread inventory.
+    """
+
+    def __init__(self, controller: GuiController, refresh: Callable[[], None]) -> None:
+        """Creates a hidden target until Core permits a current-cycle DROP observation.
+
+        Args:
+            controller: Same-client restricted state owner.
+            refresh: Native repaint request.
+        Returns:
+            None
+        """
+        self.controller = controller
+
+        def activate() -> None:
+            """Requests normal unlock before exposing notification state.
+
+            Args:
+                None
+            Returns:
+                None
+            """
+            controller.notifications.open_locked()
+            refresh()
+
+        super().__init__('', activate)
+        self.update()
+
+    def update(self) -> None:
+        """Repaints only permitted generic activity, preserving focused controls nearby.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        security = self.controller.security
+        visible = (
+            self.controller.state.covered
+            and security.restriction is not None
+            and security.notification_privacy is not NotificationPrivacy.OFF
+            and bool(self.controller.notifications.locked_activity)
+        )
+        self.opacity = 1 if visible else 0
+        self.disabled = not visible
+        self.height = '48dp' if visible else 0
+        activity = self.controller.notifications.locked_activity
+        text = (
+            'New Drop'
+            if activity == {Delivery.DROP}
+            else 'New Live activity'
+            if activity == {Delivery.LIVE}
+            else 'New activity'
+        )
+        self.label.text = self.accessible_name = (
+            text + ' · Unlock to view' if visible else ''
+        )
+
+
+def security_view(
+    controller: GuiController, refresh: Callable[[], None]
+) -> AnchorLayout:
+    """Uses a full opaque viewport with no contact-bearing master panel.
+
+    Args:
+        controller: Active client authorization owner.
+        refresh: Native repaint request.
+    Returns:
+        AnchorLayout: Centered, measured private form.
+    """
+    outer = PrivateForm()
+    body = outer.body
+    state, security = controller.state, controller.security
+    if state.route.view == 'V05':
+        body.add_widget(Label('Locked', role='title'))
+        body.add_widget(LockedActivity(controller, refresh))
+        if security.profile_label:
+            body.add_widget(Label(security.profile_label, role='support'))
+        restriction = security.restriction
+        if restriction is not None:
+            method = restriction.unlock_method
+            secret = SecretInput(
+                accessible_name='PIN'
+                if method is ClientUnlockMethod.PIN
+                else 'Profile password'
+            )
+            if method is ClientUnlockMethod.PIN:
+                secret.input_purpose = 'pin'
+            if method is not ClientUnlockMethod.NONE:
+                body.add_widget(
+                    Label(
+                        'PIN'
+                        if method is ClientUnlockMethod.PIN
+                        else 'Profile password',
+                        role='support',
+                    )
+                )
+                body.add_widget(secret)
+
+            def unlock() -> None:
+                """Transfers a single secret then clears the native field.
+
+                Args:
+                    None
+                Returns:
+                    None
+                """
+                value = secret.text
+                secret.text = ''
+                security.unlock(value)
+                refresh()
+
+            secret.bind(on_text_validate=lambda *_args: unlock())
+            if method is ClientUnlockMethod.PIN:
+                keypad = GridLayout(
+                    cols=3,
+                    spacing='8dp',
+                    size_hint_y=None,
+                )
+                keypad.bind(minimum_height=keypad.setter('height'))
+                for key in (
+                    '1',
+                    '2',
+                    '3',
+                    '4',
+                    '5',
+                    '6',
+                    '7',
+                    '8',
+                    '9',
+                    '⌫',
+                    '0',
+                    'Unlock',
+                ):
+
+                    def press(value: str = key) -> None:
+                        """Routes one explicit keypad activation to its masked field.
+
+                        Args:
+                            value: Key label.
+                        Returns:
+                            None
+                        """
+                        if value == 'Unlock':
+                            unlock()
+                        elif value == '⌫':
+                            secret.do_backspace()
+                        else:
+                            secret.insert_text(value)
+
+                    button = Action(
+                        key,
+                        press,
+                        surface='drop' if key == 'Unlock' else 'raised',
+                        tone='onAccent' if key == 'Unlock' else 'text',
+                        disabled=state.busy,
+                    )
+                    button.padding = ('4dp', '8dp')
+                    if key == 'Unlock':
+                        width, _ = TextMeasure(
+                            font_name=button.label.font_name,
+                            font_size=button.label.font_size,
+                        ).get_extents(key)
+                        button.size_hint_min_x = (
+                            width + button.padding[0] + button.padding[2]
+                        )
+                    elif key == '⌫':
+                        button.accessible_name = 'Delete last PIN digit'
+                    keypad.add_widget(button)
+                body.add_widget(keypad)
+
+                def forgot_pin() -> None:
+                    """Requests password recovery without submitting a wrong PIN.
+
+                    Args:
+                        None
+                    Returns:
+                        None
+                    """
+                    security.unlock(password=True)
+                    refresh()
+
+                body.add_widget(
+                    Action(
+                        'Forgot PIN?',
+                        forgot_pin,
+                        disabled=state.busy,
+                    )
+                )
+            else:
+                body.add_widget(
+                    Action(
+                        'Unlock',
+                        unlock,
+                        surface='drop',
+                        tone='onAccent',
+                        disabled=state.busy,
+                    )
+                )
+    else:
+        body.add_widget(Label('Secure Metor', role='title'))
+        body.add_widget(
+            Label(
+                'Choose how to unlock this application. Opening an encrypted profile still requires its password.',
+                tone='textSecondary',
+            )
+        )
+        pin = SecretInput(accessible_name='New PIN')
+        confirm = SecretInput(accessible_name='Confirm PIN')
+        pin.input_purpose = confirm.input_purpose = 'pin'
+        error = Label('', role='support', tone='danger')
+
+        def configure_pin() -> None:
+            """Matches user entry before Core performs sensitive authorization.
+
+            Args:
+                None
+            Returns:
+                None
+            """
+            if not pin.text or pin.text != confirm.text:
+                error.text = 'Enter matching PINs'
+                return
+            value = pin.text
+            pin.text = confirm.text = ''
+            security.configure(ClientUnlockMethod.PIN, value)
+            refresh()
+
+        def configure(method: ClientUnlockMethod) -> None:
+            """Applies an explicit setup choice through protected Core metadata.
+
+            Args:
+                method: Selected unlock method.
+            Returns:
+                None
+            """
+            security.configure(method)
+            refresh()
+
+        def show_pin() -> None:
+            """Opens PIN input only after the user selects this setup method.
+
+            Args:
+                None
+            Returns:
+                None
+            """
+            body.clear_widgets()
+            body.add_widget(Label('Set PIN', role='title'))
+            body.add_widget(Label('New PIN', role='support'))
+            body.add_widget(pin)
+            body.add_widget(Label('Confirm PIN', role='support'))
+            body.add_widget(confirm)
+            body.add_widget(error)
+            body.add_widget(
+                Action(
+                    'Save PIN',
+                    configure_pin,
+                    surface='drop',
+                    tone='onAccent',
+                    disabled=state.busy,
+                )
+            )
+            body.add_widget(
+                Action(
+                    'Use profile password',
+                    lambda: configure(ClientUnlockMethod.PROFILE_PASSWORD),
+                    disabled=state.busy,
+                )
+            )
+
+        body.add_widget(Action('Set PIN', show_pin, disabled=state.busy))
+        body.add_widget(
+            Action(
+                'Use profile password',
+                lambda: configure(ClientUnlockMethod.PROFILE_PASSWORD),
+                surface='drop',
+                tone='onAccent',
+                disabled=state.busy,
+            )
+        )
+        warning = BoxLayout(
+            orientation='vertical', spacing='12dp', size_hint_y=None, height=0
+        )
+        warning.bind(minimum_height=warning.setter('height'))
+
+        def warn_none() -> None:
+            """Requires a separate explicit confirmation before weakening lock policy.
+
+            Args:
+                None
+            Returns:
+                None
+            """
+            warning.clear_widgets()
+            warning.add_widget(
+                Label(
+                    'Anyone with access to this running application can unlock it. The profile password is still required at startup.',
+                    tone='danger',
+                )
+            )
+            warning.add_widget(
+                Action(
+                    'Confirm no screen lock',
+                    lambda: configure(ClientUnlockMethod.NONE),
+                    surface='danger',
+                    tone='onAccent',
+                    disabled=state.busy,
+                )
+            )
+
+        body.add_widget(Action('No screen lock', warn_none, disabled=state.busy))
+        body.add_widget(warning)
+
+        def later() -> None:
+            """Leaves the conservative uncompleted password default in force.
+
+            Args:
+                None
+            Returns:
+                None
+            """
+            state.route = Route('V06')
+            refresh()
+
+        body.add_widget(
+            Action(
+                'Later',
+                later,
+                disabled=state.busy,
+            )
+        )
+    if state.status:
+        body.add_widget(Label(state.status, role='support', tone='info'))
+    return outer

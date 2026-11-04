@@ -2,13 +2,21 @@
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional, TypeVar
+from typing import Optional, TypeVar, cast
 
+from metor.core.api.base import _validate_value
 from metor.core.api.codes import (
+    ConnectionActor,
     ConnectionOrigin,
+    ConnectionReasonCode,
     MessageDirectionCode,
     MessageStatusCode,
     PendingConnectionReasonCode,
+)
+from metor.core.api.content import (
+    ContentType,
+    Delivery,
+    MessageContent,
 )
 
 
@@ -16,11 +24,31 @@ EnumT = TypeVar('EnumT', bound=Enum)
 
 
 def _coerce_enum(enum_type: type[EnumT], value: object) -> EnumT:
-    """Coerces one string-backed DTO field to its target enum type."""
+    """Coerces one string-backed DTO field to its target enum type.
+
+    Args:
+        enum_type (type[EnumT]): The enum type input.
+        value (object): The value input.
+
+    Returns:
+        EnumT: The resulting value.
+    """
 
     if isinstance(value, enum_type):
         return value
     return enum_type(value)
+
+
+def _coerce_content(value: MessageContent | dict[str, object]) -> MessageContent:
+    """Casts one JSON-shaped content payload by its discriminator.
+
+    Args:
+        value (MessageContent | dict[str, object]): Content DTO or decoded object.
+
+    Returns:
+        MessageContent: Typed content DTO.
+    """
+    return cast(MessageContent, _validate_value(MessageContent, value, 'content'))
 
 
 @dataclass
@@ -29,6 +57,7 @@ class ContactEntry:
 
     alias: str
     onion: str
+    saved: bool = True
 
 
 @dataclass
@@ -37,13 +66,59 @@ class MessageEntry:
 
     direction: MessageDirectionCode
     status: MessageStatusCode
-    payload: str
+    delivery: Delivery
+    content: MessageContent
     timestamp: str
+    msg_id: Optional[str] = None
 
     def __post_init__(self) -> None:
-        """Coerces string-backed direction and status fields to their typed enum equivalents."""
+        """Coerces string-backed direction and status fields to their typed enum equivalents.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         self.direction = _coerce_enum(MessageDirectionCode, self.direction)
         self.status = _coerce_enum(MessageStatusCode, self.status)
+        self.delivery = _coerce_enum(Delivery, self.delivery)
+        if isinstance(self.content, dict):
+            self.content = _coerce_content(self.content)
+
+
+@dataclass
+class RetainedMessageEntry:
+    """Identifies one retained item without exposing its content or storage path."""
+
+    onion: str
+    alias: str
+    direction: MessageDirectionCode
+    delivery: Delivery
+    status: MessageStatusCode
+    content_type: ContentType
+    msg_id: str
+    finalized: bool
+    size_bytes: int = 0
+    codec: Optional[str] = None
+    duration_ms: Optional[int] = None
+    producer_interrupted: bool = False
+    can_retry_finalization: bool = False
+    context_generation: Optional[int] = None
+
+    def __post_init__(self) -> None:
+        """Coerces serialized enum fields into their typed representations.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        self.direction = _coerce_enum(MessageDirectionCode, self.direction)
+        self.delivery = _coerce_enum(Delivery, self.delivery)
+        self.status = _coerce_enum(MessageStatusCode, self.status)
+        self.content_type = _coerce_enum(ContentType, self.content_type)
 
 
 @dataclass
@@ -51,9 +126,22 @@ class UnreadMessageEntry:
     """Represents one unread message awaiting explicit consume."""
 
     timestamp: str
-    payload: str
-    is_drop: bool
+    delivery: Delivery
+    content: MessageContent
     msg_id: Optional[str] = None
+
+    def __post_init__(self) -> None:
+        """Casts JSON-shaped nested content to its typed DTO.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        self.delivery = _coerce_enum(Delivery, self.delivery)
+        if isinstance(self.content, dict):
+            self.content = _coerce_content(self.content)
 
 
 @dataclass
@@ -65,9 +153,17 @@ class PendingConnectionEntry:
     origin: ConnectionOrigin
     reason: PendingConnectionReasonCode
     expires_at: Optional[str] = None
+    action_handle: Optional[str] = None
 
     def __post_init__(self) -> None:
-        """Coerces string-backed origin and reason values to typed enums."""
+        """Coerces string-backed origin and reason values to typed enums.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
         self.origin = _coerce_enum(ConnectionOrigin, self.origin)
         self.reason = _coerce_enum(PendingConnectionReasonCode, self.reason)
 
@@ -81,6 +177,55 @@ class UnreadInboxSummaryEntry:
     total_unread: int
     drop_unread: int
     live_unread: int
+
+
+@dataclass
+class LiveContextEntry:
+    """Represents canonical per-peer LIVE state in an aggregate snapshot."""
+
+    alias: str
+    onion: str
+    saved: bool
+    session_state: str
+    unseen_count: int = 0
+    pending_outbound_count: int = 0
+    recovery_eligible: bool = False
+    disconnect_actor: Optional[ConnectionActor] = None
+    disconnect_reason: Optional[ConnectionReasonCode] = None
+    context_generation: Optional[int] = None
+    invitation_handle: Optional[str] = None
+    outbound_attempt_id: Optional[str] = None
+    route_changing: bool = False
+
+    def __post_init__(self) -> None:
+        """Coerces optional disconnect fields to their public enums.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        if self.context_generation is not None and (
+            type(self.context_generation) is not int or self.context_generation <= 0
+        ):
+            raise ValueError('Invalid LIVE context generation')
+        if self.disconnect_actor is not None:
+            self.disconnect_actor = _coerce_enum(ConnectionActor, self.disconnect_actor)
+        if self.disconnect_reason is not None:
+            self.disconnect_reason = _coerce_enum(
+                ConnectionReasonCode, self.disconnect_reason
+            )
+
+
+@dataclass
+class DropConversationSummaryEntry:
+    """Represents a content-free DROP conversation summary."""
+
+    alias: str
+    onion: str
+    unread_count: int = 0
+    pending_count: int = 0
 
 
 @dataclass
@@ -109,3 +254,13 @@ class SettingSnapshotEntry:
     value: str
     source: str
     category: str
+    value_type: str = ''
+    display_name: str = ''
+    display_group: str = ''
+    description: str = ''
+    constraints: str = ''
+    security_note: str = ''
+    min_value: Optional[float] = None
+    max_value: Optional[float] = None
+    editable: bool = False
+    scope: str = ''

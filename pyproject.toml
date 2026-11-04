@@ -1,47 +1,72 @@
 [build-system]
-requires = ["setuptools==80.10.2", "wheel==0.46.3"]
+requires = ["setuptools==84.2.1", "wheel==0.46.3"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "metor"
-version = "0.2.0"
+dynamic = ["version", "dependencies"]
 description = "A Tor Messenger Framework."
 readme = "README.md"
 authors = [{ name = "LuRex" }]
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.14"
 license = { text = "GPLv3" }
-dependencies = [
-    "stem==1.8.2",
-    "PySocks==1.7.1",
-    "pynacl==1.6.2",
-    "psutil==7.2.2",
-    "python-dotenv==1.2.2",
-    "sqlcipher3-binary==0.6.0; platform_system == 'Linux'",
-    "sqlcipher3==0.6.2; platform_system != 'Linux'",
-]
 
 [project.optional-dependencies]
 dev = ["ruff==0.15.8", "mypy==1.19.1"]
 
 [project.scripts]
 metor = "metor.main:main"
-metor-daemon = "metor.daemon_main:main"
 
 [tool.setuptools]
 include-package-data = true
+py-modules = [
+    "metor.__main__",
+    "metor.main",
+    "metor.core.key",
+    "metor.core.profile_destruction",
+    "metor.core.profile_keys",
+    "metor.core.tor",
+    "metor.core.tor_windows",
+]
+
+[tool.setuptools.dynamic]
+version = { attr = "metor.versioning.APP_VERSION" }
 
 [tool.setuptools.package-dir]
 "" = "src"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["metor*"]
+include = [
+    "metor.application",
+    "metor.application.*",
+    "metor.cli",
+    "metor.cli.*",
+    "metor.core.daemon",
+    "metor.core.daemon.*",
+    "metor.data",
+    "metor.data.*",
+    "metor.utils",
+    "metor.utils.*",
+]
 
 [tool.ruff]
 line-length = 88
 
+[tool.ruff.lint]
+# Keep the repository-wide rule set stable across Ruff editor/CI versions.
+select = ["E4", "E7", "E9", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+# Kivy setup must run before the native capture fixture imports its widgets.
+'tests/gui_native_capture.py' = ['E402']
+
 [tool.ruff.format]
 quote-style = "single"
+
+[tool.basedpyright]
+typeCheckingMode = "standard"
+extraPaths = ["src", "tests"]
 
 [tool.mypy]
 strict = true
@@ -63,3 +88,11 @@ module = [
     "stem.*",
 ]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["kivy", "kivy.*", "sounddevice", "qrcode", "qrcode.*", "accesskit", "accesskit.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["metor.ui.gui.widgets.*", "metor.ui.gui.views.*", "metor.ui.gui.app"]
+disallow_subclassing_any = false

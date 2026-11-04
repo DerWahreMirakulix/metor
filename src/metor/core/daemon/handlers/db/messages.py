@@ -1,25 +1,42 @@
 """Message and inbox-specific database command handling."""
 
+import json
 from typing import Callable, Dict, List, Optional, Tuple
 
 from metor.core.api import (
     ClearMessagesCommand,
+    DeleteMessageCommand,
     EventType,
     GetInboxCommand,
     GetMessagesCommand,
+    GetMessageOutcomeCommand,
+    MessageOutcomeEvent,
+    ListRetainedMessagesCommand,
     InboxCountsEvent,
     IpcEvent,
     MarkReadCommand,
     MessageDirectionCode,
+    MessageOperationReason,
     MessageEntry,
     MessageStatusCode,
     MessagesDataEvent,
+    RetainedMessageEntry,
+    RetainedMessagesEvent,
+    RuntimeStateChangedEvent,
     UnreadMessageEntry,
     UnreadMessagesEvent,
     create_event,
+    ContentType,
+    deserialize_content,
+    VoiceContent,
 )
-from metor.data import MessageType
-from metor.data.message import MessageClearOperationType, MessageClearResult
+from metor.core.api import Delivery
+from metor.data import MessageDirection, SettingKey
+from metor.data.message import (
+    MessageClearOperationType,
+    MessageClearResult,
+    MessageDeleteOutcome,
+)
 
 # Local Package Imports
 from metor.core.daemon.handlers.db.support import DatabaseCommandHandlerSupportMixin
@@ -42,6 +59,35 @@ class DatabaseCommandMessagesMixin(DatabaseCommandHandlerSupportMixin):
     """Handles chat-history, inbox, and clear-message database commands."""
 
     _send_read_receipt_cb: Optional[Callable[[str, List[str]], None]]
+    _release_consumed_voice_cb: Optional[Callable[[str, List[str]], None]]
+    _delete_persistent_blob_cb: Optional[Callable[[str], None]]
+    _cancel_drop_requests_cb: Optional[Callable[[tuple[tuple[str, str], ...]], None]]
+
+    def _delete_voice_payloads(self, payloads: List[str]) -> None:
+        """Best-effort deletes persistent Voice objects after metadata commits.
+
+        Args:
+            payloads (List[str]): The payloads input.
+
+        Returns:
+            None
+        """
+        if self._delete_persistent_blob_cb is None:
+            return
+        for payload in payloads:
+            try:
+                content = deserialize_content(ContentType.VOICE, payload)
+                if isinstance(content, VoiceContent):
+                    self._delete_persistent_blob_cb(content.blob_id)
+                metadata = json.loads(payload)
+                if isinstance(metadata, dict):
+                    chunk_ids = metadata.get('chunk_ids', [])
+                    if isinstance(chunk_ids, list):
+                        for chunk_id in chunk_ids:
+                            if isinstance(chunk_id, str):
+                                self._delete_persistent_blob_cb(chunk_id)
+            except (KeyError, OSError, TypeError, ValueError):
+                continue
 
     def _handle_get_messages(self, cmd: GetMessagesCommand) -> IpcEvent:
         """
@@ -61,17 +107,122 @@ class DatabaseCommandMessagesMixin(DatabaseCommandHandlerSupportMixin):
             return create_event(EventType.INVALID_TARGET, {'target': cmd.target})
 
         alias, onion = resolved
-        messages_raw = self._mm.get_chat_history(onion, cmd.limit)
+        has_older, page_available = False, True
+        if cmd.max_payload_bytes is not None and cmd.limit is not None:
+            messages_raw, has_older, page_available = self._mm.get_chat_page(
+                onion,
+                cmd.limit,
+                cmd.max_payload_bytes,
+                cmd.before_msg_id,
+                MessageDirection(cmd.before_direction.value)
+                if cmd.before_direction is not None
+                else None,
+            )
+        else:
+            messages_raw = self._mm.get_chat_history(onion, cmd.limit)
         messages = [
             MessageEntry(
                 direction=MessageDirectionCode(message.direction),
                 status=MessageStatusCode(message.status),
-                payload=message.payload,
+                delivery=Delivery.DROP,
+                content=deserialize_content(
+                    ContentType(message.content_type), message.payload
+                ),
                 timestamp=message.timestamp,
+                msg_id=message.msg_id,
             )
             for message in messages_raw
         ]
-        return MessagesDataEvent(messages=messages, alias=alias, onion=onion)
+        return MessagesDataEvent(
+            messages=messages,
+            alias=alias,
+            onion=onion,
+            has_older=has_older,
+            page_available=page_available,
+        )
+
+    def _handle_message_outcome(self, cmd: GetMessageOutcomeCommand) -> IpcEvent:
+        """Projects an exact retained receipt without reading or consuming payloads.
+
+        Args:
+            cmd: Stable identity and direction from the authenticated client.
+        Returns:
+            IpcEvent: Content-free receipt facts; absence remains unknown to a sender.
+        """
+        outcome = self._mm.message_state(
+            cmd.onion, cmd.msg_id, MessageDirection(cmd.direction.value)
+        )
+        return MessageOutcomeEvent(
+            cmd.onion,
+            cmd.msg_id,
+            cmd.direction,
+            outcome[0] if outcome else None,
+            MessageStatusCode(outcome[1].value) if outcome else None,
+            outcome[2] if outcome else None,
+        )
+
+    def _handle_list_retained_messages(
+        self, cmd: ListRetainedMessagesCommand
+    ) -> IpcEvent:
+        """Returns retained identities without reading or consuming payloads.
+
+        Args:
+            cmd (ListRetainedMessagesCommand): The cmd input.
+
+        Returns:
+            IpcEvent: The resulting value.
+        """
+        onion: Optional[str] = None
+        if cmd.target:
+            resolved = self._cm.resolve_target(cmd.target)
+            if not resolved:
+                return create_event(EventType.INVALID_TARGET, {'target': cmd.target})
+            _, onion = resolved
+        direction = (
+            MessageDirection(cmd.direction.value) if cmd.direction is not None else None
+        )
+        try:
+            page = self._mm.list_retained_messages(
+                contact_onion=onion,
+                delivery=cmd.delivery,
+                direction=direction,
+                cursor=cmd.cursor,
+                limit=cmd.limit,
+                owner_token=cmd.owner_token,
+                msg_id=cmd.msg_id,
+            )
+        except ValueError:
+            return create_event(
+                EventType.RETAINED_MESSAGES_UNAVAILABLE,
+                {
+                    'reason': 'Retained-message inventory is unavailable.',
+                    'retryable': True,
+                },
+            )
+        entries = [
+            RetainedMessageEntry(
+                onion=message.peer_onion,
+                alias=self._cm.require_alias_by_onion(message.peer_onion),
+                direction=MessageDirectionCode(message.direction.value),
+                delivery=Delivery(message.delivery),
+                status=MessageStatusCode(message.status),
+                content_type=ContentType(message.content_type),
+                msg_id=message.msg_id,
+                finalized=message.finalized,
+                size_bytes=message.retained_bytes,
+                codec=message.codec,
+                duration_ms=message.duration_ms,
+                producer_interrupted=message.producer_interrupted,
+                can_retry_finalization=message.producer_interrupted,
+                context_generation=message.context_generation,
+            )
+            for message in page.messages
+        ]
+        return RetainedMessagesEvent(
+            messages=entries,
+            next_cursor=page.next_cursor,
+            inventory_version=page.inventory_version,
+        )
 
     def _handle_clear_messages(self, cmd: ClearMessagesCommand) -> IpcEvent:
         """
@@ -93,10 +244,20 @@ class DatabaseCommandMessagesMixin(DatabaseCommandHandlerSupportMixin):
                 return create_event(EventType.PEER_NOT_FOUND, {'target': cmd.target})
             alias, onion = resolved
 
+        voice_payloads = self._mm.get_drop_voice_payloads(
+            onion=onion,
+            non_contacts_only=cmd.non_contacts_only,
+            include_pending=cmd.cancel_pending,
+        )
         result: MessageClearResult = self._mm.clear_messages(
             onion,
             cmd.non_contacts_only,
+            cmd.cancel_pending,
         )
+        if result.success:
+            self._delete_voice_payloads(voice_payloads)
+            if self._cancel_drop_requests_cb is not None:
+                self._cancel_drop_requests_cb(result.cancelled_drop_ids)
         params: Dict[str, str] = {}
         if (
             result.operation_type
@@ -116,6 +277,8 @@ class DatabaseCommandMessagesMixin(DatabaseCommandHandlerSupportMixin):
             params = {'profile': result.profile or self._pm.profile_name}
 
         self._emit_orphan_cleanup(self._cm.cleanup_orphans(active_onions))
+        if result.success:
+            self._broadcast(RuntimeStateChangedEvent(scope='messages', onion=onion))
         return create_event(MESSAGE_CLEAR_EVENT_TYPES[result.operation_type], params)
 
     def _handle_get_inbox(self, _: GetInboxCommand) -> IpcEvent:
@@ -150,12 +313,16 @@ class DatabaseCommandMessagesMixin(DatabaseCommandHandlerSupportMixin):
             return create_event(EventType.PEER_NOT_FOUND, {'target': cmd.target})
 
         alias, onion = resolved
-        raw_messages = self._mm.get_and_read_inbox(onion)
+        raw_messages = self._mm.get_and_read_inbox(
+            onion, cmd.delivery, cmd.max_messages, cmd.max_payload_bytes
+        )
         messages_list: List[UnreadMessageEntry] = [
             UnreadMessageEntry(
                 timestamp=str(message[3]),
-                payload=str(message[2]),
-                is_drop=str(message[1]) != MessageType.LIVE_TEXT.value,
+                delivery=Delivery(str(message[1])),
+                content=deserialize_content(
+                    ContentType(str(message[5])), str(message[2])
+                ),
                 msg_id=str(message[4]) if message[4] is not None else None,
             )
             for message in raw_messages
@@ -163,6 +330,86 @@ class DatabaseCommandMessagesMixin(DatabaseCommandHandlerSupportMixin):
         msg_ids: List[str] = [
             str(message[4]) for message in raw_messages if message[4] is not None
         ]
-        if self._send_read_receipt_cb is not None and msg_ids:
+        voice_msg_ids = [
+            str(message[4])
+            for message in raw_messages
+            if message[4] is not None and str(message[5]) == ContentType.VOICE.value
+        ]
+        if self._release_consumed_voice_cb is not None and voice_msg_ids:
+            self._release_consumed_voice_cb(onion, voice_msg_ids)
+        if self._pm.config.get_bool(SettingKey.EPHEMERAL_MESSAGES):
+            self._delete_voice_payloads(
+                [
+                    str(message[2])
+                    for message in raw_messages
+                    if message[1] == Delivery.DROP.value
+                    and message[5] == ContentType.VOICE.value
+                ]
+            )
+        if (
+            self._send_read_receipt_cb is not None
+            and msg_ids
+            and self._pm.config.get_bool(SettingKey.SEND_READ_RECEIPTS)
+        ):
             self._send_read_receipt_cb(onion, msg_ids)
+        if raw_messages:
+            self._broadcast(RuntimeStateChangedEvent(scope='inbox', onion=onion))
         return UnreadMessagesEvent(messages=messages_list, alias=alias, onion=onion)
+
+    def _handle_delete_message(self, cmd: DeleteMessageCommand) -> IpcEvent:
+        """Deletes one eligible local DROP payload by stable identity.
+
+        Args:
+            cmd (DeleteMessageCommand): Target and stable message identity.
+
+        Returns:
+            IpcEvent: Typed success or rejection event.
+        """
+        resolved = self._cm.resolve_target(cmd.target)
+        if not resolved:
+            return create_event(EventType.PEER_NOT_FOUND, {'target': cmd.target})
+        alias, onion = resolved
+        direction = (
+            MessageDirection(cmd.direction.value) if cmd.direction is not None else None
+        )
+        voice_payloads = self._mm.get_drop_voice_payloads(
+            onion=onion,
+            msg_id=cmd.msg_id,
+            direction=direction,
+            include_pending=cmd.cancel_pending,
+        )
+        outcome = self._mm.delete_drop_message(
+            onion, cmd.msg_id, direction, cmd.cancel_pending
+        )
+        if outcome is MessageDeleteOutcome.DELETED:
+            self._delete_voice_payloads(voice_payloads)
+            if (
+                cmd.cancel_pending
+                and direction is not MessageDirection.IN
+                and self._cancel_drop_requests_cb is not None
+            ):
+                self._cancel_drop_requests_cb(((onion, cmd.msg_id),))
+            self._broadcast(RuntimeStateChangedEvent(scope='messages', onion=onion))
+            return create_event(
+                EventType.MESSAGE_DELETED,
+                {'alias': alias, 'onion': onion, 'msg_id': cmd.msg_id},
+            )
+        reason_map = {
+            MessageDeleteOutcome.NOT_FOUND: MessageOperationReason.NOT_FOUND,
+            MessageDeleteOutcome.NOT_DROP: MessageOperationReason.NOT_DROP,
+            MessageDeleteOutcome.PENDING_DELIVERY: (
+                MessageOperationReason.PENDING_DELIVERY
+            ),
+            MessageDeleteOutcome.AMBIGUOUS_IDENTITY: (
+                MessageOperationReason.AMBIGUOUS_IDENTITY
+            ),
+        }
+        return create_event(
+            EventType.MESSAGE_DELETE_REJECTED,
+            {
+                'target': cmd.target,
+                'onion': onion,
+                'msg_id': cmd.msg_id,
+                'reason': reason_map[outcome].value,
+            },
+        )

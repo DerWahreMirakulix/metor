@@ -13,7 +13,9 @@ from metor.core.api import (
     IpcEvent,
     ConnectedEvent,
     ConnectionPendingEvent,
+    ConnectionReasonCode,
     RetunnelSuccessEvent,
+    is_valid_message_id,
 )
 from metor.core.daemon.managed.models import (
     DisconnectIntent,
@@ -27,11 +29,13 @@ from metor.data import (
     ContactManager,
     SettingKey,
 )
+from metor.shared import Constants
 
 # Local Package Imports
 from metor.core.daemon.managed.network.state import StateTracker
 from metor.core.daemon.managed.network.stream import TcpStreamReader
 from metor.core.daemon.managed.network.router import MessageRouter
+from metor.core.daemon.managed.network.router.admission import FrameAdmission
 
 if TYPE_CHECKING:
     from metor.data.profile import Config
@@ -39,22 +43,6 @@ if TYPE_CHECKING:
 
 class StreamReceiver:
     """Manages the background read-loop for fully established Tor sockets."""
-
-    @staticmethod
-    def _close_socket_quietly(conn: socket.socket) -> None:
-        """
-        Closes one socket while suppressing transport teardown noise.
-
-        Args:
-            conn (socket.socket): The socket to close.
-
-        Returns:
-            None
-        """
-        try:
-            conn.close()
-        except OSError:
-            pass
 
     @staticmethod
     def _socket_appears_closed(conn: socket.socket) -> bool:
@@ -128,25 +116,10 @@ class StreamReceiver:
         if not awaiting_acceptance:
             return False
 
-        is_current_outbound_socket = getattr(
-            self._state,
-            'is_current_outbound_socket',
-            None,
-        )
-        is_connected_or_pending = getattr(
-            self._state,
-            'is_connected_or_pending',
-            None,
-        )
-        if not callable(is_current_outbound_socket) or not callable(
-            is_connected_or_pending
-        ):
+        if self._state.is_current_outbound_socket(onion, conn):
             return False
 
-        if is_current_outbound_socket(onion, conn):
-            return False
-
-        return bool(is_connected_or_pending(onion))
+        return True
 
     def __init__(
         self,
@@ -163,6 +136,7 @@ class StreamReceiver:
                 Optional[socket.socket],
                 bool,
                 Optional[ConnectionOrigin],
+                Optional[ConnectionReasonCode],
             ],
             None,
         ],
@@ -177,6 +151,10 @@ class StreamReceiver:
             None,
         ],
         config: 'Config',
+        call_frame_callback: Optional[Callable[[str, socket.socket, str], bool]] = None,
+        call_lost_callback: Optional[Callable[[socket.socket], None]] = None,
+        call_keeps_transport_callback: Optional[Callable[[socket.socket], bool]] = None,
+        call_owns_transport_callback: Optional[Callable[[socket.socket], bool]] = None,
     ) -> None:
         """
         Initializes the StreamReceiver.
@@ -200,6 +178,10 @@ class StreamReceiver:
         self._router: MessageRouter = router
         self._broadcast: Callable[[IpcEvent], None] = broadcast_callback
         self._config: 'Config' = config
+        self._call_frame = call_frame_callback
+        self._call_lost = call_lost_callback
+        self._call_keeps_transport = call_keeps_transport_callback
+        self._call_owns_transport = call_owns_transport_callback
 
         self._disconnect_cb: Callable[
             [
@@ -209,6 +191,7 @@ class StreamReceiver:
                 Optional[socket.socket],
                 bool,
                 Optional[ConnectionOrigin],
+                Optional[ConnectionReasonCode],
             ],
             None,
         ] = disconnect_cb
@@ -238,7 +221,7 @@ class StreamReceiver:
         if len(parts) != 2 or parts[0] != TorCommand.ACK.value:
             return None
 
-        return parts[1]
+        return parts[1] if is_valid_message_id(parts[1]) else None
 
     def start_receiving(
         self,
@@ -292,25 +275,28 @@ class StreamReceiver:
         remote_reject_intent: Optional[RejectIntent] = None
         remote_disconnected: bool = False
         remote_disconnect_is_fallback: bool = False
+        stale_outbound_response: bool = False
 
         idle_timeout: float = self._config.get_float(SettingKey.STREAM_IDLE_TIMEOUT)
         late_acceptance_timeout: float = self._config.get_float(
             SettingKey.LATE_ACCEPTANCE_TIMEOUT
         )
-        conn.settimeout(
-            late_acceptance_timeout if awaiting_acceptance else idle_timeout
-        )
-
         stream: TcpStreamReader = TcpStreamReader(conn, initial_buffer)
 
         try:
+            conn.settimeout(
+                late_acceptance_timeout if awaiting_acceptance else idle_timeout
+            )
             while True:
                 try:
                     msg: Optional[str] = stream.read_line()
                 except socket.timeout:
                     if awaiting_acceptance:
                         break
-                    if not self._state.is_known_socket(onion, conn):
+                    if not self._state.is_known_socket(onion, conn) and not (
+                        self._call_keeps_transport is not None
+                        and self._call_keeps_transport(conn)
+                    ):
                         break
                     if self._socket_appears_closed(conn):
                         break
@@ -319,18 +305,46 @@ class StreamReceiver:
                 if not msg:
                     break
 
-                touch_activity = getattr(self._state, 'touch_session_activity', None)
-                if callable(touch_activity):
-                    touch_activity(onion)
+                self._state.touch_session_activity(onion)
+
+                if msg.startswith(Constants.CALL_FRAME_PREFIX):
+                    if (
+                        awaiting_acceptance
+                        or self._call_frame is None
+                        or not self._call_frame(onion, conn, msg)
+                    ):
+                        break
+                    continue
+
+                if (
+                    not awaiting_acceptance
+                    and self._call_keeps_transport is not None
+                    and self._call_keeps_transport(conn)
+                    and self._state.get_connection(onion) is not conn
+                ):
+                    continue
 
                 if msg == TorCommand.ACCEPTED.value:
-                    effective_origin: ConnectionOrigin = (
-                        self._state.consume_outbound_connected_origin(onion)
-                        or connection_origin
-                    )
+                    with self._state.snapshot_barrier():
+                        if (
+                            not awaiting_acceptance
+                            or not self._state.is_current_outbound_socket(onion, conn)
+                        ):
+                            stale_outbound_response = True
+                            break
+                        effective_origin: ConnectionOrigin = (
+                            self._state.consume_outbound_connected_origin(onion)
+                            or connection_origin
+                        )
+                        if not self._state.add_active_connection(
+                            onion,
+                            conn,
+                            require_outbound_socket=True,
+                        ):
+                            stale_outbound_response = True
+                            break
                     awaiting_acceptance = False
                     conn.settimeout(idle_timeout)
-                    self._state.add_active_connection(onion, conn)
                     alias: str = cast(str, self._cm.ensure_alias_for_onion(onion))
                     self._hm.log_event(
                         HistoryEvent.CONNECTED,
@@ -368,6 +382,9 @@ class StreamReceiver:
                     self._router.replay_unacked_messages(onion)
 
                 elif msg == TorCommand.PENDING.value:
+                    if not self._state.is_current_outbound_socket(onion, conn):
+                        stale_outbound_response = True
+                        break
                     awaiting_acceptance = True
                     conn.settimeout(late_acceptance_timeout)
                     alias = cast(str, self._cm.ensure_alias_for_onion(onion))
@@ -391,11 +408,26 @@ class StreamReceiver:
                 elif msg == TorCommand.REJECT.value or msg.startswith(
                     f'{TorCommand.REJECT.value} '
                 ):
+                    if (
+                        not awaiting_acceptance
+                        and msg == f'{TorCommand.REJECT.value} drops_disabled'
+                        and self._state.get_connection(onion) is conn
+                    ):
+                        self._state.reject_drop_transfer(onion, conn, msg)
+                        continue
                     remote_rejected = True
                     remote_reject_intent = self._parse_reject_intent(msg)
                     break
                 else:
-                    ack_msg_id: Optional[str] = self._parse_ack_msg_id(msg)
+                    drop_ack_parts = msg.split(' ')
+                    if (
+                        len(drop_ack_parts) == 2
+                        and drop_ack_parts[0] == TorCommand.DROP_ACK.value
+                    ):
+                        self._router.process_incoming_drop_ack(onion, drop_ack_parts[1])
+                        ack_msg_id = None
+                    else:
+                        ack_msg_id = self._parse_ack_msg_id(msg)
                     if ack_msg_id is not None:
                         self._router.process_incoming_ack(onion, ack_msg_id)
 
@@ -413,10 +445,10 @@ class StreamReceiver:
                             msg_id = parts[1]
                             content: str = parts[2]
 
-                            should_disconnect: bool = self._router.process_incoming_msg(
+                            admission = self._router.process_incoming_msg(
                                 conn, onion, msg_id, content
                             )
-                            if should_disconnect:
+                            if admission is not FrameAdmission.ACCEPTED:
                                 self._disconnect_cb(
                                     onion,
                                     True,
@@ -424,8 +456,102 @@ class StreamReceiver:
                                     None,
                                     False,
                                     connection_origin,
+                                    (
+                                        ConnectionReasonCode.LIVE_BACKLOG_LIMIT_REACHED
+                                        if admission is FrameAdmission.RESOURCE_LIMIT
+                                        else ConnectionReasonCode.INVALID_PEER_FRAME
+                                    ),
                                 )
                                 break
+
+                    elif any(
+                        msg.startswith(f'{command.value} ')
+                        for command in (
+                            TorCommand.VOICE_BEGIN,
+                            TorCommand.VOICE_CHUNK,
+                            TorCommand.VOICE_END,
+                        )
+                    ):
+                        parts = msg.split(' ', 1)
+                        admission = (
+                            self._router.process_voice_frame(
+                                conn, onion, parts[0], parts[1]
+                            )
+                            if len(parts) == 2
+                            else FrameAdmission.MALFORMED
+                        )
+                        if admission is not FrameAdmission.ACCEPTED:
+                            self._disconnect_cb(
+                                onion,
+                                True,
+                                False,
+                                None,
+                                False,
+                                connection_origin,
+                                (
+                                    ConnectionReasonCode.LIVE_VOICE_LIMIT_REACHED
+                                    if admission is FrameAdmission.RESOURCE_LIMIT
+                                    else ConnectionReasonCode.INVALID_PEER_FRAME
+                                ),
+                            )
+                            break
+
+                    elif msg.startswith(f'{TorCommand.VOICE_COMMIT_ACK.value} '):
+                        parts = msg.split(' ')
+                        if len(parts) == 2:
+                            if not self._state.acknowledge_drop_transfer(
+                                onion, conn, parts[1], msg
+                            ):
+                                self._router.process_voice_commit_ack(onion, parts[1])
+
+                    elif msg.startswith(f'{TorCommand.VOICE_ACK.value} '):
+                        parts = msg.split(' ')
+                        if len(parts) == 3:
+                            try:
+                                next_offset = int(parts[2])
+                            except ValueError:
+                                next_offset = -1
+                            if next_offset >= 0:
+                                if not self._state.acknowledge_drop_transfer(
+                                    onion, conn, parts[1], msg
+                                ):
+                                    self._router.process_voice_ack(
+                                        onion, parts[1], next_offset
+                                    )
+
+                    elif any(
+                        msg.startswith(f'{command.value} ')
+                        for command in (
+                            TorCommand.DROP_VOICE_BEGIN,
+                            TorCommand.DROP_VOICE_CHUNK,
+                            TorCommand.DROP_VOICE_END,
+                        )
+                    ):
+                        parts = msg.split(' ', 1)
+                        admission = (
+                            self._router.process_drop_voice_frame(
+                                conn, onion, parts[0], parts[1]
+                            )
+                            if len(parts) == 2
+                            else FrameAdmission.MALFORMED
+                        )
+                        if admission is FrameAdmission.POLICY_REJECTED:
+                            continue
+                        if admission is not FrameAdmission.ACCEPTED:
+                            self._disconnect_cb(
+                                onion,
+                                True,
+                                False,
+                                None,
+                                False,
+                                connection_origin,
+                                (
+                                    ConnectionReasonCode.LIVE_VOICE_LIMIT_REACHED
+                                    if admission is FrameAdmission.RESOURCE_LIMIT
+                                    else ConnectionReasonCode.INVALID_PEER_FRAME
+                                ),
+                            )
+                            break
 
                     elif msg.startswith(f'{TorCommand.DROP.value} '):
                         parts = msg.split(' ', 2)
@@ -439,45 +565,58 @@ class StreamReceiver:
         except Exception:
             pass
         finally:
-            consume_local_termination = getattr(
-                self._state,
-                'consume_locally_terminated_socket',
-                None,
-            )
-            if callable(consume_local_termination) and consume_local_termination(conn):
-                return
+            try:
+                if self._call_owns_transport is not None and self._call_owns_transport(
+                    conn
+                ):
+                    return
+                if self._state.consume_locally_terminated_socket(conn):
+                    return
+                if stale_outbound_response:
+                    return
+                if not self._state.is_known_socket(
+                    onion, conn
+                ) and not self._state.is_current_outbound_socket(onion, conn):
+                    return
 
-            if self._is_stale_pending_acceptance_socket(
-                onion,
-                conn,
-                awaiting_acceptance,
-            ):
-                self._close_socket_quietly(conn)
-                return
+                if self._is_stale_pending_acceptance_socket(
+                    onion,
+                    conn,
+                    awaiting_acceptance,
+                ):
+                    self._state.retire_connection(conn, preserve_final=True)
+                    return
 
-            if remote_rejected:
-                self._reject_cb(
-                    onion,
-                    False,
-                    conn,
-                    connection_origin,
-                    remote_reject_intent,
-                )
-            elif remote_disconnected:
-                self._disconnect_cb(
-                    onion,
-                    False,
-                    remote_disconnect_is_fallback,
-                    conn,
-                    False,
-                    connection_origin,
-                )
-            else:
-                self._disconnect_cb(
-                    onion,
-                    False,
-                    True,
-                    conn,
-                    False,
-                    connection_origin,
-                )
+                if remote_rejected:
+                    self._reject_cb(
+                        onion,
+                        False,
+                        conn,
+                        connection_origin,
+                        remote_reject_intent,
+                    )
+                elif remote_disconnected:
+                    self._disconnect_cb(
+                        onion,
+                        False,
+                        remote_disconnect_is_fallback,
+                        conn,
+                        False,
+                        connection_origin,
+                        None,
+                    )
+                else:
+                    self._disconnect_cb(
+                        onion,
+                        False,
+                        True,
+                        conn,
+                        False,
+                        connection_origin,
+                        None,
+                    )
+
+            finally:
+                if self._call_lost is not None:
+                    self._call_lost(conn)
+                self._state.retire_connection(conn, preserve_final=True)

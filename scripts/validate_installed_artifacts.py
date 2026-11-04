@@ -1,0 +1,632 @@
+"""Accept built namespace wheels in isolated, non-editable consumer environments.
+
+Run with a completed native release-bundle directory. No source path is added to
+any consumer. All installs resolve offline from that directory's wheelhouses.
+The invoking interpreter supplies build/typecheck tooling, not runtime imports.
+"""
+
+import argparse
+import base64
+import csv
+import hashlib
+import io
+import os
+from pathlib import Path
+import subprocess
+import sys
+import tempfile
+import venv
+from zipfile import ZipFile
+
+
+_ANNOTATION_MAX_CHARS = 4096
+_CONSUMER_COMMAND_TIMEOUT_SEC = 180
+# Missing-installation, locked, and full Tor startups run sequentially.
+_MANAGED_SPAWN_COMMAND_TIMEOUT_SEC = 360
+
+
+def _emit_failure_annotation(
+    message: str,
+    *,
+    redactions: tuple[str, ...],
+) -> None:
+    """Emits one bounded, path-redacted GitHub-compatible error annotation."""
+    rendered = message[-_ANNOTATION_MAX_CHARS:]
+    for value in redactions:
+        if value:
+            rendered = rendered.replace(value, '<redacted>')
+    escaped = rendered.replace('%', '%25').replace('\r', '%0D').replace('\n', '%0A')
+    print(
+        f'::error title=Installed artifact acceptance failed::{escaped}',
+        flush=True,
+    )
+
+
+GOOD_CONSUMER = """from typing import assert_type
+from metor.client import MetorClient, FrontendHost, FrontendInteractions
+from metor.core.api import Delivery, RuntimeSnapshotEvent, CallStateEvent, CallsStateEvent, CallAudioEvent, CallAudioSentEvent, CallRejectedEvent
+from metor.core.auth import derive_pin_verifier, build_session_auth_proof_from_key
+from metor.versioning import APP_VERSION
+client = MetorClient(1234)
+assert_type(client.runtime_snapshot(), RuntimeSnapshotEvent | None)
+assert_type(derive_pin_verifier("2468", "00" * 16), bytearray)
+assert_type(build_session_auth_proof_from_key(bytes(32), "00" * 32), str)
+assert_type(APP_VERSION, str)
+def endpoint(host: FrontendHost, interactions: FrontendInteractions) -> int:
+    return host.bootstrap(interactions).port
+client.send_text("peer", Delivery.LIVE, "text", "id")
+assert_type(client.start_call("peer", "call-id"), CallStateEvent | CallRejectedEvent | None)
+assert_type(client.get_calls(), CallsStateEvent | None)
+assert_type(client.read_call_audio("call-id"), CallAudioEvent | CallRejectedEvent | None)
+assert_type(client.send_call_audio("call-id", 0, "AA=="), CallAudioSentEvent | CallRejectedEvent | None)
+"""
+BAD_CONSUMER = """from metor.client import MetorClient
+from metor.core.api import Delivery
+from metor.core.auth import derive_pin_verifier
+client = MetorClient(object())
+client.send_text("peer", "live", "text", "id")
+derive_pin_verifier(42, "00" * 16)
+"""
+SDK_PROBE = """import os, sys
+from pathlib import Path
+from unittest.mock import patch
+before = dict(os.environ)
+with patch.object(Path, "home", side_effect=AssertionError("host lookup")):
+    import metor.client, metor.core.api, metor.core.auth, metor.shared, metor.versioning
+assert dict(os.environ) == before
+assert "dotenv" not in sys.modules and "metor.data" not in sys.modules
+assert "metor.core.daemon" not in sys.modules
+from importlib.util import find_spec
+assert find_spec("metor.data") is None and find_spec("metor.cli") is None
+for toolkit in ("accesskit", "kivy", "sounddevice"):
+    assert toolkit not in sys.modules and find_spec(toolkit) is None
+print("SDK_ONLY_INERT_OK", metor.client.__file__)
+"""
+SDK_REIMPORT_PROBE = SDK_PROBE.replace(
+    'assert toolkit not in sys.modules and find_spec(toolkit) is None',
+    'assert toolkit not in sys.modules',
+).replace('SDK_ONLY_INERT_OK', 'SDK_REIMPORT_AFTER_UI_REMOVAL_OK')
+BASE_PROBE = """import sys
+from importlib.metadata import entry_points
+from importlib.util import find_spec
+import metor.application, metor.cli, metor.data
+assert find_spec("metor.ui") is None
+assert not list(entry_points(group="metor.ui_frontends"))
+for toolkit in ("accesskit", "kivy", "sounddevice"):
+    assert toolkit not in sys.modules and find_spec(toolkit) is None
+print("BASE_ONLY_WITHOUT_UI_OK", metor.cli.__file__)
+"""
+FAKE_FRONTEND = """from metor.client import MetorClient, FRONTEND_LAUNCH_CONTRACT_VERSION, FrontendSelectionKind
+def launch(context):
+    print("FAKE_STARTED_BEFORE_HOST")
+    selection = context.host.initial_selection()
+    assert selection.kind is FrontendSelectionKind.RESOLVED
+    assert selection.profile == context.profile
+    class Interaction:
+        def confirm_daemon_start(self): raise AssertionError("unexpected prompt")
+        def request_session_auth_secret(self): raise AssertionError("unexpected secret")
+        def show_status(self, message): pass
+    result = context.host.bootstrap(Interaction())
+    assert type(result.port) is int and result.port > 0, result
+    client = MetorClient(result.port, timeout=2)
+    try:
+        assert client.connect(), f"connect failed: {result.port}"
+        initialized = client.bootstrap()
+        assert initialized is not None, "bootstrap failed"
+        snapshot = client.runtime_snapshot()
+        assert snapshot is not None, "snapshot failed"
+        assert snapshot.profile == result.profile, (snapshot.profile, result.profile)
+        print("FAKE_DYNAMIC_IPC_OK")
+    finally:
+        client.disconnect()
+    return 0
+launch.contract_version = FRONTEND_LAUNCH_CONTRACT_VERSION
+"""
+FAKE_HARNESS = """import atexit, tempfile, sys
+from pathlib import Path
+from unittest.mock import Mock, patch
+from metor.utils import Constants
+from metor.data import ProfileManager, ContactManager, HistoryManager, MessageManager
+from metor.data.profile.models import ProfileConfigKey
+from metor.core.key import KeyManager
+from metor.core.daemon.managed.engine import Daemon
+from metor.cli.handlers import CommandHandlers
+with tempfile.TemporaryDirectory() as root:
+    Constants.DATA = Path(root) / ".metor"
+    pm = ProfileManager("artifact")
+    pm.initialize()
+    tor = Mock()
+    tor.onion = "a" * 56
+    with patch("metor.core.daemon.managed.engine.daemon.signal.signal"):
+        daemon = Daemon(pm, KeyManager(pm), tor, ContactManager(pm), HistoryManager(pm), MessageManager(pm))
+    atexit.unregister(daemon.stop)
+    try:
+        daemon._ipc.start()
+        pm.config.set(ProfileConfigKey.DAEMON_PORT, daemon._ipc.port)
+        pm.config.set(ProfileConfigKey.IS_REMOTE, True, allow_mutating_structural_keys=True)
+        assert pm.get_static_port() == daemon._ipc.port
+        assert CommandHandlers.handle_chat(pm, frontend_id="closure-fake") == 0
+        assert "metor.ui.terminal" not in sys.modules
+    finally:
+        daemon.stop()
+"""
+
+TERMINAL_HARNESS = FAKE_HARNESS.replace(
+    'assert CommandHandlers.handle_chat(pm, frontend_id="closure-fake") == 0\n'
+    '        assert "metor.ui.terminal" not in sys.modules',
+    'with patch("metor.ui.terminal.chat.renderer.engine.InputHandler"), '
+    'patch("metor.ui.terminal.chat.renderer.engine.Renderer.read_line", '
+    'side_effect=["/help", "/clear", "/help", "/exit"]):\n'
+    '            assert CommandHandlers.handle_chat(pm, frontend_id="terminal") == 0\n'
+    '        print("TERMINAL_LOOP_HELP_REDRAW_OK")',
+)
+
+TERMINAL_MINIMAL_PROBE = """from importlib import metadata
+from importlib.util import find_spec
+from pathlib import Path
+import sys
+import threading
+from unittest.mock import Mock
+import metor.client, metor.cli, metor.ui.terminal
+from metor.client import discover_frontends
+from metor.core.api import Delivery, MessageDirectionCode, VoiceFinalizedEvent
+from metor.ui.terminal.chat.event.handler import EventHandler
+from metor.ui.terminal.chat.session import Session
+prefix = Path(sys.prefix).resolve()
+for module in (metor.client, metor.cli, metor.ui.terminal):
+    assert Path(module.__file__).resolve().is_relative_to(prefix), module.__file__
+assert set(discover_frontends()) == {"terminal"}, discover_frontends()
+assert {item.metadata["Name"] for item in metadata.distributions() if item.metadata["Name"].startswith("metor")} == {"metor", "metor-sdk", "metor-ui-terminal"}
+for name in ("metor.ui.gui", "kivy", "sounddevice", "accesskit"):
+    assert find_spec(name) is None, name
+ipc, renderer = Mock(), Mock()
+handler = EventHandler(ipc, Session(), renderer, threading.Event(), threading.Event(), lambda: 0.0, lambda: False)
+handler.handle(VoiceFinalizedEvent(msg_id="synthetic-voice", size_bytes=4, onion="a" * 56 + ".onion", delivery=Delivery.DROP, direction=MessageDirectionCode.IN))
+assert renderer.print_message.call_count == 1
+assert "Playback is not supported" in renderer.print_message.call_args.args[0]
+assert "/inbox" in renderer.print_message.call_args.args[0]
+ipc.send_command.assert_not_called()
+print("TERMINAL_MINIMAL_VOICE_METADATA_OK", metor.ui.terminal.__file__)
+"""
+
+
+def audit_wheel_records(wheels: tuple[Path, ...]) -> None:
+    """Checks RECORD hashes, licensing, disjoint ownership and namespace markers."""
+    license_text = (Path(__file__).resolve().parents[1] / 'LICENSE').read_bytes()
+    selected = {
+        path.name: path
+        for path in wheels
+        if path.name.startswith(
+            ('metor-', 'metor_sdk-', 'metor_ui_terminal-', 'metor_ui_gui-')
+        )
+    }
+    if len(selected) != 4:
+        raise RuntimeError('Expected exactly four coordinated Metor wheel names.')
+    owned: dict[str, str] = {}
+    contents: dict[str, bytes] = {}
+    expected_markers = {
+        'metor/client/py.typed',
+        'metor/core/api/py.typed',
+        'metor/core/auth/py.typed',
+        'metor/shared/py.typed',
+        'metor/versioning/py.typed',
+    }
+    for path in sorted(path for path in wheels if path.name in selected):
+        with ZipFile(path) as archive:
+            members = set(archive.namelist())
+            licenses = [
+                name for name in members if name.endswith('.dist-info/licenses/LICENSE')
+            ]
+            if len(licenses) != 1 or archive.read(licenses[0]) != license_text:
+                raise RuntimeError(
+                    f'Distribution must include the canonical GPL license: {path.name}'
+                )
+            record = next(
+                name for name in members if name.endswith('.dist-info/RECORD')
+            )
+            rows = list(csv.reader(io.StringIO(archive.read(record).decode('utf-8'))))
+            if {row[0] for row in rows} != members:
+                raise RuntimeError(f'RECORD/member mismatch: {path.name}')
+            for name, digest, size in rows:
+                if name == record:
+                    continue
+                data = archive.read(name)
+                actual = (
+                    base64.urlsafe_b64encode(hashlib.sha256(data).digest())
+                    .rstrip(b'=')
+                    .decode()
+                )
+                if digest != 'sha256=' + actual or size != str(len(data)):
+                    raise RuntimeError(f'Invalid RECORD hash/size: {name}')
+            files = {name for name in members if name.startswith('metor/')}
+            obsolete = {
+                'metor/core/auth.py',
+                'metor/versioning.py',
+                'metor/utils/auth.py',
+                'metor/utils/network.py',
+            }
+            if files & obsolete:
+                raise RuntimeError('Wheel contains superseded implementation files.')
+            if any(name in owned and owned[name] != path.name for name in files):
+                raise RuntimeError('Overlapping installed namespace files.')
+            for name in files:
+                digest_bytes = hashlib.sha256(archive.read(name)).digest()
+                if name in contents and contents[name] != digest_bytes:
+                    raise RuntimeError(
+                        'Bundle variants contain different runtime code.'
+                    )
+                owned[name] = path.name
+                contents[name] = digest_bytes
+            markers = {name for name in files if name.endswith('/py.typed')}
+            if markers != (
+                expected_markers if path.name.startswith('metor_sdk-') else set()
+            ):
+                raise RuntimeError(f'Incorrect typing-marker ownership: {path.name}')
+        print(
+            'WHEEL_RECORD_OWNERSHIP_OK',
+            path.parent.parent.name,
+            path.name,
+            path.stat().st_size,
+            hashlib.sha256(path.read_bytes()).hexdigest(),
+            flush=True,
+        )
+
+
+def run_acceptance(
+    bundle_root: Path,
+    *,
+    gui_smoke: bool = False,
+    windows_launch: bool = False,
+    with_public_tor: bool = False,
+) -> None:
+    """Run installed consumer and optional native display gates.
+
+    Args:
+        bundle_root: Completed platform wheelhouse bundle directory.
+        gui_smoke: Exercise the installed GUI on a supplied native display.
+        windows_launch: Inspect both installed Windows GUI entry points and windows.
+        with_public_tor: Also run optional native network Tor startup acceptance.
+    Returns:
+        None
+    """
+    wheels = tuple(bundle_root.resolve().rglob('*.whl'))
+    audit_wheel_records(wheels)
+    wheel_dirs = sorted({str(path.parent) for path in wheels})
+    if not wheel_dirs:
+        raise ValueError('No built wheels supplied.')
+    wheel_sources = ['--no-index']
+    for directory in wheel_dirs:
+        wheel_sources.extend(('--find-links', directory))
+    environment = {
+        k: v for k, v in os.environ.items() if k not in {'PYTHONPATH', 'MYPYPATH'}
+    }
+    with tempfile.TemporaryDirectory(prefix='metor-artifact-') as directory:
+        root = Path(directory)
+        venv.EnvBuilder(with_pip=True, symlinks=os.name != 'nt').create(
+            root / 'consumer'
+        )
+        executable = (
+            root
+            / 'consumer'
+            / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
+        )
+
+        def run(
+            args: list[str],
+            *,
+            expected: int = 0,
+            extra_environment: dict[str, str] | None = None,
+            timeout_seconds: int = _CONSUMER_COMMAND_TIMEOUT_SEC,
+            creation_flags: int = 0,
+        ) -> str:
+            command_environment = dict(environment)
+            if extra_environment is not None:
+                command_environment.update(extra_environment)
+            result = subprocess.run(
+                args,
+                cwd=root,
+                env=command_environment,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                timeout=timeout_seconds,
+                creationflags=creation_flags,
+            )
+            print(result.stdout, end='')
+            if result.returncode != expected:
+                _emit_failure_annotation(
+                    (
+                        f'Command exited {result.returncode}, expected {expected}: '
+                        f'argv_count={len(args)}\n{result.stdout}'
+                    ),
+                    redactions=(
+                        str(root),
+                        str(bundle_root.resolve()),
+                        str(Path(__file__).resolve().parents[1]),
+                        str(Path.home()),
+                        str(Path(sys.prefix).resolve()),
+                    ),
+                )
+                raise RuntimeError(
+                    f'Consumer command exited {result.returncode}, expected {expected}: {args[:4]}'
+                )
+            return result.stdout
+
+        def install(name: str) -> None:
+            run([str(executable), '-m', 'pip', 'install', *wheel_sources, name])
+            run([str(executable), '-m', 'pip', 'check'])
+
+        install('metor-sdk')
+        run([str(executable), '-I', '-c', SDK_PROBE])
+        good = root / 'good_consumer.py'
+        bad = root / 'bad_consumer.py'
+        config = root / 'mypy.ini'
+        good.write_text(GOOD_CONSUMER, encoding='utf-8')
+        bad.write_text(BAD_CONSUMER, encoding='utf-8')
+        config.write_text('[mypy]\nstrict = True\n', encoding='utf-8')
+        checker = [
+            sys.executable,
+            '-m',
+            'mypy',
+            '--config-file',
+            str(config),
+            '--no-incremental',
+            '--python-executable',
+            str(executable),
+        ]
+        run([*checker, str(good)])
+        errors = run([*checker, str(bad)], expected=1)
+        if errors.count('[arg-type]') != 3 or 'import-untyped' in errors:
+            raise RuntimeError(
+                'External SDK typing was missing or unexpectedly permissive.'
+            )
+        print('EXTERNAL_SDK_TYPING_POSITIVE_AND_NEGATIVE_OK')
+        install('metor')
+        run([str(executable), '-I', '-c', BASE_PROBE])
+        for module, arguments in (
+            ('metor', ['--help']),
+            ('metor', ['--version']),
+            ('metor', ['daemon', '--help']),
+            ('metor', ['chat', '--list-uis']),
+        ):
+            run([str(executable), '-I', '-m', module, *arguments])
+        missing = run(
+            [str(executable), '-I', '-m', 'metor', 'chat', '--ui', 'terminal'],
+            expected=2,
+        )
+        if 'metor-ui-terminal' not in missing:
+            raise RuntimeError('Missing frontend did not name its distribution.')
+
+        # A fresh consumer proves that Terminal has no residual GUI dependencies.
+        venv.EnvBuilder(with_pip=True, symlinks=os.name != 'nt').create(
+            root / 'terminal-minimal'
+        )
+        minimal_python = (
+            root
+            / 'terminal-minimal'
+            / ('Scripts/python.exe' if os.name == 'nt' else 'bin/python')
+        )
+        run(
+            [
+                str(minimal_python),
+                '-m',
+                'pip',
+                'install',
+                *wheel_sources,
+                'metor-sdk',
+                'metor',
+                'metor-ui-terminal',
+            ]
+        )
+        run([str(minimal_python), '-m', 'pip', 'check'])
+        run([str(minimal_python), '-I', '-c', TERMINAL_MINIMAL_PROBE])
+        run([str(minimal_python), '-I', '-m', 'metor', '--help'])
+        run(
+            [
+                str(minimal_python),
+                '-I',
+                '-m',
+                'metor',
+                'chat',
+                '--ui',
+                'terminal',
+                '--help',
+            ]
+        )
+        minimal_inventory = run(
+            [str(minimal_python), '-I', '-m', 'metor', 'chat', '--list-uis']
+        )
+        if 'terminal' not in minimal_inventory or 'gui' in minimal_inventory:
+            raise RuntimeError('Minimal Terminal discovery was not isolated.')
+        minimal_chat = run([str(minimal_python), '-I', '-c', TERMINAL_HARNESS])
+        if (
+            'TERMINAL_LOOP_HELP_REDRAW_OK' not in minimal_chat
+            or '/connect' not in minimal_chat
+        ):
+            raise RuntimeError('Minimal Terminal did not complete its chat loop.')
+        print('TERMINAL_MINIMAL_INSTALLATION_OK')
+
+        managed_spawn = (
+            Path(__file__).resolve().parents[1] / 'tests' / 'installed_managed_spawn.py'
+        )
+        managed_data = root / 'managed-spawn-data'
+        managed_data.mkdir()
+        managed_command = [
+            str(executable),
+            '-I',
+            str(managed_spawn),
+            '--data-parent',
+            str(managed_data),
+            '--checkout',
+            str(Path(__file__).resolve().parents[1]),
+        ]
+        if with_public_tor:
+            managed_command.append('--with-public-tor')
+        run(
+            managed_command,
+            extra_environment={'METOR_DATA_DIR_PARENT': str(managed_data)},
+            timeout_seconds=_MANAGED_SPAWN_COMMAND_TIMEOUT_SEC,
+        )
+
+        # A separately built, non-shipped frontend exercises installed discovery,
+        # base dispatch, deferred host and a dynamic real local daemon endpoint.
+        fake = root / 'fake'
+        fake.mkdir()
+        (fake / 'closure_fake.py').write_text(FAKE_FRONTEND, encoding='utf-8')
+        (fake / 'pyproject.toml').write_text(
+            """[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+[project]
+name = "metor-closure-fake"
+version = "0.0.0"
+[project.entry-points."metor.ui_frontends"]
+closure-fake = "closure_fake:launch"
+[tool.setuptools]
+py-modules = ["closure_fake"]
+""",
+            encoding='utf-8',
+        )
+        run(
+            [
+                sys.executable,
+                '-m',
+                'pip',
+                'wheel',
+                '--no-deps',
+                '--no-build-isolation',
+                str(fake),
+                '-w',
+                str(root),
+            ]
+        )
+        run(
+            [
+                str(executable),
+                '-m',
+                'pip',
+                'install',
+                '--no-deps',
+                str(next(root.glob('metor_closure_fake-*.whl'))),
+            ]
+        )
+        output = run([str(executable), '-I', '-c', FAKE_HARNESS])
+        if 'FAKE_DYNAMIC_IPC_OK' not in output:
+            raise RuntimeError('Installed fake did not complete dynamic IPC.')
+        run([str(executable), '-m', 'pip', 'uninstall', '-y', 'metor-closure-fake'])
+        install('metor-ui-gui')
+        gui_probe = (
+            'import sys; from metor.client import load_frontend; '
+            'assert load_frontend("gui"); assert "kivy" not in sys.modules; '
+            'from metor.ui.gui.theme import font_path; assert font_path(); '
+            'print("GUI_LAZY_INSTALLED_ENTRY_OK")'
+        )
+        run([str(executable), '-I', '-c', gui_probe])
+        run([str(executable), '-I', '-m', 'metor', 'chat', '--ui', 'gui', '--help'])
+        gui_inventory = run(
+            [str(executable), '-I', '-m', 'metor', 'chat', '--list-uis']
+        )
+        if 'gui' not in gui_inventory or 'terminal' in gui_inventory:
+            raise RuntimeError('GUI-only installation inventory was not isolated.')
+        print('GUI_ONLY_INSTALLATION_OK')
+        if gui_smoke:
+            gui_launcher = (
+                Path(__file__).resolve().parents[1]
+                / 'tests'
+                / 'gui_installed_launcher.py'
+            )
+            output = run([str(executable), '-I', str(gui_launcher)])
+            if 'INSTALLED_GUI_REAL_LAUNCH_OK desktop' not in output:
+                raise RuntimeError(
+                    'Installed GUI did not finish its native close gate.'
+                )
+        if windows_launch:
+            if os.name != 'nt':
+                raise RuntimeError('Windows entry-point acceptance needs Windows.')
+            entrypoint_probe = (
+                Path(__file__).resolve().parents[1]
+                / 'tests'
+                / 'gui_windows_process_chain.py'
+            )
+            # Give this native fixture its own visible terminal. Hosted runners
+            # can inherit a console attachment with no usable window; that is
+            # not the terminal boundary the process-chain check must exercise.
+            output = run(
+                [str(executable), '-I', str(entrypoint_probe)],
+                creation_flags=int(getattr(subprocess, 'CREATE_NEW_CONSOLE')),
+            )
+            if 'WINDOWS_INSTALLED_GUI_ENTRYPOINTS_OK' not in output:
+                raise RuntimeError('Windows GUI entry-point acceptance failed.')
+        install('metor-ui-terminal')
+        terminal_output = run([str(executable), '-I', '-c', TERMINAL_HARNESS])
+        if (
+            'TERMINAL_LOOP_HELP_REDRAW_OK' not in terminal_output
+            or '/connect' not in terminal_output
+        ):
+            raise RuntimeError('Installed Terminal did not render its real chat help.')
+        run(
+            [
+                str(executable),
+                '-I',
+                '-c',
+                'from metor.client import load_frontend; from metor.ui.terminal import Help; assert load_frontend("terminal"); print("TERMINAL_ENTRY_AND_CHAT_HELP_OK")',
+            ]
+        )
+        run([str(executable), '-m', 'pip', 'uninstall', '-y', 'metor-ui-terminal'])
+        run([str(executable), '-I', '-c', gui_probe])
+        run([str(executable), '-I', '-m', 'metor', '--help'])
+        run([str(executable), '-m', 'pip', 'check'])
+        inventory = run([str(executable), '-I', '-m', 'metor', 'chat', '--list-uis'])
+        if 'metor-ui-terminal' in inventory:
+            raise RuntimeError('Uninstalled frontend remained in metadata inventory.')
+        install('metor-ui-terminal')
+        run([str(executable), '-m', 'pip', 'uninstall', '-y', 'metor-ui-gui'])
+        run(
+            [
+                str(executable),
+                '-I',
+                '-c',
+                'from metor.client import load_frontend; assert load_frontend("terminal"); '
+                'from metor.ui.terminal import Help; print("TERMINAL_SURVIVES_GUI_UNINSTALL_OK")',
+            ]
+        )
+        run(
+            [
+                str(executable),
+                '-m',
+                'pip',
+                'uninstall',
+                '-y',
+                'metor-ui-terminal',
+                'metor',
+            ]
+        )
+        run([str(executable), '-I', '-c', SDK_REIMPORT_PROBE])
+        run([str(executable), '-m', 'pip', 'check'])
+        print('ALL_ISOLATED_ARTIFACT_SCENARIOS_OK')
+
+
+def main() -> None:
+    """Parse the native bundle and explicit display gate selection.
+
+    Args:
+        None
+    Returns:
+        None
+    """
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('bundle_root', type=Path)
+    parser.add_argument('--gui-smoke', action='store_true')
+    parser.add_argument('--windows-launch', action='store_true')
+    parser.add_argument('--with-public-tor', action='store_true')
+    arguments = parser.parse_args()
+    run_acceptance(
+        arguments.bundle_root,
+        gui_smoke=arguments.gui_smoke,
+        windows_launch=arguments.windows_launch,
+        with_public_tor=arguments.with_public_tor,
+    )
+
+
+if __name__ == '__main__':
+    main()
