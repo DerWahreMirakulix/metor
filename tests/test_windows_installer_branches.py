@@ -65,16 +65,27 @@ class WindowsInstallerBranchTests(unittest.TestCase):
         )
 
     def _selection(
-        self, py: int | None, python: int | None, *, archive_on_path: bool = True
+        self,
+        py: int | None,
+        python: int | None,
+        *,
+        archive_on_path: bool = True,
+        alias_root: bool = False,
     ) -> tuple[str, list[tuple[str, ...]]]:
         """Run the installer with archive shadows and two external PATH candidates."""
         with TemporaryDirectory(prefix='metor candidate ! ') as directory:
             root = Path(directory)
+            if alias_root:
+                root = self._alternate_spelling(root)
             bundle = root / 'Bundle %METOR_EXPAND% !'
             external = root / 'External %METOR_EXPAND% !'
             nested = bundle / 'nested'
             nested.mkdir(parents=True)
             external.mkdir()
+            verifier = bundle / 'verify_bundle.py'
+            verifier.write_text(
+                '# Inert verifier path for the native probe.\n', encoding='ascii'
+            )
             trace = root / 'trace.txt'
             marker = root / 'cmd-ran'
             (bundle / 'install.cmd').write_text(
@@ -115,16 +126,66 @@ class WindowsInstallerBranchTests(unittest.TestCase):
             )
             calls: list[tuple[str, ...]] = []
             for path, *args in rows:
-                self.assertEqual(
-                    Path(path).parent, external, 'Archive-local executable was invoked'
+                observed = Path(path)
+                self.assertIn(observed.name, ('py.exe', 'python.exe'))
+                self.assertTrue(
+                    observed.parent.samefile(external)
+                    and observed.samefile(external / observed.name),
+                    f'Unexpected {observed.name} location: bundle root={observed.parent.samefile(bundle)}, '
+                    f'bundle subdirectory={observed.parent.samefile(nested)}',
+                )
+                selector = (
+                    [f'-{sys.version_info.major}.{sys.version_info.minor}']
+                    if observed.stem == 'py'
+                    else []
                 )
                 if 'venv' in args:
-                    self.assertEqual(Path(args[-1]), bundle / '.venv')
+                    self.assertEqual(args[:-1], [*selector, '-I', '-m', 'venv'])
+                    target = Path(args[-1])
+                    self.assertEqual(target.name, '.venv')
+                    self.assertTrue(
+                        target.parent.samefile(bundle)
+                        and target.samefile(bundle / '.venv')
+                    )
                 else:
-                    self.assertIn(str(bundle), args)
-                    self.assertIn(str(bundle / 'verify_bundle.py'), args)
+                    verify_args = args[:-1] if args[-1] == '--target-only' else args
+                    self.assertEqual(verify_args[:-2], [*selector, '-I', '-S'])
+                    script = Path(verify_args[-2])
+                    self.assertEqual(script.name, verifier.name)
+                    self.assertTrue(
+                        script.parent.samefile(bundle) and script.samefile(verifier)
+                    )
+                    self.assertTrue(Path(verify_args[-1]).samefile(bundle))
                 calls.append((Path(path).stem, *args))
             return process.stdout + process.stderr, calls
+
+    @staticmethod
+    def _alternate_spelling(path: Path) -> Path:
+        """Use a real DOS short path when available, or a distinct path to the same directory."""
+        import ctypes
+        from ctypes import wintypes
+
+        get_short = ctypes.windll.kernel32.GetShortPathNameW
+        get_short.argtypes = [wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD]
+        get_short.restype = wintypes.DWORD
+        size = get_short(str(path), None, 0)
+        if size:
+            buffer = ctypes.create_unicode_buffer(size)
+            if 0 < get_short(str(path), buffer, size) < size:
+                short = Path(buffer.value)
+                if short != path and short.samefile(path):
+                    return short
+        detour = path / 'path-spelling'
+        detour.mkdir()
+        return detour / '..'
+
+    def test_alternate_directory_spelling_preserves_external_executable_and_arguments(
+        self,
+    ) -> None:
+        """Aliases for a trusted temporary root preserve real process and argument identities."""
+        _, calls = self._selection(0, 0, alias_root=True)
+        self.assertEqual(calls[-1][0], 'py')
+        self.assertIn('venv', calls[-1])
 
     def test_matching_launcher_wins_and_unavailable_launcher_falls_back(self) -> None:
         """Probe the requested Python minor before fallback, then verify before venv creation."""
