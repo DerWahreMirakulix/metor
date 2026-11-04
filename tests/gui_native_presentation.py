@@ -27,6 +27,9 @@ from gui_native_lifecycle_failure import exercise_lifecycle_failure
 
 from metor.client import FrontendHost, FrontendLaunchContext
 from metor.core.api import (
+    CallInfo,
+    CallState,
+    CallStateEvent,
     ContactEntry,
     Delivery,
     DropConversationSummaryEntry,
@@ -52,6 +55,9 @@ def exercise_feedback_layout(
         complete: Continuation after synchronous private-reference revocation.
     """
     controller, state = app.controller, app.controller.state
+    call = CallInfo(
+        'layout-call', 'feedback-peer', 'Feedback', CallState.ACTIVE, owned=True
+    )
     state.covered = False
     state.snapshot = RuntimeSnapshotEvent(
         profile='Simulator',
@@ -78,6 +84,7 @@ def exercise_feedback_layout(
         assert app.shell is not None and app.shell._peer_panel is not None
         assert app.input_dock is not None
         peer = app.shell._peer_panel
+        peer.composer.entry.text = 'Unsent feedback fixture draft'
         app.input_dock.show(peer.composer.entry)
         settled(inspect_keyboard)
 
@@ -110,6 +117,8 @@ def exercise_feedback_layout(
                 )
             ],
         )
+        controller.calls.observe(CallStateEvent(call))
+        controller.calls.visible = False
         app.refresh()
         settled(inspect_small_viewport)
 
@@ -117,11 +126,14 @@ def exercise_feedback_layout(
         """Suppresses only transient feedback when no complete action target fits."""
         assert app.shell is not None and app.feedback_overlay is not None
         assert app.input_dock is not None
+        assert app.call_bar is not None and app.call_bar.height > 0
         overlay, anchor = app.feedback_overlay, app.shell.feedback_anchor()
         assert anchor is not None and anchor.height < dp(Geometry.TARGET + 24)
         assert overlay.card.parent is None
         assert ActionSheet.current is None
         assert state.feedback.visible()
+        assert app.shell._peer_panel is not None
+        assert app.shell._peer_panel.composer.entry.focus
         app.input_dock.hide()
         settled(inspect_restored)
 
@@ -133,7 +145,11 @@ def exercise_feedback_layout(
         assert anchor is not None and overlay.card.parent is not None
         assert overlay.card.y >= anchor.y and overlay.card.top <= anchor.top
         assert app.shell._peer_panel.composer.entry.focus
+        assert (
+            app.shell._peer_panel.composer.entry.text == 'Unsent feedback fixture draft'
+        )
         assert not overlay.dismiss.focus
+        controller.calls.observe(CallStateEvent(replace(call, state=CallState.ENDED)))
         overlay.dismiss.focus = True
         state.covered = True
         assert overlay._anchor is None
