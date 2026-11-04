@@ -332,26 +332,28 @@ class CliProcessTests(unittest.TestCase):
         self.assertEqual(result.returncode, 1)
         self.assertIn('SSH tunnel', result.stdout)
 
-    def test_connection_close_before_result_is_unknown_and_never_success(self) -> None:
-        """Actual EOF after receiving a command does not fabricate its confirmation."""
+    def test_eof_or_malformed_result_is_unknown_and_never_success(self) -> None:
+        """Neither EOF nor an invalid event confirms a command or prints peer data."""
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
             listener.bind((Constants.LOCALHOST, 0))
             listener.listen(1)
             listener.settimeout(PROCESS_WAIT_SECONDS)
             port = int(listener.getsockname()[1])
-            seen = threading.Event()
+            replies = (b'', b'{"event_type":"synthetic-private-marker"}\n')
 
             def close_after_frame() -> None:
                 """Read a real request and lose its result at the transport boundary."""
-                with listener.accept()[0] as connection:
-                    connection.settimeout(PROCESS_WAIT_SECONDS)
-                    data = bytearray()
-                    while b'\n' not in data:
-                        part = connection.recv(Constants.TCP_BUFFER_SIZE)
-                        if not part:
-                            break
-                        data.extend(part)
-                    seen.set()
+                for reply in replies:
+                    with listener.accept()[0] as connection:
+                        connection.settimeout(PROCESS_WAIT_SECONDS)
+                        data = bytearray()
+                        while b'\n' not in data:
+                            part = connection.recv(Constants.TCP_BUFFER_SIZE)
+                            if not part:
+                                break
+                            data.extend(part)
+                        if reply:
+                            connection.sendall(reply)
 
             self.assertEqual(
                 self.run_cli(
@@ -362,11 +364,15 @@ class CliProcessTests(unittest.TestCase):
             worker = threading.Thread(target=close_after_frame)
             worker.start()
             try:
-                result = self.run_cli('-p', 'Uncertain', 'contacts', 'list')
-                self.assertTrue(seen.is_set())
-                self.assertEqual(result.returncode, 1)
-                self.assertIn('outcome is unknown', result.stdout)
-                self.assertNotIn('executed successfully', result.stdout)
+                for reply in replies:
+                    with self.subTest(reply=reply):
+                        result = self.run_cli('-p', 'Uncertain', 'contacts', 'list')
+                        self.assertEqual(result.returncode, 1)
+                        self.assertIn('outcome is unknown', result.stdout)
+                        self.assertNotIn('executed successfully', result.stdout)
+                        self.assertNotIn(
+                            'synthetic-private-marker', result.stdout + result.stderr
+                        )
             finally:
                 worker.join(PROCESS_WAIT_SECONDS)
                 self.assertFalse(worker.is_alive())

@@ -4,11 +4,19 @@ This is the canonical release and compatibility-version policy for Metor. The
 only authoritative version values are in `src/metor/versioning/__init__.py`. Application
 releases and compatibility generations are independent.
 
+The first stable application is **1.0.0**. All four distributions share that
+version and pin their Metor dependencies to the same release. IPC, peer wire,
+database schema, keyslots, blobs and both key-derivation domains begin at
+generation 1. Generation 1 is the only supported value on each axis.
+The local frontend launch and platform adapter contracts also start at 1.
+
 ## Version axes
 
 | Axis                   | Meaning                                                        | Bump when                                                                  |
 | ---------------------- | -------------------------------------------------------------- | -------------------------------------------------------------------------- |
 | Application            | Version of the Metor product and all four Python distributions | An explicit product release is prepared                                    |
+| Frontend launch        | SDK entry point for independent GUI and Terminal clients       | The frontend and its host require an incompatible launch contract          |
+| Platform adapter       | SDK entry point for installed local platform adapters          | The provider and frontend require an incompatible adapter contract         |
 | IPC protocol           | Typed client-daemon NDJSON wire contract                       | A breaking command, event, field, type, or wire-semantics change is made   |
 | Peer protocol          | Daemon-to-daemon Tor wire and handshake contract               | A breaking peer-wire or peer-semantics change is made                      |
 | DB schema              | Durable SQL tables, columns, constraints, and indexes          | Any persistent SQL schema changes, including additive changes              |
@@ -30,22 +38,20 @@ release acknowledgement; changing a label is never cosmetic.
 
 ## Application Semantic Versioning
 
-Application versions use SemVer and change only during an explicit release.
-During initial development, normal feature releases increment `0.MINOR.0` and
-bugfix releases increment `0.MINOR.PATCH`. `1.0.0` is an explicit stable
-product/API milestone. After 1.0, incompatible public product/API contract
-changes increment MAJOR.
+The first stable application version is `1.0.0`. After publication, compatible
+bug fixes increment PATCH, compatible features increment MINOR, and incompatible
+public product or API changes increment MAJOR.
 
 Do not tie application SemVer to any protocol or storage generation. A release
 may leave every compatibility generation unchanged, and an explicit format
 bump does not prescribe the application version.
 
-Metor has no public release yet. Existing internal generations are not reset.
-For the first release, choose `current` to publish the registry's current
-application version, or explicitly request another SemVer bump. With no prior
-`v*` release tag, historical comparison is skipped and the generated
-`docs/generated/compatibility.json` becomes the baseline. No migration from arbitrary
-pre-release development data is promised.
+For the first public release choose `current`; the workflow rejects an initial
+`patch`, `minor` or `major` bump. The application and all four packages ship as
+`1.0.0`; each independent protocol, storage format and adapter contract starts
+at generation `1`. With no previous stable release, the generated
+`docs/generated/compatibility.json` establishes the baseline. Use new profiles
+for this baseline: databases created by development builds are not upgraded.
 
 The supported release types are `current`, `patch`, `minor`, and `major`.
 Prerelease channels are intentionally unsupported until an explicit
@@ -53,20 +59,20 @@ release-sequencing design introduces them.
 
 ## Database lifecycle
 
-`DB_SCHEMA_VERSION` is stored with SQLite/SQLCipher `PRAGMA user_version` and is
-not the application version. The SQLCipher key is applied and the database is
-probed before its version is read.
+`PRAGMA user_version` stores the database schema generation.
+`PRAGMA application_id` identifies the stable Metor format (ASCII `METR`).
+The SQLCipher key is applied before reading either field.
 
-- An empty database at version 0 is created transactionally and stamped only
-  after all schema DDL succeeds.
-- A populated version-0 development database is rejected and must be recreated
-  before the first public release; it is never silently relabeled.
-- Current versions open without schema mutation.
-- Supported older versions follow the adjacent, ordered registry in
-  `src/metor/data/sql/migrations.py`.
-- Newer and older-than-minimum versions raise typed schema errors.
-- Each migration and its `PRAGMA user_version` update share one transaction, so
-  a failed step cannot claim the target generation.
+- An empty, unmarked database receives both fields in the schema creation
+  transaction, after all tables and indexes are created.
+- An existing database opens only with the supported schema and application
+  marker. Unsupported development and foreign databases are rejected without
+  converting or restamping them, even when their schema number is also 1.
+- The release has no historical schema upgrades. The transactional migration
+  registry in `src/metor/data/sql/migrations.py` is reserved for future
+  adjacent generations if a release explicitly supports an upgrade.
+- The explicit encrypted/plaintext profile conversion is a separate user
+  operation. It preserves both database fields and the profile instance.
 
 When introducing schema generation N, add every adjacent migration required by
 the advertised support range and tests for success and rollback. Any persistent
@@ -188,7 +194,9 @@ or rejects either ref, fails closed without a non-atomic fallback. GitHub
 Release creation remains a separate downstream operation and is not described
 as part of that ref transaction.
 
-The tag convention is `v0.2.0`, `v0.3.0`, or `v1.0.0`. Protocol and format
+The first stable tag is `v1.0.0`. With no previous stable tag, select the
+default `current` release type to use the registry version. Patch, minor and
+major bumps require an existing stable release tag. Protocol and format
 generations are metadata in each product release, not separate tags.
 
 The four package builds are `metor-sdk`, the headless/base `metor`,

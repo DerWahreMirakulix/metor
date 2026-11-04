@@ -4,19 +4,23 @@ import re
 from dataclasses import dataclass
 
 
-APP_VERSION: str = '0.2.0'
+APP_VERSION: str = '1.0.0'
+
+# Local plugin entry points require an exact contract match.
+FRONTEND_LAUNCH_CONTRACT_VERSION: int = 1
+PLATFORM_ADAPTER_CONTRACT_VERSION: int = 1
 
 # Client-to-daemon typed NDJSON wire generation.
-IPC_PROTOCOL_VERSION: int = 4
-IPC_PROTOCOL_MIN_SUPPORTED: int = 4
+IPC_PROTOCOL_VERSION: int = 1
+IPC_PROTOCOL_MIN_SUPPORTED: int = 1
 
 # Daemon-to-daemon Tor handshake and message-wire generation.
-PEER_PROTOCOL_VERSION: int = 4
-PEER_PROTOCOL_MIN_SUPPORTED: int = 4
+PEER_PROTOCOL_VERSION: int = 1
+PEER_PROTOCOL_MIN_SUPPORTED: int = 1
 
 # Durable SQLite/SQLCipher schema generation stored in PRAGMA user_version.
-DB_SCHEMA_VERSION: int = 4
-DB_SCHEMA_MIN_SUPPORTED: int = 3
+DB_SCHEMA_VERSION: int = 1
+DB_SCHEMA_MIN_SUPPORTED: int = 1
 
 # Persisted password-protected profile-master-key document generation.
 KEYSLOT_FORMAT_VERSION: int = 1
@@ -59,6 +63,18 @@ class CompatibilityAxis:
 
 COMPATIBILITY_AXES: tuple[CompatibilityAxis, ...] = (
     CompatibilityAxis(
+        'frontend-launch',
+        'Frontend launch contract',
+        FRONTEND_LAUNCH_CONTRACT_VERSION,
+        FRONTEND_LAUNCH_CONTRACT_VERSION,
+    ),
+    CompatibilityAxis(
+        'platform-adapter',
+        'Platform adapter contract',
+        PLATFORM_ADAPTER_CONTRACT_VERSION,
+        PLATFORM_ADAPTER_CONTRACT_VERSION,
+    ),
+    CompatibilityAxis(
         'ipc', 'IPC protocol', IPC_PROTOCOL_VERSION, IPC_PROTOCOL_MIN_SUPPORTED
     ),
     CompatibilityAxis(
@@ -83,13 +99,13 @@ COMPATIBILITY_AXES: tuple[CompatibilityAxis, ...] = (
         'profile-key-derivation',
         'Profile-key derivation',
         PROFILE_KEY_DERIVATION_VERSION,
-        None,
+        PROFILE_KEY_DERIVATION_VERSION,
     ),
     CompatibilityAxis(
         'blob-object-derivation',
         'Blob-object derivation',
         BLOB_OBJECT_DERIVATION_VERSION,
-        None,
+        BLOB_OBJECT_DERIVATION_VERSION,
     ),
 )
 

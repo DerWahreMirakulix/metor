@@ -20,7 +20,7 @@ from metor.data.blob.store import (
     PER_BLOB_CONTEXT,
 )
 from metor.data.sql.backends import SqlCipherConnection, sqlite3
-from metor.data.sql.schema import initialize_database
+from metor.data.sql.schema import DATABASE_APPLICATION_ID, initialize_database
 from metor.versioning import (
     APP_VERSION,
     BLOB_FORMAT_MIN_SUPPORTED,
@@ -28,12 +28,14 @@ from metor.versioning import (
     BLOB_OBJECT_DERIVATION_VERSION,
     DB_SCHEMA_MIN_SUPPORTED,
     DB_SCHEMA_VERSION,
+    FRONTEND_LAUNCH_CONTRACT_VERSION,
     IPC_PROTOCOL_MIN_SUPPORTED,
     IPC_PROTOCOL_VERSION,
     KEYSLOT_FORMAT_MIN_SUPPORTED,
     KEYSLOT_FORMAT_VERSION,
     PEER_PROTOCOL_MIN_SUPPORTED,
     PEER_PROTOCOL_VERSION,
+    PLATFORM_ADAPTER_CONTRACT_VERSION,
     PROFILE_KEY_DERIVATION_VERSION,
 )
 
@@ -120,6 +122,14 @@ def build_compatibility_manifest(ipc_schema_path: Path) -> JsonObject:
     return {
         'manifest_version': 1,
         'application_version': APP_VERSION,
+        'frontend_launch': {
+            'current': FRONTEND_LAUNCH_CONTRACT_VERSION,
+            'minimum_supported': FRONTEND_LAUNCH_CONTRACT_VERSION,
+        },
+        'platform_adapter': {
+            'current': PLATFORM_ADAPTER_CONTRACT_VERSION,
+            'minimum_supported': PLATFORM_ADAPTER_CONTRACT_VERSION,
+        },
         'ipc': {
             'current': IPC_PROTOCOL_VERSION,
             'minimum_supported': IPC_PROTOCOL_MIN_SUPPORTED,
@@ -143,6 +153,7 @@ def build_compatibility_manifest(ipc_schema_path: Path) -> JsonObject:
             },
         },
         'database': {
+            'application_id': DATABASE_APPLICATION_ID,
             'current': DB_SCHEMA_VERSION,
             'minimum_supported': DB_SCHEMA_MIN_SUPPORTED,
             'schema': _normalized_database_schema(),
@@ -173,6 +184,7 @@ def build_compatibility_manifest(ipc_schema_path: Path) -> JsonObject:
         'derivation': {
             'profile_key': {
                 'current': PROFILE_KEY_DERIVATION_VERSION,
+                'minimum_supported': PROFILE_KEY_DERIVATION_VERSION,
                 'contexts_hex': {
                     'database': DB_KEY_CONTEXT.hex(),
                     'identity_secret': SECRET_KEY_CONTEXT.hex(),
@@ -181,6 +193,7 @@ def build_compatibility_manifest(ipc_schema_path: Path) -> JsonObject:
             },
             'blob_object': {
                 'current': BLOB_OBJECT_DERIVATION_VERSION,
+                'minimum_supported': BLOB_OBJECT_DERIVATION_VERSION,
                 'context_prefix_hex': PER_BLOB_CONTEXT.hex(),
             },
         },

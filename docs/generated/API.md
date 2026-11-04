@@ -18,7 +18,7 @@ It describes the strict newline-delimited JSON protocol used over the local IPC 
 
 ## Canonical Client Session Sequence
 
-The current IPC generation is **4**; the oldest supported generation is **4**. Application release versions are independent. An overlapping generation does not promise that an older schema understands every additive capability: check `InitEvent.capabilities` before optional commands and fields.
+The current IPC generation is **1**; the oldest supported generation is **1**. Application release versions are independent. An overlapping generation does not promise that an older schema understands every additive capability: check `InitEvent.capabilities` before optional commands and fields.
 
 1. **Connect:** Open `127.0.0.1:<daemon_port>`, locally or through an SSH tunnel. Endpoint discovery is a host responsibility, separate from the portable wire protocol.
 2. **Optional local lifetime lease:** A persistent frontend attached to an automatically managed daemon sends `FrontendLeaseCommand` using its host-issued token and a random frontend ID. Independent daemons, remote endpoints and short-lived queries do not require this. The lease grants no profile access.

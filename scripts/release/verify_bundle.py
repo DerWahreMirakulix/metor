@@ -6,13 +6,53 @@ import json
 import platform
 from pathlib import Path, PurePosixPath
 import re
+import stat
 import sys
-from typing import Sequence, cast
+from typing import Iterator, Sequence, cast
 
 
 CHECKSUM_FILE_NAME = 'SHA256SUMS.txt'
 METADATA_FILE_NAME = 'BUNDLE.json'
 CHECKSUM_PATTERN = re.compile(r'^([0-9a-f]{64})  (.+)$')
+
+
+def _kind(path: Path) -> int:
+    """Inspect the entry itself; links and Windows reparse points are not bundle payloads."""
+    info = path.lstat()
+    if (
+        stat.S_ISLNK(info.st_mode)
+        or getattr(info, 'st_file_attributes', 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+    ):
+        raise ValueError(f'Linked bundle entry: {path.name}.')
+    return info.st_mode
+
+
+def _regular(path: Path) -> Path:
+    """Reject devices, pipes and links before attempting to read them."""
+    if not stat.S_ISREG(_kind(path)):
+        raise ValueError(f'Not a regular bundle file: {path.name}.')
+    return path
+
+
+def bundle_payloads(bundle_dir: Path) -> Iterator[Path]:
+    """Walk the extracted tree without crossing links or entering its top-level virtualenv."""
+    pending = [bundle_dir]
+    while pending:
+        for path in pending.pop().iterdir():
+            mode = _kind(path)
+            if stat.S_ISDIR(mode):
+                if path != bundle_dir / '.venv':
+                    pending.append(path)
+            elif not stat.S_ISREG(mode) or path == bundle_dir / '.venv':
+                raise ValueError(f'Unexpected bundle entry: {path.name}.')
+            elif path != bundle_dir / CHECKSUM_FILE_NAME:
+                yield path
+
+
+def file_digest(path: Path) -> str:
+    """Hash a regular file incrementally so wheel size does not dictate memory use."""
+    with _regular(path).open('rb') as stream:
+        return hashlib.file_digest(stream, 'sha256').hexdigest()
 
 
 def normalize_machine(machine: str) -> str:
@@ -42,7 +82,9 @@ def read_metadata(bundle_dir: Path) -> dict[str, object]:
     Returns:
         dict[str, object]: Parsed target metadata.
     """
-    document = json.loads((bundle_dir / METADATA_FILE_NAME).read_text(encoding='utf-8'))
+    document = json.loads(
+        _regular(bundle_dir / METADATA_FILE_NAME).read_text(encoding='utf-8')
+    )
     if not isinstance(document, dict):
         raise ValueError('Bundle target metadata must be a JSON object.')
     return cast(dict[str, object], document)
@@ -89,13 +131,25 @@ def checksum_entries(bundle_dir: Path) -> dict[PurePosixPath, str]:
         dict[PurePosixPath, str]: Relative bundle paths mapped to SHA-256 values.
     """
     entries: dict[PurePosixPath, str] = {}
-    lines = (bundle_dir / CHECKSUM_FILE_NAME).read_text(encoding='utf-8').splitlines()
+    lines = (
+        _regular(bundle_dir / CHECKSUM_FILE_NAME)
+        .read_text(encoding='utf-8')
+        .splitlines()
+    )
     for line in lines:
         match = CHECKSUM_PATTERN.fullmatch(line)
         if match is None:
             raise ValueError('Malformed SHA256SUMS.txt entry.')
-        relative = PurePosixPath(match.group(2))
-        if relative.is_absolute() or '..' in relative.parts or not relative.parts:
+        name = match.group(2)
+        relative = PurePosixPath(name)
+        if (
+            relative.is_absolute()
+            or '..' in relative.parts
+            or not relative.parts
+            or '\\' in name
+            or ':' in name
+            or name != relative.as_posix()
+        ):
             raise ValueError('Unsafe SHA256SUMS.txt path.')
         if relative in entries:
             raise ValueError(f'Duplicate checksum path: {relative}.')
@@ -118,10 +172,7 @@ def verify_checksums(bundle_dir: Path) -> None:
     entries = checksum_entries(bundle_dir)
     actual = {
         PurePosixPath(path.relative_to(bundle_dir).as_posix())
-        for path in bundle_dir.rglob('*')
-        if path.is_file()
-        and path.name != CHECKSUM_FILE_NAME
-        and '.venv' not in path.relative_to(bundle_dir).parts
+        for path in bundle_payloads(bundle_dir)
     }
     expected = set(entries)
     if missing := expected - actual:
@@ -134,7 +185,7 @@ def verify_checksums(bundle_dir: Path) -> None:
         )
     for relative, expected_digest in entries.items():
         path = bundle_dir.joinpath(*relative.parts)
-        actual_digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        actual_digest = file_digest(path)
         if actual_digest != expected_digest:
             raise ValueError(f'Checksum mismatch: {relative}.')
 

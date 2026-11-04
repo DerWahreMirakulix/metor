@@ -681,7 +681,7 @@ class ReleaseContractTests(unittest.TestCase):
             guide,
         )
         self.assertIn('requires no package index access', guide)
-        self.assertIn('python verify_bundle.py .', guide)
+        self.assertIn('python -I verify_bundle.py .', guide)
         self.assertIn('including the bundled pip wheel', guide)
         self.assertIn('not a signature', guide)
 
@@ -733,8 +733,8 @@ class ReleaseContractTests(unittest.TestCase):
 
         self.assertIn('verify_bundle.py', script)
         self.assertIn('--target-only', script)
-        self.assertIn(f'call py -{target} -m venv', script)
-        self.assertIn('call python -m venv', script)
+        self.assertIn(f'call py -{target} -I -m venv', script)
+        self.assertIn('call python -I -m venv', script)
         self.assertIn('goto selected_py', script)
         self.assertIn('goto selected_python', script)
         self.assertNotIn(':try_py', script)
@@ -808,6 +808,44 @@ class ReleaseContractTests(unittest.TestCase):
                     )
                     with self.assertRaisesRegex(ValueError, diagnostic):
                         verify_bundle(bundle, target_only=True)
+
+    def test_bundle_inventory_covers_nested_manifest_names(self) -> None:
+        """Only the root manifest and local virtualenv fall outside the payload."""
+        with TemporaryDirectory() as directory:
+            bundle = Path(directory)
+            (bundle / BUNDLE_METADATA_NAME).write_text(
+                build_bundle_metadata('sdk', 'metor-sdk'), encoding='utf-8'
+            )
+            (bundle / CHECKSUM_FILE_NAME).write_text(
+                build_sha256_manifest(bundle), encoding='utf-8'
+            )
+            extra = bundle / 'wheelhouse' / CHECKSUM_FILE_NAME
+            extra.parent.mkdir()
+            extra.write_bytes(b'unlisted file')
+            with self.assertRaisesRegex(ValueError, 'Unhashed bundle files'):
+                verify_bundle(bundle)
+
+    @unittest.skipIf(
+        sys.platform == 'win32', 'Portable symlink creation requires Unix.'
+    )
+    def test_bundle_rejects_external_payload_even_if_its_digest_matches(self) -> None:
+        """An external file must not be substituted after manifest creation."""
+        with TemporaryDirectory() as directory:
+            bundle = Path(directory) / 'bundle'
+            bundle.mkdir()
+            (bundle / BUNDLE_METADATA_NAME).write_text(
+                build_bundle_metadata('sdk', 'metor-sdk')
+            )
+            payload = bundle / 'package.whl'
+            payload.write_bytes(b'trusted wheel')
+            (bundle / CHECKSUM_FILE_NAME).write_text(
+                build_sha256_manifest(bundle), encoding='utf-8'
+            )
+            outside = Path(directory) / 'outside'
+            payload.rename(outside)
+            payload.symlink_to(outside)
+            with self.assertRaisesRegex(ValueError, 'Linked bundle entry'):
+                verify_bundle(bundle)
 
     @unittest.skipIf(sys.platform == 'win32', 'Shell installer is validated on Unix.')
     def test_shell_installer_preserves_incompatible_existing_venv(self) -> None:

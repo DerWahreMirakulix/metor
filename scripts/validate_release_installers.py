@@ -26,6 +26,7 @@ def validate_zip(archive: Path) -> None:
         subprocess.run(
             [
                 sys.executable,
+                '-I',
                 str(installer.parent / 'verify_bundle.py'),
                 str(installer.parent),
             ],
@@ -38,6 +39,8 @@ def validate_zip(archive: Path) -> None:
         environment['PATH'] = (
             str(Path(sys.executable).parent) + os.pathsep + environment.get('PATH', '')
         )
+        outside = root / 'unexpected-pip-target'
+        environment['PIP_TARGET'] = str(outside)
 
         def run(args: list[str]) -> str:
             result = subprocess.run(
@@ -61,6 +64,9 @@ def validate_zip(archive: Path) -> None:
             if os.name == 'nt'
             else ['sh', str(installer)]
         )
+        if outside.exists():
+            raise RuntimeError('Installer honored an external pip target.')
+        environment.pop('PIP_TARGET')
         executable = (
             installer.parent
             / '.venv'

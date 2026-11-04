@@ -124,8 +124,8 @@ prefix is client scope and rejected with `CLIENT_SCOPE_KEY_REJECTED`.
 ## Protected GUI metadata
 
 - `DropConversationSummaryEntry.pending_count`: content-free count of pending
-  outbound DROP receipts that retain a delivery spool. It defaults to zero for
-  older IPC-2 writers and remains separate from inbound `unread_count`.
+  outbound DROP receipts that retain a delivery spool. Its default is zero.
+  It remains separate from inbound `unread_count`.
   History-only clearing preserves this queue. Core retains its canonical conversation order, with
   stable peer-identity ties; the GUI applies protected pin order only.
 - `ClearMessagesCommand.cancel_pending` / `DeleteMessageCommand.cancel_pending`:
@@ -150,10 +150,10 @@ prefix is client scope and rejected with `CLIENT_SCOPE_KEY_REJECTED`.
   root-password strength; PIN verifier management remains its existing Core API.
 - `GuiPreferencesEvent` / `GuiPreferencesRejectedEvent`: authoritative values
   or non-mutating typed `GuiPreferenceFailure`; no plaintext fallback.
-- `profile_instance_id` / `protected_gui_preferences` capabilities: additive
-  IPC-2 support negotiated before the GUI uses these services.
+- `profile_instance_id` / `protected_gui_preferences` capabilities: generation 1
+  IPC services negotiated before the GUI uses them.
 
-The generated API/schema describe the nested fields and enums. Schema 4 stores
+The generated API/schema describe the nested fields and enums. Schema 1 stores
 this namespace under the profile database's protection and deletion boundary.
 
 - `local_acceptance`: opt-in text-send field requesting a local durable result
@@ -196,12 +196,12 @@ this namespace under the profile database's protection and deletion boundary.
   of the selected SQL row string values; selection stops before a row exceeding
   the remaining budget. It excludes response-envelope/presentation overhead,
   which consumers reserve separately. Selection and consumption remain atomic.
-- `bounded_text_handoff`: additive IPC-2 capability for these defaulted bounds.
+- `bounded_text_handoff`: generation 1 IPC capability for these defaulted bounds.
   The operation remains peer- and delivery-filtered and never consumes Voice.
 
 ### Bounded DROP archive paging
 
-- `bounded_archive_pages`: additive IPC-2 capability for optional
+- `bounded_archive_pages`: generation 1 IPC capability for optional
   `GetMessagesCommand.before_msg_id`, `before_direction` and `max_payload_bytes`.
   Continuation requires both exact identity fields and explicit bounded paging.
   The boundary is exclusive and qualified by the resolved peer and DROP delivery;
@@ -215,14 +215,14 @@ this namespace under the profile database's protection and deletion boundary.
   unread count. `page_available=false` with an empty page means the requested
   boundary no longer exists or the first row exceeds the requested byte budget.
   Clients preserve the old page and offer an explicit return to current history.
-  Legacy requests retain their existing history projection and default values.
+  Requests without a page cursor use the default history projection.
 
 ### Contact identity guards and observations
 
-- `contact_identity_guard`: additive IPC-2 capability for defaulted optional
+- `contact_identity_guard`: generation 1 IPC capability for optional
   `RemoveContactCommand.onion` and `RenameContactCommand.onion`. The canonical
   contact service rejects an alias that no longer belongs to that exact identity;
-  legacy alias-only writers retain their behavior. The asserted identity never
+  alias-only writers use the current alias. The asserted identity never
   selects a replacement peer through a reused human label.
 - Contact rename/demotion and orphan-removal broadcasts are uncorrelated state
   observations. Only the requested operation's actual outcome completes its
@@ -258,9 +258,8 @@ this namespace under the profile database's protection and deletion boundary.
 - `GetRestrictedClientStateCommand` / `RestrictedClientStateEvent`: projects only
   the client's app restriction and privacy policy, never a continued LIVE media
   grant. Calls have their own privacy-filtered projection.
-- IPC and peer generation 4 reject older generations before commands or frames
-  can acquire the new semantics. Old LIVE media-lock and auto-play preferences
-  are retired without transferring their privileges to calls.
+- IPC and peer generation 1 require a common generation before a command or
+  frame is dispatched. Unrecognized stored preference fields cannot grant call privileges.
 
 - `InboxNotificationEvent.delivery`: defaulted DROP/LIVE kind for content-free
   unseen activity. `source_id` is a defaulted optional canonical inbound message
@@ -275,8 +274,8 @@ this namespace under the profile database's protection and deletion boundary.
 - `qualified_live_control`: capability for optional exact qualifiers on
   `DisconnectCommand`. `context_generation` identifies the displayed active or
   recovering context for End; `attempt_id` identifies one current outbound LIVE connection attempt
-  for Cancel. They are mutually exclusive. Unqualified legacy callers retain
-  their existing semantics.
+  for Cancel. They are mutually exclusive. An unqualified request targets the
+  current peer context.
 - `LiveContextEntry.outbound_attempt_id`: defaulted optional opaque 32-character
   hexadecimal identity of the current outbound attempt. Cancellation invalidates
   it; a late connection worker cannot bind to or clear a replacement attempt.

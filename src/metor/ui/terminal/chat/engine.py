@@ -227,14 +227,11 @@ class Chat:
             failure_limit=self._pm.config.get_int('daemon.local_auth_failure_limit'),
         )
 
-        unlock_deadline: float | None = None
+        ipc_timeout = self._pm.config.get_float('client.ipc_timeout')
+        deadline = time.monotonic() + ipc_timeout
         while True:
             try:
-                remaining = (
-                    max(0.0, unlock_deadline - time.monotonic())
-                    if unlock_deadline is not None
-                    else None
-                )
+                remaining = max(0.0, deadline - time.monotonic())
                 event: Optional[IpcEvent] = self._ipc.read_event(timeout=remaining)
             except socket.timeout:
                 self._print_prechat_message(
@@ -271,9 +268,9 @@ class Chat:
                     EventType.DAEMON_LOCKED,
                     EventType.INVALID_PASSWORD,
                 ):
-                    unlock_deadline = time.monotonic() + self._pm.unlock_timeout
-                elif event.event_type is EventType.DAEMON_UNLOCKED:
-                    unlock_deadline = None
+                    deadline = time.monotonic() + self._pm.unlock_timeout
+                else:
+                    deadline = time.monotonic() + ipc_timeout
                 if event.event_type in (
                     EventType.AUTH_REQUIRED,
                     EventType.DAEMON_LOCKED,

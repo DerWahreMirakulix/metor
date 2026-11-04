@@ -15,6 +15,8 @@ from kivy.uix.scrollview import ScrollView
 from metor.ui.gui.constants import Geometry
 from metor.ui.gui.theme import TYPE, color, font_path
 
+from .layout import reveal_focus
+
 
 class Panel(BoxLayout):
     """Layout-owned rounded surface with geometry-independent state feedback."""
@@ -179,6 +181,7 @@ class Action(FocusBehavior, ButtonBehavior, Panel):  # pyright: ignore[reportInc
         self._tone = tone
         self._hovered = False
         self._keyboard_armed = False
+        self.bind(focus=reveal_focus)
         self.focus_group: tuple[Action, ...] = ()
         self.focus_key: tuple[str, ...] = ()
         self._rectangle.radius = [dp(12)]
@@ -363,12 +366,6 @@ class Action(FocusBehavior, ButtonBehavior, Panel):  # pyright: ignore[reportInc
                 ]
                 self._keyboard_armed = False
                 selected.focus = True
-                parent = selected.parent
-                while parent is not None and parent is not Window:
-                    if isinstance(parent, ScrollView):
-                        parent.scroll_to(selected, animate=False)
-                        break
-                    parent = parent.parent
             return True
         if keycode[1] in ('spacebar', 'enter') and self.focus and not self.disabled:
             self._keyboard_armed = True

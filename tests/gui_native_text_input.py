@@ -25,15 +25,17 @@ from kivy.clock import Clock
 from kivy.core.window import Window
 from kivy.input.providers.mouse import MouseMotionEvent
 from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.widget import Widget
 
 from metor.client import FrontendLaunchContext, FrontendProfileState
 from metor.core.api import Delivery, DropQueuedEvent
 from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.state import Route
 from metor.ui.gui.state.mailbox import Update
+from metor.ui.gui.views.cover import PrivateForm
 from metor.ui.gui.views.input import InputDock
 from metor.ui.gui.views.peer.composer import Composer
-from metor.ui.gui.widgets import SecretInput, TextField
+from metor.ui.gui.widgets import Action, SecretInput, TextField
 from metor.ui.gui.widgets.keyboard import KeyboardKey
 
 if TYPE_CHECKING:
@@ -169,6 +171,51 @@ class TextInputHarness(App):
         ordinary = TextField(multiline=True, text='notes')
         ordinary.enter()
         assert '\n' in ordinary.text
+        field.focus = False
+        self.dock.hide()
+        self.configuration.touch = False
+        self.panel.clear_widgets()
+        form = PrivateForm()
+        self.panel.add_widget(form)
+        form.body.add_widget(secret)
+        form.body.add_widget(Widget(size_hint_y=None, height=Window.height * 2))
+        confirm = Mock()
+        action = Action('Confirm', confirm)
+        form.body.add_widget(action)
+        secret.text = 'synthetic'
+
+        def assert_visible(target: Widget) -> None:
+            """Require the actual focus ring to fit in the private form's viewport."""
+            bottom = form.scroll.to_window(*form.scroll.pos)[1]
+            y = target.to_window(*target.pos)[1]
+            assert bottom - 1 <= y <= bottom + form.scroll.height - target.height + 1
+
+        def forward(_elapsed: float) -> None:
+            """Tab must leave a credential intact and reveal the next real action."""
+            secret.focus = True
+            assert secret.get_focus_next() is action
+            assert secret.keyboard_on_key_down(Window, (9, 'tab'), '\t', [])
+            assert secret.text == 'synthetic' and action.focus and not secret.focus
+            Clock.schedule_once(reverse, 0)
+
+        def reverse(_elapsed: float) -> None:
+            """Shift+Tab must return to the masked field without invoking the action."""
+            assert_visible(action)
+            assert action.keyboard_on_key_down(Window, (9, 'tab'), '', ['shift'])
+            assert secret.focus and not action.focus
+            Clock.schedule_once(finish, 0)
+
+        def finish(_elapsed: float) -> None:
+            """Confirm reverse visibility and record only the non-secret test results."""
+            assert_visible(secret)
+            assert secret.text == 'synthetic'
+            confirm.assert_not_called()
+            self.finish()
+
+        Clock.schedule_once(forward, 0.2)
+
+    def finish(self) -> None:
+        """Record the measured input and navigation checks after all native frames."""
         self.result.write_text(
             json.dumps(
                 {
@@ -178,6 +225,7 @@ class TextInputHarness(App):
                     'pending_submission_preserves_exact_recoverable_text': 'pass',
                     'composer_focus_survives_send_and_acceptance': 'pass',
                     'credential_and_generic_multiline_policy_preserved': 'pass',
+                    'tab_and_shift_tab_reveal_controls_without_editing_or_submitting': 'pass',
                     'input': 'synthetic native callbacks and pointer input',
                     'window_provider': type(Window).__name__,
                     'video_driver': os.environ.get(

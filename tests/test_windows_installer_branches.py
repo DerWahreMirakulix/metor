@@ -62,11 +62,11 @@ class WindowsInstallerBranchTests(unittest.TestCase):
         Returns:
             str: Complete batch wrapper source.
         """
-        target_arg = '4' if launcher else '3'
+        target_arg = '5' if launcher else '4'
         venv_test = (
-            'if "%~2"=="-m" if "%~3"=="venv" exit /b 23'
+            'if "%~3"=="-m" if "%~4"=="venv" exit /b 23'
             if launcher
-            else 'if "%~1"=="-m" if "%~2"=="venv" exit /b 23'
+            else 'if "%~2"=="-m" if "%~3"=="venv" exit /b 23'
         )
         return (
             '@echo off\n'

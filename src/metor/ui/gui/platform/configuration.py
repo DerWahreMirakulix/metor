@@ -341,29 +341,24 @@ def read_configuration(
     )
     if simulator and 'platform' in tables:
         raise DeviceConfigurationError('Simulator cannot select a platform adapter')
+    if not simulator and 'platform' not in tables:
+        raise DeviceConfigurationError('Device mode requires [platform].adapter')
     platform_table = (
         _table(tables['platform'], {'adapter', 'config'}, 'platform')
-        if 'platform' in tables
-        else None
+        if not simulator
+        else {}
     )
     expected_adapter = (
         'simulator'
         if simulator
-        else _adapter(
-            platform_table.get('adapter')
-            if platform_table is not None
-            else display.get('adapter'),
-            'platform.adapter',
-        )
+        else _adapter(platform_table.get('adapter'), 'platform.adapter')
     )
     if not simulator and expected_adapter in {'none', 'simulator'}:
         raise DeviceConfigurationError('Unsupported device adapter')
     if platform is not None and platform.adapter_id != expected_adapter:
         raise DeviceConfigurationError('Unsupported device adapter')
     parameters = (
-        _parameters(platform_table['config'])
-        if platform_table is not None and 'config' in platform_table
-        else ()
+        _parameters(platform_table['config']) if 'config' in platform_table else ()
     )
     for table in (display, inputs):
         if table.get('adapter') != expected_adapter:

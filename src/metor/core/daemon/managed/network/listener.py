@@ -376,6 +376,7 @@ class InboundListener:
 
         try:
             tor_timeout: float = self._config.get_float(SettingKey.TOR_TIMEOUT)
+            deadline = time.monotonic() + tor_timeout
             conn.settimeout(tor_timeout)
             challenge: str = secrets.token_hex(Constants.TOR_HANDSHAKE_CHALLENGE_BYTES)
             self._state.send_frame(
@@ -384,7 +385,7 @@ class InboundListener:
             )
 
             stream = TcpStreamReader(conn)
-            line: Optional[str] = stream.read_line()
+            line: Optional[str] = stream.read_line(deadline=deadline)
 
             if line:
                 is_call = line.split()[-1] == Constants.CALL_AUTH_FLAG

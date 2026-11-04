@@ -3,7 +3,7 @@
 import socket
 import threading
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Callable, Optional, Tuple
+from typing import TYPE_CHECKING, Callable, Optional
 
 from metor.core.api import InboxNotificationEvent, IpcEvent, RuntimeStateChangedEvent
 from metor.core.daemon.managed.models import TorCommand
@@ -19,7 +19,7 @@ from ...notify import NotificationPayload
 from ..state import StateTracker
 from ..stream import TcpStreamReader
 from .admission import FrameAdmission
-from .codec import decode_drop_payload
+from .codec import decode_message_payload
 
 if TYPE_CHECKING:
     from metor.data import ContactManager, HistoryManager, MessageManager
@@ -85,19 +85,17 @@ class DropMessageRouter:
         Args:
             conn (socket.socket): The authenticated channel socket.
             onion (str): The peer onion identity.
-            payload_id (str): The transport fallback message identifier.
+            payload_id (str): Message identifier from the frame header.
             b64_payload (str): The Base64-encoded message envelope.
             transport (str): The transport label for projected history.
 
         Returns:
             bool: True when the drop backlog is full.
         """
-        decoded_payload: Optional[Tuple[str, str, Optional[str]]] = decode_drop_payload(
-            payload_id, b64_payload
-        )
-        if decoded_payload is None:
+        try:
+            msg_id, content, timestamp = decode_message_payload(payload_id, b64_payload)
+        except ValueError:
             return False
-        msg_id, content, timestamp = decoded_payload
         with self._transition_lock:
             return self._store_decoded_drop(
                 conn, onion, msg_id, content, timestamp, transport
@@ -194,7 +192,7 @@ class DropMessageRouter:
         Args:
             conn (socket.socket): The active session socket.
             onion (str): The peer onion identity.
-            payload_id (str): The transport fallback message identifier.
+            payload_id (str): Message identifier from the frame header.
             b64_payload (str): The Base64-encoded message envelope.
 
         Returns:

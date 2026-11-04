@@ -164,6 +164,8 @@ class DeviceLifecycleTests(unittest.TestCase):
             None
         """
         source = """schema_version = 1
+[platform]
+adapter = 'fixture'
 [display]
 adapter = 'fixture'
 width_px = 480
@@ -194,6 +196,8 @@ adapter = 'fixture'
             None
         """
         source = """schema_version = 1
+[platform]
+adapter = 'fixture'
 [display]
 adapter = 'fixture'
 width_px = 480

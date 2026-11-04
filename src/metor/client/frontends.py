@@ -9,12 +9,14 @@ import threading
 from typing import ContextManager, Optional, Protocol, cast
 
 from metor.shared.constants import Constants
+from metor.versioning import (
+    FRONTEND_LAUNCH_CONTRACT_VERSION as FRONTEND_LAUNCH_CONTRACT_VERSION,
+)
 
 from .platform import PlatformBindings
 
 
 FRONTEND_ENTRY_POINT_GROUP: str = 'metor.ui_frontends'
-FRONTEND_LAUNCH_CONTRACT_VERSION: int = 3
 
 
 class FrontendLaunchError(RuntimeError):

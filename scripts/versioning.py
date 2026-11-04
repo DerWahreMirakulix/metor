@@ -19,6 +19,8 @@ from metor.versioning import format_version_matrix, validate_version_registry
 
 
 CURRENT_CONSTANTS: dict[str, str] = {
+    'frontend-launch': 'FRONTEND_LAUNCH_CONTRACT_VERSION',
+    'platform-adapter': 'PLATFORM_ADAPTER_CONTRACT_VERSION',
     'ipc': 'IPC_PROTOCOL_VERSION',
     'peer': 'PEER_PROTOCOL_VERSION',
     'db-schema': 'DB_SCHEMA_VERSION',

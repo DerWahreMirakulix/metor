@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 
+from kivy.core.text import Label as TextMeasure
 from kivy.uix.anchorlayout import AnchorLayout
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.gridlayout import GridLayout
@@ -176,6 +177,16 @@ def security_view(
                         disabled=state.busy,
                     )
                     button.padding = ('4dp', '8dp')
+                    if key == 'Unlock':
+                        width, _ = TextMeasure(
+                            font_name=button.label.font_name,
+                            font_size=button.label.font_size,
+                        ).get_extents(key)
+                        button.size_hint_min_x = (
+                            width + button.padding[0] + button.padding[2]
+                        )
+                    elif key == '⌫':
+                        button.accessible_name = 'Delete last PIN digit'
                     keypad.add_widget(button)
                 body.add_widget(keypad)
 

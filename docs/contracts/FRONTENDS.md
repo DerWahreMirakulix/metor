@@ -10,7 +10,35 @@ or other presentation behavior. Terminal, GUI, and third-party clients consume
 the same typed boundary without gaining storage, transport, key, or host-process
 ownership.
 
-This frontend-neutral contract owns public integration behavior. GUI-specific presentation belongs in [GUI.md](GUI.md).
+## Connecting a Python client
+
+Install `metor-sdk` in the client environment. The daemon runs separately; its
+Tor, SQLCipher and GUI dependencies are unnecessary on a machine that only runs
+this client. Connect to the loopback port of the running daemon, or to the local
+end of an authenticated SSH tunnel. The port belongs to the selected profile.
+
+```python
+from metor.client import AuthProvider, MetorClient
+
+
+def negotiated_protocol(port: int, credentials: AuthProvider) -> int:
+    client = MetorClient(port, auth_provider=credentials)
+    try:
+        session = client.bootstrap()
+        if session is None:
+            raise RuntimeError("Daemon unavailable or authentication incomplete")
+        return session.negotiated_version
+    finally:
+        client.disconnect()
+```
+
+Your application supplies the `AuthProvider`: ask for secrets through its own
+masked input, derive the session response with `build_session_auth_proof` from
+`metor.client`, and return `None` when the user cancels. Do not log passwords,
+proofs or the full initialization event. After bootstrap, use `request` with a
+typed command and its expected reply; broadcasts and request replies share the
+same socket. A native GUI should perform the blocking handshake off its render
+thread. See the [wire reference](../generated/API.md) for command and event pairs.
 
 ## Ownership boundary
 
@@ -100,11 +128,9 @@ not grant access to keys, content, or profile actions. Anonymous connections
 without that token cannot keep an automatic daemon alive. Re-registration on a
 new socket replaces only the same frontend ID. A stale socket or previous
 daemon token cannot release or join a newer instance. Frontends skip the lease
-command when a current independent daemon has no token. This release requires
-IPC generation 4. Generation 3 introduced the local profile-exit semantics;
-generation 4 adds the current telephone-call contract. Older daemons must be
-stopped and upgraded before a current frontend can attach. Short-lived CLI
-queries do not register as frontends.
+command when a current independent daemon has no token. The first stable
+frontend launch contract and IPC contract both use generation 1. Short-lived
+CLI queries do not register as frontends.
 
 The first frontend has 60 seconds after IPC readiness to register. An
 unexpected disconnect reserves that frontend's slot for 45 seconds so a
@@ -254,7 +280,7 @@ and `/call accept` explicitly report that a capable frontend is required before
 issuing any Core command. Terminal never creates a silent accepted call, reads
 call media, auto-plays messages, or consumes Voice on the user's behalf.
 
-Peer wire generation 4 retains separate `/ack` (LIVE text), `/drop_ack` (DROP text),
+Peer wire generation 1 defines separate `/ack` (LIVE text), `/drop_ack` (DROP text),
 `/voice_ack <id> <offset>` (resumable progress), and
 `/voice_commit_ack <id>` (terminal Voice durability). A sender retains every
 Voice segment until the terminal commit ACK. Duplicate matching chunks and END
@@ -288,8 +314,8 @@ concurrent-call rejection and client/profile teardown are explicit outcomes.
 Local adapters must establish compatible selected headset endpoints before
 starting or accepting media. Speaker echo cancellation is not claimed.
 
-IPC/peer generation 4 is required. Older generations fail typed negotiation;
-unsupported peers cannot interpret a call as a LIVE invitation or chat message.
+IPC and peer communication require generation 1. A disjoint advertised range
+fails negotiation before either side can accept a command or a peer payload.
 
 ## Restricted client/session lock
 
@@ -300,8 +326,8 @@ blob, identity, and key runtime state. It is not a device screen lock.
 Its immutable lock-cycle policy selects unlock method, notification privacy,
 `accept_calls_locked` (default false), and independent `device_lifecycle`
 authority. It grants no continued LIVE media, message playback/capture or
-locked LIVE invitation acceptance. Retired auto-play and general LIVE-lock
-preferences cannot transfer privileges to calls.
+locked LIVE invitation acceptance. Unknown protected preference fields are
+rejected without changing stored values or granting call permission.
 
 Restricted clients cannot read contacts/history/messages/settings or create
 Voice recordings. Existing exact-owner accepted calls may continue their
@@ -337,9 +363,8 @@ clients. An authorized profile purge immediately broadcasts a redacted
 initiation to other connected frontends so they cover local state. Its operation
 ID and detailed destruction milestones remain limited to the initiator.
 
-This changed profile-exit meaning was introduced in IPC generation 3. The current
-call contract raises the required generation to 4; older clients and daemons are
-rejected by the handshake instead of interpreting incompatible commands.
+Generation 1 defines both the per-client profile exit and the independent call
+contract. Clients and daemons validate the agreed generation before dispatch.
 
 Self-destruct is a separate emergency path. Hard-locked anonymous clients cannot
 invoke it. A restricted client can act only when it was authenticated before

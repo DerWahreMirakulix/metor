@@ -1,4 +1,4 @@
-"""Protected GUI metadata migration, authorization, and wire regression contracts."""
+"""Protected GUI metadata, authorization, and wire regression contracts."""
 
 from dataclasses import replace
 import json
@@ -25,8 +25,9 @@ from metor.core.daemon.managed.handlers import ProfileMetadataCommandHandler
 from metor.data.sql import SqlManager
 from metor.data.message import MessageDirection, MessageStatus
 from metor.data.sql.backends import sqlite3
+from metor.data.sql.errors import LegacyDatabaseSchemaError
+from metor.data.sql.schema import DATABASE_APPLICATION_ID
 from metor.shared import Constants
-from metor.versioning import DB_SCHEMA_VERSION
 
 
 class GuiMetadataTests(unittest.TestCase):
@@ -78,28 +79,21 @@ class GuiMetadataTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             IpcCommand.from_dict(payload)
 
-    def test_retired_privileges_migrate_without_authorizing_calls(self) -> None:
-        """Old message-media permissions never become Call consent under migration."""
-        legacy = {
+    def test_unknown_stored_privileges_are_rejected_without_rewriting(self) -> None:
+        """Unsupported stored permissions cannot grant call consent or trigger a rewrite."""
+        unknown = {
             'auto_play': True,
             'keep_live_locked': True,
             'accept_live_locked': 'all',
             'keyboard_layout': 'qwertz',
         }
-        self.sql.metadata.write_gui(0, json.dumps(legacy))
+        self.sql.metadata.write_gui(0, json.dumps(unknown))
         result = self.handler.handle(GetGuiPreferencesCommand(), self.connection)
-        self.assertIsInstance(result, GuiPreferencesEvent)
-        self.assertFalse(result.preferences.accept_calls_locked)
-        self.assertEqual(result.preferences.keyboard_layout, 'qwertz')
-        self.assertEqual(result.preferences_revision, 2)
-        stored = json.loads(self.sql.metadata.read_gui()[1])
-        self.assertNotIn('auto_play', stored)
-        self.assertNotIn('keep_live_locked', stored)
-        self.assertNotIn('accept_live_locked', stored)
-        self.assertFalse(stored['accept_calls_locked'])
-        again = self.handler.handle(GetGuiPreferencesCommand(), self.connection)
-        self.assertEqual(again.preferences_revision, 2)
-        self.assertEqual(self.notify.call_count, 1)
+        self.assertIsInstance(result, GuiPreferencesRejectedEvent)
+        self.assertEqual(result.reason, GuiPreferenceFailure.INVALID_PREFERENCES)
+        self.assertFalse(self.handler.call_lock_acceptance_enabled())
+        self.assertEqual(self.sql.metadata.read_gui(), (1, json.dumps(unknown)))
+        self.notify.assert_not_called()
 
     def test_call_lock_acceptance_requires_full_auth_and_retired_wire_is_rejected(
         self,
@@ -277,38 +271,37 @@ class GuiMetadataTests(unittest.TestCase):
         self.assertEqual(json.loads(value)['pins'], [])
         self.assertIsNone(self.sql.metadata.write_gui(1, '{}'))
 
-    def test_schema_three_migrates_and_export_does_not_falsely_stamp_four(self) -> None:
-        """A pre-metadata database retains data and receives exactly one new identity."""
+    def test_foreign_database_is_neither_upgraded_nor_exported(self) -> None:
+        """Reject a development database even when its generation number collides."""
         SqlManager.close_connection(self.path)
         source = sqlite3.connect(str(self.path))
         source.execute(f'PRAGMA key = "x\'{self.key.hex()}\'"')
-        source.execute('DROP TABLE profile_metadata')
-        source.execute('DROP TABLE voice_producer_items')
-        source.execute('CREATE TABLE retained_fixture (value TEXT)')
-        source.execute('INSERT INTO retained_fixture VALUES (?)', ('retained',))
-        source.execute('PRAGMA user_version = 3')
+        source.execute('PRAGMA application_id = 0')
         source.commit()
         source.close()
         copy = self.path.with_name('copy.db')
-        SqlManager.export_database_copy(self.path, copy, self.key, self.key)
-        exported = sqlite3.connect(str(copy))
-        exported.execute(f'PRAGMA key = "x\'{self.key.hex()}\'"')
-        self.assertEqual(exported.execute('PRAGMA user_version').fetchone(), (3,))
-        exported.close()
+        for operation in (
+            lambda: SqlManager(self.path, self.config, self.key),
+            lambda: SqlManager.export_database_copy(
+                self.path, copy, self.key, self.key
+            ),
+        ):
+            with self.assertRaises(LegacyDatabaseSchemaError):
+                operation()
+        self.assertFalse(copy.exists())
+
+    def test_security_mode_export_preserves_format_and_profile_identity(self) -> None:
+        """A supported encrypted profile can be converted to plaintext and reopened."""
+        original_id = self.sql.metadata.instance_id
+        copy = self.path.with_name('plaintext.db')
+        SqlManager.export_database_copy(self.path, copy, self.key, None)
         try:
-            migrated = SqlManager(copy, self.config, self.key)
-            self.assertEqual(migrated.producers.items(), ())
-            self.assertTrue(migrated.producers.protected)
-            identity = migrated.metadata.instance_id
+            opened = SqlManager(copy, self.config)
+            self.assertEqual(opened.metadata.instance_id, original_id)
             self.assertEqual(
-                migrated.fetchall('PRAGMA user_version'), [(DB_SCHEMA_VERSION,)]
+                opened.fetchall('PRAGMA application_id'), [(DATABASE_APPLICATION_ID,)]
             )
-            self.assertEqual(
-                migrated.fetchall('SELECT value FROM retained_fixture'), [('retained',)]
-            )
-            SqlManager.close_connection(copy)
-            reopened = SqlManager(copy, self.config, self.key)
-            self.assertEqual(reopened.metadata.instance_id, identity)
+            self.assertEqual(opened.fetchall('PRAGMA user_version'), [(1,)])
         finally:
             SqlManager.close_connection(copy)
 

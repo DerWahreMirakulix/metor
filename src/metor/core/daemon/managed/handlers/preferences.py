@@ -56,30 +56,25 @@ class ProfileMetadataCommandHandler:
         return self._repository().instance_id
 
     @staticmethod
-    def _decode_preferences(payload: str | None) -> tuple[GuiPreferences, bool]:
-        """Validates protected values while retiring only known obsolete permissions."""
+    def _decode_preferences(payload: str | None) -> GuiPreferences:
+        """Validate protected preferences without rewriting stored permissions on read."""
         if payload is None:
-            return GuiPreferences(), False
+            return GuiPreferences()
         stored = json.loads(payload)
         if not isinstance(stored, dict):
             raise ValueError('Invalid protected preference document')
-        retired = {'auto_play', 'keep_live_locked', 'accept_live_locked'}
-        migrated = bool(retired.intersection(stored))
-        for name in retired:
-            stored.pop(name, None)
         decoded = IpcEvent.from_dict(
             {'event_type': 'gui_preferences', 'preferences': stored}
         )
         if not isinstance(decoded, GuiPreferencesEvent):
             raise ValueError('Invalid protected preference document')
-        return decoded.preferences, migrated
+        return decoded.preferences
 
     def call_lock_acceptance_enabled(self) -> bool:
         """Reads the protected Core policy; caller-supplied lock flags cannot enable it."""
         try:
             _revision, payload = self._repository().read_gui()
-            preferences, _migrated = self._decode_preferences(payload)
-            return preferences.accept_calls_locked
+            return self._decode_preferences(payload).accept_calls_locked
         except (PermissionError, ValueError, TypeError):
             return False
 
@@ -99,14 +94,7 @@ class ProfileMetadataCommandHandler:
         repository = self._repository()
         try:
             revision, payload = repository.read_gui()
-            preferences, migrated = self._decode_preferences(payload)
-            if migrated:
-                sanitized = json.dumps(asdict(preferences), separators=(',', ':'))
-                accepted_revision = repository.write_gui(revision, sanitized)
-                if accepted_revision is None:
-                    return GuiPreferencesRejectedEvent(GuiPreferenceFailure.CONFLICT)
-                revision = accepted_revision
-                self._notify(RuntimeStateChangedEvent('ui.gui'))
+            preferences = self._decode_preferences(payload)
             if isinstance(command, SetGuiPreferencesCommand):
                 command.preferences.__post_init__()
                 if (

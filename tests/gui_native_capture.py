@@ -1159,7 +1159,11 @@ def main() -> None:
             covers = [
                 widget for widget in app.shell.walk() if isinstance(widget, ScrollView)
             ]
-            assert len(covers) == 1 and not covers[0].do_scroll_y
+            assert len(covers) == 1
+            cover = covers[0]
+            assert cover.do_scroll_y == (cover.children[0].height > cover.height + 1)
+            if args.font_scale <= 1.5:
+                assert not cover.do_scroll_y
         if args.view in {'entry', 'lock', 'locked_notice'}:
             names = (
                 {'Switch profile', 'New profile'}

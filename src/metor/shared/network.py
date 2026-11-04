@@ -1,13 +1,32 @@
 """
-Module containing network-related utility functions.
-Isolates Tor and onion address formatting logic.
+Shared socket deadlines and Tor onion address helpers.
 """
 
 import base64
 import hashlib
+import socket
+import time
+from contextlib import suppress
 
 # Local Package Imports
 from metor.shared.constants import Constants
+
+
+def recv_before(sock: socket.socket, size: int, deadline: float | None) -> bytes:
+    """Receive a fragment within a monotonic operation budget, restoring the socket's idle policy."""
+    if deadline is None:
+        return sock.recv(size)
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise socket.timeout('Socket read deadline elapsed.')
+    previous = sock.gettimeout()
+    try:
+        sock.settimeout(remaining)
+        return sock.recv(size)
+    finally:
+        # A concurrent shutdown may have closed this particular socket.
+        with suppress(OSError):
+            sock.settimeout(previous)
 
 
 def clean_onion(onion: str) -> str:

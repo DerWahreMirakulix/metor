@@ -263,10 +263,10 @@ The IPC contract is versioned and additive-only within one IPC protocol generati
 
 The root `README.md` is the human entry point and root `AGENTS.md` routes coding
 agents to the canonical `docs/AGENTS.md`; do not create `docs/README.md`. Global canonical docs
-stay at `docs/` root, while governance, contracts, generated references, and
-lasting historical audits belong to their named ownership directories. Every
-new document must have one of those ownership classes; temporary agent reports
-do not automatically become canonical documentation.
+stay at `docs/` root. Frontend contracts, generated references and runnable
+examples have their own subdirectories. Keep dated reviews, handoffs, screenshots
+and machine-specific test logs out of repository documentation. Put the
+applicable results in the PR or release record.
 
 Files under `docs/generated/` are valuable, first-class references whose source
 ownership is code and generators. Never edit them manually: update the source
@@ -275,13 +275,16 @@ should link readers to deeper generated references instead of duplicating them,
 and relevant links must remain reachable from the existing human or agent entry
 point.
 
+CI checks all public Python and npm pins against the OSV advisory database,
+including dependencies specific to the other operating system. To run the same
+online check separately from the offline tests: `python -m scripts.check_dependency_advisories`.
+
 ## 10. Security and Architecture Review
 
 Every change is reviewed against the risks it can actually affect. Record the
 relevant checks and evidence; do not claim a platform, hardware, or destructive
-path that was not exercised. Use the reusable
-[audit checklist](./governance/AUDIT.md) to select relevant checks and record
-their results with the PR or release evidence.
+path that was not exercised. Use the areas below to select checks and record
+their results in the PR or release record.
 
 ### Ownership and isolation
 

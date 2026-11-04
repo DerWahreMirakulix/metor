@@ -109,7 +109,13 @@ def _release_manifest(ipc_schema: dict[str, object]) -> dict[str, object]:
         dict[str, object]: Candidate compatibility manifest.
     """
     return {
-        'ipc': {'current': 2, 'minimum_supported': 2, 'schema': ipc_schema},
+        'frontend_launch': {'current': 1, 'minimum_supported': 1},
+        'platform_adapter': {'current': 1, 'minimum_supported': 1},
+        'ipc': {
+            'current': IPC_PROTOCOL_VERSION,
+            'minimum_supported': IPC_PROTOCOL_MIN_SUPPORTED,
+            'schema': ipc_schema,
+        },
         'peer': {
             'current': 1,
             'minimum_supported': 1,
@@ -215,13 +221,20 @@ class VersionRegistryTests(unittest.TestCase):
 class ProtocolNegotiationTests(unittest.TestCase):
     """Covers inclusive IPC and peer protocol-range intersection."""
 
-    def test_old_profile_exit_semantics_cannot_negotiate(self) -> None:
-        """Generation 2 must never use the local-only profile-exit command."""
-        self.assertIsNone(
-            negotiate_protocol_generation(
-                IPC_PROTOCOL_VERSION, IPC_PROTOCOL_MIN_SUPPORTED, 2, 2
-            )
-        )
+    def test_only_stable_generation_negotiates(self) -> None:
+        """Generation one is the entire supported range for IPC and peer transport."""
+        for current, minimum in (
+            (IPC_PROTOCOL_VERSION, IPC_PROTOCOL_MIN_SUPPORTED),
+            (PEER_PROTOCOL_VERSION, PEER_PROTOCOL_MIN_SUPPORTED),
+        ):
+            self.assertEqual((current, minimum), (1, 1))
+            self.assertEqual(negotiate_protocol_generation(current, minimum, 1, 1), 1)
+            for unsupported in (0, 2, 3, 4):
+                self.assertIsNone(
+                    negotiate_protocol_generation(
+                        current, minimum, unsupported, unsupported
+                    )
+                )
 
     def test_range_matrix_selects_highest_overlap_or_rejects(self) -> None:
         """Verifies current/minimum semantics in both negotiation directions.
@@ -523,18 +536,24 @@ class ReleaseCompatibilityTests(unittest.TestCase):
         Returns:
             None
         """
-        self.assertEqual(calculate_next_version('0.2.0', 'current'), '0.2.0')
+        self.assertEqual(calculate_next_version('1.0.0', 'current'), '1.0.0')
+        for bump in ('patch', 'minor', 'major'):
+            with (
+                self.subTest(bump=bump),
+                self.assertRaisesRegex(ValueError, 'first release'),
+            ):
+                calculate_next_version('1.0.0', bump)
         self.assertEqual(
-            calculate_next_version('0.2.0', 'patch', previous_release='v0.2.0'),
-            '0.2.1',
+            calculate_next_version('1.0.0', 'patch', previous_release='v1.0.0'),
+            '1.0.1',
         )
         self.assertEqual(
-            calculate_next_version('0.2.0', 'minor', previous_release='v0.2.0'),
-            '0.3.0',
+            calculate_next_version('1.0.0', 'minor', previous_release='v1.0.0'),
+            '1.1.0',
         )
         self.assertEqual(
-            calculate_next_version('0.2.0', 'major', previous_release='v0.2.0'),
-            '1.0.0',
+            calculate_next_version('1.0.0', 'major', previous_release='v1.0.0'),
+            '2.0.0',
         )
 
     def test_current_release_rejects_existing_stable_baseline(self) -> None:

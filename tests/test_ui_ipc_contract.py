@@ -49,7 +49,9 @@ from metor.client import (
     FrontendBootstrapResult,
     FrontendLaunchContext,
     IpcAuthExchange,
+    IpcClient,
 )
+from metor.shared.constants import Constants as WireLimits
 from metor.ui.terminal import get_session_auth_prompt
 from metor.utils import Constants
 from metor.versioning import IPC_PROTOCOL_MIN_SUPPORTED, IPC_PROTOCOL_VERSION
@@ -213,7 +215,11 @@ class _RequestSessionSocket:
         del args
         return None
 
-    def settimeout(self, timeout: float) -> None:
+    def gettimeout(self) -> float | None:
+        """Report the configured socket timeout before a bounded frame read."""
+        return self.timeout
+
+    def settimeout(self, timeout: float | None) -> None:
         """
         Captures one timeout value for assertions.
 
@@ -465,6 +471,86 @@ class _AuthPromptProfileManager:
 
 class UiIpcContractTests(unittest.TestCase):
     """Covers UI IPC contract regression scenarios."""
+
+    def test_synchronous_read_deadline_survives_frame_fragmentation(self) -> None:
+        """A partial frame cannot renew the deadline or disappear from the next read."""
+        with socket.socket() as listener:
+            listener.bind(('127.0.0.1', 0))
+            listener.listen()
+            client = IpcClient(
+                listener.getsockname()[1], 1.5, lambda _: None, lambda: None
+            )
+            self.addCleanup(client.stop)
+            self.assertTrue(client.connect(start_listener=False))
+            peer, _ = listener.accept()
+            with peer:
+                event = create_event(EventType.DAEMON_UNLOCKED)
+                peer.sendall((event.to_json() + '\n').encode())
+                with (
+                    patch.object(WireLimits, 'TCP_BUFFER_SIZE', 1),
+                    patch('time.monotonic', side_effect=[10.0, 10.1, 10.8, 11.2]),
+                    self.assertRaises(socket.timeout),
+                ):
+                    client.read_event(timeout=1.0)
+                self.assertEqual(client.read_event(timeout=1.0), event)
+
+    def test_invalid_synchronous_frame_ends_generation_without_echoing_content(
+        self,
+    ) -> None:
+        """A later valid event cannot mask a malformed authority change."""
+        with socket.socket() as listener:
+            listener.bind(('127.0.0.1', 0))
+            listener.listen()
+            client = IpcClient(
+                listener.getsockname()[1], 1.5, lambda _: None, lambda: None
+            )
+            self.addCleanup(client.stop)
+            for frame in (
+                b'{"event_type":"private-marker"}',
+                b'{"event_type":"daemon_locked","private-marker":true}',
+                b'["private-marker"]',
+            ):
+                with self.subTest(frame=frame):
+                    self.assertTrue(client.connect(start_listener=False))
+                    peer, _ = listener.accept()
+                    with peer:
+                        confirmation = create_event(EventType.DAEMON_UNLOCKED)
+                        peer.sendall(
+                            frame + b'\n' + confirmation.to_json().encode() + b'\n'
+                        )
+                        with self.assertRaisesRegex(
+                            ValueError, 'invalid IPC event'
+                        ) as raised:
+                            client.read_event()
+                        self.assertNotIn('private-marker', str(raised.exception))
+                        self.assertIsNone(client.read_event())
+
+    def test_cli_unrelated_response_cannot_extend_command_deadline(self) -> None:
+        """A late confirmation cannot turn an expired one-shot exchange into success."""
+        session = IpcRequestSession(
+            cast(ProfileManager, _RequestSessionProfileManager()),
+            async_event_types=set(),
+            format_event=lambda event: event.event_type.value,
+            format_message=lambda message: message,
+            prompt_password=lambda _prompt: None,
+            send_socket_command=lambda sock, cmd: sock.sendall(
+                (cmd.to_json() + '\n').encode()
+            ),
+        )
+        command = GetHistoryCommand(request_id='mine')
+        events = [
+            create_event(EventType.UNKNOWN_COMMAND, {'request_id': key})
+            for key in ('another', 'mine')
+        ]
+        client, peer = socket.socketpair()
+        with client, peer:
+            peer.sendall(''.join(event.to_json() + '\n' for event in events).encode())
+            with patch('time.monotonic', side_effect=[10.0, 10.1, 10.5, 12.0]):
+                result = session.execute_socket_result(client, command, True)
+            self.assertTrue(result.failed)
+            self.assertIn('outcome is unknown', result.message or '')
+            self.assertIsNone(result.event)
+            self.assertEqual(client.gettimeout(), 1.5)
 
     def setUp(self) -> None:
         """Keep mocked profiles away from real daemon token files."""

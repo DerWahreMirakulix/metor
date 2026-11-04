@@ -349,22 +349,22 @@ class IpcClient:
         Returns:
             Optional[IpcEvent]: The decoded event, or None when the stream ends.
         """
-        if self._socket is None:
-            return None
-
-        if self._listener_thread is not None and self._listener_thread.is_alive():
-            raise RuntimeError('The active listener owns all IPC reads.')
-
-        if timeout is None:
-            return self._reader.read_from_socket(self._socket)
-        if timeout <= 0:
-            raise socket.timeout('IPC operation deadline elapsed.')
-        previous_timeout = self._socket.gettimeout()
+        with self._response_condition:
+            sock = self._socket
+            if sock is None:
+                return None
+            if self._listener_thread is not None and self._listener_thread.is_alive():
+                raise RuntimeError('The active listener owns all IPC reads.')
+            generation = self._generation
+            reader = self._reader
+        budget = self._timeout if timeout is None else timeout
         try:
-            self._socket.settimeout(timeout)
-            return self._reader.read_from_socket(self._socket)
-        finally:
-            self._socket.settimeout(previous_timeout)
+            return reader.read_from_socket(sock, deadline=time.monotonic() + budget)
+        except ValueError:
+            # As with the listener, a malformed frame may have revoked authority.
+            # A caller must reconnect before consuming subsequent events.
+            self._notify_disconnect(generation, sock=sock)
+            raise
 
     def begin_request(self, request_id: str) -> RequestLease:
         """Registers one correlated response stream before sending its command.

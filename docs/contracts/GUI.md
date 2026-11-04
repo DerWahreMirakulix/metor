@@ -184,8 +184,10 @@ Unknown fields and versions fail. The current parser accepts an empty
 `[drivers]` table only; it does not load arbitrary driver names or commands.
 `[platform]` selects an installed adapter by stable ID; `[platform.config]`
 holds at most 32 bounded scalar values and passes only to that adapter's
-preactivation validator. Existing version 1 files without `[platform]` retain
-their `[display].adapter` identity. A selected adapter's concrete fields are
+preactivation validator. A physical configuration must name the provider in
+`[platform].adapter`, including when its bindings are supplied by the host.
+To update a file that declares only display and input adapters, add a
+`[platform]` table with that same adapter ID. A selected adapter's concrete fields are
 specified by its installed package, never inferred by the GUI. The generic
 boundary accepts finite numbers with absolute value at most 10¹²; this keeps
 deployment data small before provider validation. Each provider then applies
@@ -193,7 +195,7 @@ its own narrower field ranges.
 
 | Table                                 | Current contract                                                                                                                                                                                                                            |
 | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `[platform]`                          | Optional `adapter` and bounded `[platform.config]` for a physical adapter. Simulation has no platform provider.                                                                                                                             |
+| `[platform]`                          | Physical mode requires `adapter` and allows bounded `[platform.config]`. Simulation has no platform provider.                                                                                                                               |
 | `[display]`                           | `adapter`, positive bounded native `width_px` and `height_px`; optional `rotation_deg` in 0/90/180/270 and finite `scale` from 0.25 through 8. `output` is currently unsupported.                                                           |
 | `[input]`                             | `adapter`, exact `ptt_binding = "ptt"` and `power_binding = "power"`; optional boolean `touch`. PTT and Power have separate meanings.                                                                                                       |
 | `[audio]`, `[camera]`                 | Optional `adapter = "none"` only in the current implementation; absence means unavailable.                                                                                                                                                  |
@@ -202,9 +204,9 @@ its own narrower field ranges.
 
 `adapter` is a registered identity, never a Python import path. In simulator
 mode, required display and input adapters are `simulator`, and physical bindings
-are rejected. In physical mode, `[platform].adapter` (or legacy
-`[display].adapter`) must match the required display/input IDs and the selected
-`metor.platform_adapters` entry point. Discovery inspects metadata only, rejects
+are rejected. In physical mode, `[platform].adapter` must match the required
+display/input IDs and the installed entry point or injected bindings.
+Discovery inspects metadata only, rejects
 duplicate IDs and loads only that selected provider. The device file is
 owner-checked deployment configuration; the package installation must also be
 trusted. Neither an entry point nor a well-formed ID proves trust, and validation
@@ -639,6 +641,9 @@ configuration declares touch input; no keyboard button occupies the field.
 Focus order follows visible reading order. Text fields expose their purpose
 independently of placeholder text or entered values. Password/PIN confirmation
 fields have distinct accessible names.
+Tab and Shift+Tab move between form fields and actions without changing the
+field value or submitting the form. A scrolling view reveals the focused
+control in either direction, including when a physical keyboard is used.
 Ordinary action names follow their visible labels as state changes; icon actions
 retain their explicit purpose.
 Selection alone does not start communication. A focused PTT control may own
@@ -677,6 +682,8 @@ Entry, lock, and profile management content stays fixed when it fits the
 viewport. Scrolling is enabled only for actual overflow, including locked
 activity or accepted-call controls. Pending profile activation shows covered
 progress until a graphical prompt or the complete profile becomes available.
+The PIN keypad reserves enough width for the Unlock label at enlarged text
+sizes and announces the backspace key as “Delete last PIN digit.”
 All viewports clamp mouse-wheel movement at their content edges so footer
 actions remain fully reachable; touch dragging remains available for overflow.
 

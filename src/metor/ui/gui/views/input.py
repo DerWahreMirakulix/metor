@@ -6,10 +6,9 @@ from kivy.clock import Clock
 from kivy.core.window import Window
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
-from kivy.uix.scrollview import ScrollView
 
 from metor.ui.gui.constants import Geometry
-from metor.ui.gui.widgets import TextField
+from metor.ui.gui.widgets import TextField, reveal_focus
 from metor.ui.gui.widgets.keyboard import LocalKeyboard
 from metor.ui.gui.widgets.sheet import ActionSheet
 
@@ -163,13 +162,8 @@ class InputDock:
         Returns:
             None
         """
-        field = self.target
-        parent = field.parent if field is not None else None
-        while parent is not None and parent.parent is not parent:
-            if isinstance(parent, ScrollView):
-                parent.scroll_to(field, padding=dp(Geometry.EDGE), animate=False)
-                break
-            parent = parent.parent
+        if self.target is not None:
+            reveal_focus(self.target, self.target.focus)
 
     def hide(self) -> None:
         """Releases the field reference and preserves explicit keyboard dismissal.

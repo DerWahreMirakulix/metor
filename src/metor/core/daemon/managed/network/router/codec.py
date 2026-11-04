@@ -36,14 +36,14 @@ def build_message_frame(
     return f'{command.value} {msg_id} {encoded_payload}\n'
 
 
-def decode_live_payload(
+def decode_message_payload(
     payload_id: str,
     b64_payload: str,
 ) -> Tuple[str, str, Optional[str]]:
-    """Decodes and strictly validates one live message envelope.
+    """Validate the common LIVE/DROP text envelope before persistence or ACK.
 
     Args:
-        payload_id (str): The transport-level fallback identifier.
+        payload_id (str): The identifier from the frame header.
         b64_payload (str): The Base64-encoded JSON envelope.
 
     Raises:
@@ -53,77 +53,28 @@ def decode_live_payload(
         Tuple[str, str, Optional[str]]: The message ID, text, and timestamp.
     """
     if not is_valid_message_id(payload_id):
-        raise ValueError('Invalid live message ID.')
+        raise ValueError('Invalid message ID.')
     try:
         raw_text: str = base64.b64decode(b64_payload, validate=True).decode('utf-8')
     except (binascii.Error, UnicodeDecodeError) as exc:
-        raise ValueError('Invalid live payload encoding.') from exc
+        raise ValueError('Invalid message payload encoding.') from exc
 
     try:
         envelope_raw: JsonValue = json.loads(raw_text)
-    except json.JSONDecodeError as exc:
-        raise ValueError('Invalid live payload JSON.') from exc
+    except (ValueError, RecursionError) as exc:
+        raise ValueError('Invalid message payload JSON.') from exc
 
     if not isinstance(envelope_raw, dict):
-        raise ValueError('Invalid live payload envelope.')
+        raise ValueError('Invalid message payload envelope.')
 
     envelope: Dict[str, JsonValue] = envelope_raw
     text_value: JsonValue = envelope.get('text')
     if not isinstance(text_value, str):
-        raise ValueError('Invalid live payload text field.')
+        raise ValueError('Invalid message payload text field.')
 
     timestamp_value: JsonValue = envelope.get('timestamp')
-    timestamp: Optional[str] = (
-        str(timestamp_value) if timestamp_value is not None else None
-    )
-    envelope_id = envelope.get('id', payload_id)
-    if (
-        not isinstance(envelope_id, str)
-        or envelope_id != payload_id
-        or not is_valid_message_id(envelope_id)
-    ):
-        raise ValueError('Invalid live message ID.')
-    return envelope_id, text_value, timestamp
-
-
-def decode_drop_payload(
-    payload_id: str,
-    b64_payload: str,
-) -> Optional[Tuple[str, str, Optional[str]]]:
-    """Decodes one drop envelope while preserving legacy plain-text support.
-
-    Args:
-        payload_id (str): The transport-level fallback identifier.
-        b64_payload (str): The Base64-encoded payload.
-
-    Returns:
-        Optional[Tuple[str, str, Optional[str]]]: The decoded message fields, or
-            None when the encoding itself is invalid.
-    """
-    if not is_valid_message_id(payload_id):
-        return None
-    try:
-        raw_text: str = base64.b64decode(b64_payload, validate=True).decode('utf-8')
-    except (binascii.Error, UnicodeDecodeError):
-        return None
-
-    try:
-        decoded: JsonValue = json.loads(raw_text)
-    except json.JSONDecodeError:
-        return payload_id, raw_text, None
-
-    if not isinstance(decoded, dict):
-        return None
-    envelope: Dict[str, JsonValue] = decoded
-    timestamp_value: JsonValue = envelope.get('timestamp')
-    timestamp: Optional[str] = (
-        str(timestamp_value) if timestamp_value is not None else None
-    )
-    envelope_id = envelope.get('id', payload_id)
-    if not isinstance(envelope_id, str) or not is_valid_message_id(envelope_id):
-        return None
-    return (
-        envelope_id,
-        str(envelope.get('text', raw_text)),
-        timestamp,
-    )
+    if timestamp_value is not None and not isinstance(timestamp_value, str):
+        raise ValueError('Invalid message timestamp.')
+    if envelope.get('id') != payload_id:
+        raise ValueError('Message ID does not match frame header.')
+    return payload_id, text_value, timestamp_value

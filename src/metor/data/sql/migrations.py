@@ -3,12 +3,11 @@
 from dataclasses import dataclass
 from typing import Callable
 
-from metor.versioning import DB_SCHEMA_VERSION
+from metor.versioning import DB_SCHEMA_MIN_SUPPORTED, DB_SCHEMA_VERSION
 
 # Local Package Imports
 from metor.data.sql.backends import SqlCipherConnection, SqlCipherCursor
 from metor.data.sql.errors import DatabaseMigrationError
-from metor.data.sql.schema import create_profile_metadata, create_voice_producers
 
 
 @dataclass(frozen=True)
@@ -29,21 +28,7 @@ class SchemaMigration:
     apply: Callable[[SqlCipherCursor], None]
 
 
-def _migrate_three_to_four(cursor: SqlCipherCursor) -> None:
-    """Adds protected GUI metadata and durable Voice producer ownership together.
-
-    Args:
-        cursor: The schema-3 migration transaction.
-    Returns:
-        None
-    """
-    create_profile_metadata(cursor)
-    create_voice_producers(cursor)
-
-
-SCHEMA_MIGRATIONS: tuple[SchemaMigration, ...] = (
-    SchemaMigration(3, 4, _migrate_three_to_four),
-)
+SCHEMA_MIGRATIONS: tuple[SchemaMigration, ...] = ()
 
 
 def migration_path(source_version: int) -> tuple[SchemaMigration, ...]:
@@ -58,6 +43,8 @@ def migration_path(source_version: int) -> tuple[SchemaMigration, ...]:
     Returns:
         tuple[SchemaMigration, ...]: Ordered migrations ending at current.
     """
+    if not DB_SCHEMA_MIN_SUPPORTED <= source_version <= DB_SCHEMA_VERSION:
+        raise DatabaseMigrationError(f'Unsupported source schema {source_version}.')
     by_source: dict[int, SchemaMigration] = {}
     for registered_migration in SCHEMA_MIGRATIONS:
         if (

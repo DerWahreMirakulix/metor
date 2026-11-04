@@ -69,6 +69,22 @@ class _Entry:
 class AdapterSelectionTests(unittest.TestCase):
     """Exercise strict TOML and installed metadata before resource activation."""
 
+    def test_display_and_input_cannot_choose_an_installed_or_injected_provider(
+        self,
+    ) -> None:
+        """Matching port IDs alone do not authorize either provider-loading path."""
+        content = 'schema_version = 1\n[display]' + EXAMPLE.split('[display]', 1)[1]
+        with tempfile.TemporaryDirectory() as directory:
+            path = _configuration(Path(directory), content)
+            for bindings in (None, PlatformBindings('reference-board', Mock())):
+                with (
+                    self.subTest(injected=bindings is not None),
+                    self.assertRaisesRegex(
+                        DeviceConfigurationError, r'\[platform\]\.adapter'
+                    ),
+                ):
+                    read_configuration(str(path), False, bindings)
+
     def test_selected_provider_only_and_shared_reference_value(self) -> None:
         """Two sessions share one effective simulated value without profile state."""
         selected = _Entry('reference-board', _reference_provider())

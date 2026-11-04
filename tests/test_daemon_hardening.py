@@ -2677,6 +2677,26 @@ class DaemonHardeningTests(unittest.TestCase):
 
         self.assertNotIn(private_detail, str(raised.exception))
 
+    def test_slow_unauthenticated_handshake_releases_its_slot(self) -> None:
+        """Successive fragments cannot renew an inbound peer's admission deadline."""
+        state = Mock()
+        listener, receiver = self._build_live_listener(cast(StateTracker, state))
+        conn, peer = socket.socketpair()
+        with (
+            conn,
+            peer,
+            patch.object(listener._config, 'get_float', return_value=1.0),
+            patch.object(Constants, 'TCP_BUFFER_SIZE', 1),
+            patch('time.monotonic', side_effect=[10.0, 10.2, 11.1]),
+        ):
+            peer.sendall(b'AAAA\n')
+            listener._handle_incoming(conn)
+            state.remove_unauthenticated_connection.assert_called_once_with(conn)
+            state.retire_connection.assert_called_once_with(conn)
+            self.assertFalse(receiver.mock_calls)
+            conn.settimeout(0.1)
+            self.assertEqual(conn.recv(4), b'AAA\n')
+
     def test_inbound_handshake_memory_error_keeps_detail_out_of_history(
         self,
     ) -> None:
@@ -3698,7 +3718,7 @@ class DaemonHardeningTests(unittest.TestCase):
 
                 return None
 
-            def read_line(self) -> str:
+            def read_line(self, *, deadline: float | None = None) -> str:
                 """
                 Reads line from the helper stream.
 
@@ -3789,7 +3809,7 @@ class DaemonHardeningTests(unittest.TestCase):
 
                 return None
 
-            def read_line(self) -> str:
+            def read_line(self, *, deadline: float | None = None) -> str:
                 """
                 Reads line from the helper stream.
 
@@ -3947,13 +3967,22 @@ class DaemonHardeningTests(unittest.TestCase):
             {'id': 'msg-1', 'text': 'hello', 'timestamp': '2026-04-04T12:00:00+00:00'}
         )
         payload_b64 = base64.b64encode(payload_text.encode('utf-8')).decode('utf-8')
+        invalid_timestamp = base64.b64encode(
+            b'{"id":"msg-1","text":"invalid","timestamp":{}}'
+        ).decode('ascii')
+        nested_json = base64.b64encode(b'[' * 1500 + b']' * 1500).decode('ascii')
         stream = _FakeStream(
             [
                 '/drop bad not-base64!!!',
                 '/drop array W10=',
                 '/drop null bnVsbA==',
                 '/drop scalar MQ==',
+                '/drop unframed aGVsbG8=',
+                '/drop missing-text e30=',
                 f'/drop transport-id {payload_b64}',
+                f'/drop msg-1 {invalid_timestamp}',
+                f'/drop nested {nested_json}',
+                f'/drop msg-1 {payload_b64}',
                 None,
             ]
         )
@@ -4002,7 +4031,7 @@ class DaemonHardeningTests(unittest.TestCase):
             {'id': 'msg-2', 'text': 'blocked', 'timestamp': '2026-04-04T12:05:00+00:00'}
         )
         payload_b64 = base64.b64encode(payload_text.encode('utf-8')).decode('utf-8')
-        stream = _FakeStream([f'/drop transport-id {payload_b64}', None])
+        stream = _FakeStream([f'/drop msg-2 {payload_b64}', None])
         conn = _DummyConn()
 
         router.process_async_drop(
@@ -7000,7 +7029,7 @@ class DaemonHardeningTests(unittest.TestCase):
 
                 return None
 
-            def read_line(self) -> str:
+            def read_line(self, *, deadline: float | None = None) -> str:
                 """
                 Reads line from the helper stream.
 

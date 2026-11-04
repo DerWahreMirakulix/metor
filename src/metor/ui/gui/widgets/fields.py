@@ -9,6 +9,8 @@ from kivy.uix.textinput import TextInput
 
 from metor.ui.gui.theme import color, font_path
 
+from .layout import reveal_focus
+
 
 class KeyboardOwner(Protocol):
     """Native field-to-dock boundary without any profile or content persistence."""
@@ -71,6 +73,7 @@ class TextField(TextInput):
         kwargs.setdefault('hint_text_color', color('textSecondary'))
         kwargs.setdefault('cursor_color', color('focus'))
         kwargs.setdefault('padding', ('16dp', '14dp'))
+        kwargs.setdefault('write_tab', False)
         super().__init__(**kwargs)
         if framed:
             self._install_frame()
@@ -84,6 +87,7 @@ class TextField(TextInput):
         self.input_purpose = 'password' if self.password else 'text'
         self._enter_down = False
         self.bind(focus=self._keyboard_focus)
+        self.bind(focus=reveal_focus)
 
     def _install_frame(self) -> None:
         """Replace the toolkit's beveled field with an inset outline behind native text and caret."""

@@ -5,6 +5,7 @@ from metor.shared.network import (
     clean_onion,
     decode_tor_v3_onion_public_key,
     ensure_onion_format,
+    recv_before,
 )
 from metor.shared.security import secure_clear_buffer
 from metor.shared.terminal import escape_terminal_text
@@ -15,5 +16,6 @@ __all__ = [
     'decode_tor_v3_onion_public_key',
     'ensure_onion_format',
     'escape_terminal_text',
+    'recv_before',
     'secure_clear_buffer',
 ]

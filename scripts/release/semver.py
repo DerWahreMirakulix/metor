@@ -126,18 +126,19 @@ def calculate_next_version(
                 'The current-version option is only valid for the first release.'
             )
         return str(current)
-    else:
-        if release_type not in {'patch', 'minor', 'major'}:
-            raise ValueError(f'Unsupported release type: {release_type}')
-        baseline: SemVer = (
-            SemVer.parse(previous_release) if previous_release is not None else current
+    if release_type not in {'patch', 'minor', 'major'}:
+        raise ValueError(f'Unsupported release type: {release_type}')
+    if previous_release is None:
+        raise ValueError(
+            'Use current for the first release; a version bump requires a stable release tag.'
         )
-        if baseline.prerelease is not None:
-            raise ValueError('Release baselines must be stable Semantic Versions.')
-        if release_type == 'patch':
-            base = SemVer(baseline.major, baseline.minor, baseline.patch + 1)
-        elif release_type == 'minor':
-            base = SemVer(baseline.major, baseline.minor + 1, 0)
-        else:
-            base = SemVer(baseline.major + 1, 0, 0)
+    baseline = SemVer.parse(previous_release)
+    if baseline.prerelease is not None:
+        raise ValueError('Release baselines must be stable Semantic Versions.')
+    if release_type == 'patch':
+        base = SemVer(baseline.major, baseline.minor, baseline.patch + 1)
+    elif release_type == 'minor':
+        base = SemVer(baseline.major, baseline.minor + 1, 0)
+    else:
+        base = SemVer(baseline.major + 1, 0, 0)
     return str(base)

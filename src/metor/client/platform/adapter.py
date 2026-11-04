@@ -2,11 +2,13 @@
 
 from collections.abc import Mapping
 from typing import Protocol, TypeAlias
+from metor.versioning import (
+    PLATFORM_ADAPTER_CONTRACT_VERSION as PLATFORM_ADAPTER_CONTRACT_VERSION,
+)
 
 from .bindings import PlatformBindings
 
 
-PLATFORM_ADAPTER_CONTRACT_VERSION = 1
 AdapterParameter: TypeAlias = bool | int | float | str
 
 

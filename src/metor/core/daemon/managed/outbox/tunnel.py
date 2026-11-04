@@ -97,9 +97,10 @@ class DropTunnelManager:
         conn: Optional[socket.socket] = None
         try:
             conn = self._tm.connect(onion)
-            conn.settimeout(self._config.get_float(SettingKey.TOR_TIMEOUT))
+            tor_timeout = self._config.get_float(SettingKey.TOR_TIMEOUT)
+            conn.settimeout(tor_timeout)
             stream = TcpStreamReader(conn)
-            challenge_line: Optional[str] = stream.read_line()
+            challenge_line = stream.read_line(deadline=time.monotonic() + tor_timeout)
             if not challenge_line:
                 conn.close()
                 return None

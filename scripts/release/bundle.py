@@ -1,7 +1,6 @@
 """Repository tooling for building platform-specific release wheel bundles."""
 
 import argparse
-import hashlib
 import json
 import platform
 import shutil
@@ -10,9 +9,10 @@ import sys
 import tempfile
 from pathlib import Path
 from textwrap import dedent
-from typing import Iterable, Sequence
+from typing import Sequence
 
 from scripts.release.paths import PROJECT_ROOT
+from scripts.release.verify_bundle import bundle_payloads, file_digest
 
 
 PIP_VERSION: str = '26.2.1'
@@ -167,19 +167,23 @@ def build_install_guide(bundle_name: str, package_name: str = 'metor') -> str:
         Both scripts create a local .venv inside the extracted bundle and
         install {package_name} entirely from the bundled wheelhouse.
 
-        Manual fallback:
+        Manual fallback on Linux:
 
-          python {BUNDLE_VERIFIER_NAME} .
-          python -m venv .venv
-          .venv/bin/python -m pip install --no-index --find-links wheelhouse --upgrade pip=={PIP_VERSION}
-          .venv/bin/python -m pip install --no-index --find-links wheelhouse {package_name}
+          export PIP_CONFIG_FILE=/dev/null
+
+          python -I {BUNDLE_VERIFIER_NAME} .
+          python -I -m venv .venv
+          .venv/bin/python -I -m pip --isolated --require-virtualenv install --no-index --find-links wheelhouse --upgrade pip=={PIP_VERSION}
+          .venv/bin/python -I -m pip --isolated --require-virtualenv install --no-index --find-links wheelhouse {package_name}
 
         On Windows PowerShell, use:
 
-          python {BUNDLE_VERIFIER_NAME} .
-          python -m venv .venv
-          .venv\\Scripts\\python.exe -m pip install --no-index --find-links wheelhouse --upgrade pip=={PIP_VERSION}
-          .venv\\Scripts\\python.exe -m pip install --no-index --find-links wheelhouse {package_name}
+          $env:PIP_CONFIG_FILE = "nul"
+
+          python -I {BUNDLE_VERIFIER_NAME} .
+          python -I -m venv .venv
+          .venv\\Scripts\\python.exe -I -m pip --isolated --require-virtualenv install --no-index --find-links wheelhouse --upgrade pip=={PIP_VERSION}
+          .venv\\Scripts\\python.exe -I -m pip --isolated --require-virtualenv install --no-index --find-links wheelhouse {package_name}
 
         The --no-index flag ensures installation stays inside this bundle,
         requires no package index access, and never falls back to building
@@ -212,6 +216,7 @@ def build_install_shell_script(package_name: str = 'metor') -> str:
         f"""\
         #!/usr/bin/env sh
         set -eu
+        export PIP_CONFIG_FILE=/dev/null
 
         script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
         venv_dir="$script_dir/.venv"
@@ -222,7 +227,7 @@ def build_install_shell_script(package_name: str = 'metor') -> str:
             echo 'Existing .venv is incomplete; refusing to replace or delete it.' >&2
             exit 1
           fi
-          if ! "$venv_dir/bin/python" "$script_dir/{BUNDLE_VERIFIER_NAME}" "$script_dir" --target-only; then
+          if ! "$venv_dir/bin/python" -I "$script_dir/{BUNDLE_VERIFIER_NAME}" "$script_dir" --target-only; then
             echo 'Existing .venv targets a different Python/OS/architecture; refusing to modify it.' >&2
             exit 1
           fi
@@ -231,7 +236,7 @@ def build_install_shell_script(package_name: str = 'metor') -> str:
 
         if [ -z "$python_bin" ]; then
           for candidate in python{sys.version_info.major}.{sys.version_info.minor} python3 python; do
-            if command -v "$candidate" >/dev/null 2>&1 && "$candidate" "$script_dir/{BUNDLE_VERIFIER_NAME}" "$script_dir" --target-only >/dev/null 2>&1; then
+            if command -v "$candidate" >/dev/null 2>&1 && "$candidate" -I "$script_dir/{BUNDLE_VERIFIER_NAME}" "$script_dir" --target-only >/dev/null 2>&1; then
               python_bin="$candidate"
               break
             fi
@@ -243,13 +248,13 @@ def build_install_shell_script(package_name: str = 'metor') -> str:
           exit 1
         fi
 
-        "$python_bin" "$script_dir/{BUNDLE_VERIFIER_NAME}" "$script_dir"
+        "$python_bin" -I "$script_dir/{BUNDLE_VERIFIER_NAME}" "$script_dir"
 
         if [ ! -x "$venv_dir/bin/python" ]; then
-          "$python_bin" -m venv "$venv_dir"
+          "$python_bin" -I -m venv "$venv_dir"
         fi
-        "$venv_dir/bin/python" -m pip install --no-index --find-links "$script_dir/{WHEELHOUSE_DIRNAME}" --upgrade pip=={PIP_VERSION}
-        "$venv_dir/bin/python" -m pip install --no-index --find-links "$script_dir/{WHEELHOUSE_DIRNAME}" {package_name}
+        "$venv_dir/bin/python" -I -m pip --isolated --require-virtualenv install --no-index --find-links "$script_dir/{WHEELHOUSE_DIRNAME}" --upgrade pip=={PIP_VERSION}
+        "$venv_dir/bin/python" -I -m pip --isolated --require-virtualenv install --no-index --find-links "$script_dir/{WHEELHOUSE_DIRNAME}" {package_name}
 
         echo "{package_name} installed in $venv_dir"
         {verification_line}
@@ -280,38 +285,39 @@ def build_install_windows_script(package_name: str = 'metor') -> str:
         f"""\
         @echo off
         setlocal DisableDelayedExpansion
+        set "PIP_CONFIG_FILE=nul"
         set "BUNDLE_DIR=%~dp0."
         set "VENV_DIR=%BUNDLE_DIR%\\.venv"
         set "VERIFY=%BUNDLE_DIR%\\{BUNDLE_VERIFIER_NAME}"
 
         if exist "%VENV_DIR%" (
             if not exist "%VENV_DIR%\\Scripts\\python.exe" goto incompatible_venv
-            "%VENV_DIR%\\Scripts\\python.exe" "%VERIFY%" "%BUNDLE_DIR%" --target-only >nul 2>nul
+            "%VENV_DIR%\\Scripts\\python.exe" -I "%VERIFY%" "%BUNDLE_DIR%" --target-only >nul 2>nul
             if errorlevel 1 goto incompatible_venv
-            "%VENV_DIR%\\Scripts\\python.exe" "%VERIFY%" "%BUNDLE_DIR%" || exit /b 1
+            "%VENV_DIR%\\Scripts\\python.exe" -I "%VERIFY%" "%BUNDLE_DIR%" || exit /b 1
             goto install
         )
 
         where py >nul 2>nul
         if not errorlevel 1 (
-            call py -{sys.version_info.major}.{sys.version_info.minor} "%VERIFY%" "%BUNDLE_DIR%" --target-only >nul 2>nul
+            call py -{sys.version_info.major}.{sys.version_info.minor} -I "%VERIFY%" "%BUNDLE_DIR%" --target-only >nul 2>nul
             if not errorlevel 1 goto selected_py
         )
 
         where python >nul 2>nul
         if errorlevel 1 goto wrong_python
-        call python "%VERIFY%" "%BUNDLE_DIR%" --target-only >nul 2>nul
+        call python -I "%VERIFY%" "%BUNDLE_DIR%" --target-only >nul 2>nul
         if errorlevel 1 goto wrong_python
         goto selected_python
 
         :selected_py
-        call py -{sys.version_info.major}.{sys.version_info.minor} "%VERIFY%" "%BUNDLE_DIR%" || exit /b 1
-        call py -{sys.version_info.major}.{sys.version_info.minor} -m venv "%VENV_DIR%" || exit /b 1
+        call py -{sys.version_info.major}.{sys.version_info.minor} -I "%VERIFY%" "%BUNDLE_DIR%" || exit /b 1
+        call py -{sys.version_info.major}.{sys.version_info.minor} -I -m venv "%VENV_DIR%" || exit /b 1
         goto install
 
         :selected_python
-        call python "%VERIFY%" "%BUNDLE_DIR%" || exit /b 1
-        call python -m venv "%VENV_DIR%" || exit /b 1
+        call python -I "%VERIFY%" "%BUNDLE_DIR%" || exit /b 1
+        call python -I -m venv "%VENV_DIR%" || exit /b 1
         goto install
 
         :wrong_python
@@ -323,8 +329,8 @@ def build_install_windows_script(package_name: str = 'metor') -> str:
         exit /b 1
 
         :install
-        "%VENV_DIR%\\Scripts\\python.exe" -m pip install --no-index --find-links "%BUNDLE_DIR%\\{WHEELHOUSE_DIRNAME}" --upgrade pip=={PIP_VERSION} || exit /b 1
-        "%VENV_DIR%\\Scripts\\python.exe" -m pip install --no-index --find-links "%BUNDLE_DIR%\\{WHEELHOUSE_DIRNAME}" {package_name} || exit /b 1
+        "%VENV_DIR%\\Scripts\\python.exe" -I -m pip --isolated --require-virtualenv install --no-index --find-links "%BUNDLE_DIR%\\{WHEELHOUSE_DIRNAME}" --upgrade pip=={PIP_VERSION} || exit /b 1
+        "%VENV_DIR%\\Scripts\\python.exe" -I -m pip --isolated --require-virtualenv install --no-index --find-links "%BUNDLE_DIR%\\{WHEELHOUSE_DIRNAME}" {package_name} || exit /b 1
         echo Metor installed in "%VENV_DIR%"
         {verification_line}
         endlocal
@@ -380,22 +386,6 @@ def write_executable_text_file(file_path: Path, content: str) -> None:
     file_path.chmod(0o755)
 
 
-def iter_bundle_files(bundle_dir: Path) -> Iterable[Path]:
-    """
-    Iterates all files inside one bundle directory except the checksum manifest.
-
-    Args:
-        bundle_dir (Path): The bundle directory to scan.
-
-    Returns:
-        Iterable[Path]: The files that should appear in the checksum manifest.
-    """
-    for file_path in sorted(path for path in bundle_dir.rglob('*') if path.is_file()):
-        if file_path.name == CHECKSUM_FILE_NAME:
-            continue
-        yield file_path
-
-
 def build_sha256_manifest(bundle_dir: Path) -> str:
     """
     Builds the SHA256 checksum manifest for one release bundle.
@@ -407,8 +397,8 @@ def build_sha256_manifest(bundle_dir: Path) -> str:
         str: The checksum manifest contents.
     """
     lines: list[str] = []
-    for file_path in iter_bundle_files(bundle_dir):
-        digest: str = hashlib.sha256(file_path.read_bytes()).hexdigest()
+    for file_path in sorted(bundle_payloads(bundle_dir)):
+        digest = file_digest(file_path)
         relative_path: str = file_path.relative_to(bundle_dir).as_posix()
         lines.append(f'{digest}  {relative_path}')
     return '\n'.join(lines) + '\n'

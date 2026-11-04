@@ -38,7 +38,7 @@ from metor.data import (
 from ..state import StateTracker
 from .admission import FrameAdmission
 from ...notify import NotificationPayload
-from .codec import build_message_frame, decode_live_payload
+from .codec import build_message_frame, decode_message_payload
 
 if TYPE_CHECKING:
     from metor.data import ContactManager, HistoryManager, MessageManager
@@ -312,7 +312,7 @@ class LiveMessageRouter:
             FrameAdmission: Accepted, malformed, or resource-limited outcome.
         """
         try:
-            msg_id, content, timestamp = decode_live_payload(payload_id, b64_payload)
+            msg_id, content, timestamp = decode_message_payload(payload_id, b64_payload)
         except ValueError as exc:
             self._hm.log_event(
                 HistoryEvent.STREAM_CORRUPTED,

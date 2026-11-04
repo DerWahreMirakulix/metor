@@ -38,19 +38,19 @@ The source tree follows subsystem ownership; the distribution manifests select
 disjoint files from that tree. A directory named `core` does not make every
 module a public SDK dependency.
 
-| Path                                                     | Responsibility                                                                                    |
-| -------------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `src/metor/client/`, `core/api/`, `core/auth/`           | Portable Python SDK, wire DTOs and credential proofs; no host runtime or UI imports               |
-| `src/metor/application/`                                 | Local profile, daemon-process and frontend-host orchestration                                     |
-| `src/metor/core/daemon/managed/`                         | Long-lived runtime, IPC authorization, peer transport, delivery and media lifetimes               |
-| `src/metor/core/daemon/headless/`                        | Short-lived offline execution for applicable CLI operations                                       |
-| `src/metor/data/`                                        | Profile configuration, persistence, SQL schemas, message/contact repositories and encrypted blobs |
-| `src/metor/cli/`, `src/metor/ui/`                        | Command presentation and independently packaged interactive frontends                             |
-| `src/metor/shared/`, `src/metor/versioning/`             | Lightweight SDK-safe values and the authoritative compatibility registry                          |
-| `src/metor/utils/`                                       | Base-owned operating-system and runtime services                                                  |
-| `packaging/`, `requirements/`                            | Distribution ownership and the pinned dependency closures                                         |
-| `tests/`, `scripts/`, `.github/`                         | Behavior fixtures, local validation/release tools and their CI orchestration                      |
-| `docs/contracts/`, `docs/generated/`, `docs/governance/` | Authored frontend contracts, code-generated references and review evidence                        |
+| Path                                           | Responsibility                                                                                    |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `src/metor/client/`, `core/api/`, `core/auth/` | Portable Python SDK, wire DTOs and credential proofs; no host runtime or UI imports               |
+| `src/metor/application/`                       | Local profile, daemon-process and frontend-host orchestration                                     |
+| `src/metor/core/daemon/managed/`               | Long-lived runtime, IPC authorization, peer transport, delivery and media lifetimes               |
+| `src/metor/core/daemon/headless/`              | Short-lived offline execution for applicable CLI operations                                       |
+| `src/metor/data/`                              | Profile configuration, persistence, SQL schemas, message/contact repositories and encrypted blobs |
+| `src/metor/cli/`, `src/metor/ui/`              | Command presentation and independently packaged interactive frontends                             |
+| `src/metor/shared/`, `src/metor/versioning/`   | Lightweight SDK-safe values and the authoritative compatibility registry                          |
+| `src/metor/utils/`                             | Base-owned operating-system and runtime services                                                  |
+| `packaging/`, `requirements/`                  | Distribution ownership and the pinned dependency closures                                         |
+| `tests/`, `scripts/`, `.github/`               | Behavior fixtures, local validation/release tools and their CI orchestration                      |
+| `docs/contracts/`, `docs/generated/`           | Authored frontend contracts and code-generated references                                         |
 
 Use the public package facades at subsystem boundaries. Within a subsystem,
 import its implementation modules directly to avoid facade cycles. New behavior
@@ -63,8 +63,6 @@ that source-tree imports alone cannot prove.
 
 - [README.md](../README.md) is the human entry point.
 - [CONTRIBUTE.md](./CONTRIBUTE.md) owns development, testing and review rules.
-- [AUDIT.md](./governance/AUDIT.md) is the reusable security and architecture
-  review checklist.
 - [FRONTENDS.md](contracts/FRONTENDS.md) owns public frontend integration.
 - [GUI.md](./contracts/GUI.md) owns GUI operation, device configuration, behavior, and presentation.
 - [API.md](./generated/API.md), [SETTINGS.md](./generated/SETTINGS.md), and
@@ -132,16 +130,7 @@ before returning. Incomplete teardown fails visibly and retains lifecycle
 exclusion until cleanup succeeds or the process exits. It does not register a
 shared daemon, create a remote-control endpoint or start Tor.
 
-### Retired development model
-
-Before the first-release PMK design, the user password was passed directly to
-SQLCipher. A separate Argon2i derivation of the same password encrypted Metor
-and Tor identity files. There was no single random profile root, no blob-domain
-key, and purge depended primarily on recursive overwrite/delete. The repository
-is unreleased, so that development-only format is deliberately unsupported and
-has no migration shim; affected profiles must be recreated.
-
-### First-release encrypted profile model
+### Stable encrypted profile model
 
 Each encrypted local profile has exactly one independently random 32-byte
 Profile Master Key (PMK), created with the operating system CSPRNG. The password
@@ -451,10 +440,9 @@ profile departure, owner disconnect or purge ends calls and frees their audio.
 System suspend ends calls; display lock alone does not imply suspend, and resume
 never reconstructs microphone input or consent.
 
-The change uses IPC generation 4 (retired preference/restriction fields and new
-Voice publication semantics) and peer generation 4 (explicit call transport and
-frames), both with minimum 4. Older peers fail closed during negotiation.
-Application SemVer, SQL schema, encrypted blobs and key derivation are unchanged.
+Metor 1.0.0 uses IPC and peer generation 1, with minimum 1 on both axes.
+These contracts include Voice publication, explicit call acceptance and call
+audio frames. Peers with no common generation fail closed during negotiation.
 
 ## Core system boundaries
 
@@ -487,8 +475,8 @@ not receive real destructive or shutdown adapters.
 
 `PlatformBindings` composes those independent ports for one validated adapter ID
 without merging their authority. A trusted local package registers the selected
-`metor.platform_adapters` entry point; legacy deployment injection through
-`FrontendLaunchContext` remains supported. Strict device TOML must name the same
+`metor.platform_adapters` entry point, or the host injects bindings through
+`FrontendLaunchContext`. Strict device TOML must name the same
 adapter before the GUI subscribes. Optional indicator, haptic and shutdown ports
 are exposed only when their matching TOML tables name that adapter; omission or
 explicit `none` disables the
@@ -598,8 +586,7 @@ Settings keys live in exactly three namespaces (see [GLOSSARY.md](./GLOSSARY.md)
 Validation is a two-registry rule: the daemon accepts only `daemon.*` keys that
 exist in its own `SettingKey` registry. Any client-scope key (`client.*` or
 `ui.<frontend>.*`) that gets routed to the daemon is rejected with the typed
-`CLIENT_SCOPE_KEY_REJECTED` event instead of the legacy
-`DAEMON_CANNOT_MANAGE_UI` naming.
+`CLIENT_SCOPE_KEY_REJECTED` event.
 
 Request defaults are resolved client-side, not daemon-side:
 `client.history_limit` and `client.messages_limit` are read by the client and
@@ -701,11 +688,8 @@ instead of silent misbehavior. Two version axes exist:
    `InitEvent.negotiated_version`, alongside its advertised range. The client
    independently validates that result before accepting the session.
 
-Generation 3 changes `PrepareProfileExitCommand` from a global daemon lock to
-cleanup of the requesting socket. Generation 4 introduces the current telephone
-call contract. The registry currently requires generation 4 for both peers of
-an IPC session, so generation 2 and 3 clients or daemons cannot negotiate the
-current lifecycle and call semantics.
+In generation 1, `PrepareProfileExitCommand` cleans up the requesting socket.
+The daemon retains its independent clients and enforces separate consent for calls.
 
 For the complete generated command/event reference, see [API.md](./generated/API.md).
 

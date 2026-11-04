@@ -179,10 +179,18 @@ def compare_manifests(
     """
     errors: list[str] = []
     notes: list[str] = []
-    for name in ('ipc', 'peer', 'database', 'keyslot', 'blob'):
+    for name in (
+        'frontend_launch',
+        'platform_adapter',
+        'ipc',
+        'peer',
+        'database',
+        'keyslot',
+        'blob',
+    ):
         errors.extend(_axis_errors(name, cast(JsonObject, current[name])))
 
-    for name in ('keyslot', 'blob'):
+    for name in ('frontend_launch', 'platform_adapter', 'keyslot', 'blob'):
         axis = cast(JsonObject, current[name])
         if axis['minimum_supported'] != axis['current']:
             errors.append(
@@ -224,7 +232,9 @@ def compare_manifests(
 
     old_database = cast(JsonObject, previous['database'])
     new_database = cast(JsonObject, current['database'])
-    database_changed: bool = old_database['schema'] != new_database['schema']
+    database_changed: bool = old_database['schema'] != new_database[
+        'schema'
+    ] or old_database.get('application_id') != new_database.get('application_id')
     old_db_version: int = cast(int, old_database['current'])
     new_db_version: int = cast(int, new_database['current'])
     if database_changed and new_db_version <= old_db_version:
@@ -260,7 +270,15 @@ def compare_manifests(
                 f'{name} derivation changed without explicit migration/support review.'
             )
 
-    for name in ('ipc', 'peer', 'database', 'keyslot', 'blob'):
+    for name in (
+        'frontend_launch',
+        'platform_adapter',
+        'ipc',
+        'peer',
+        'database',
+        'keyslot',
+        'blob',
+    ):
         old_axis = cast(JsonObject, previous[name])
         new_axis = cast(JsonObject, current[name])
         if cast(int, new_axis['current']) < cast(int, old_axis['current']):

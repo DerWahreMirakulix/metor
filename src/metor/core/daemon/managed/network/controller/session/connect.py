@@ -160,10 +160,13 @@ def connect_to(
                 if not controller._state.bind_outbound_socket(onion, conn, attempt_id):
                     controller._state.retire_connection(conn)
                     return
-                conn.settimeout(controller._config.get_float(SettingKey.TOR_TIMEOUT))
+                tor_timeout = controller._config.get_float(SettingKey.TOR_TIMEOUT)
+                conn.settimeout(tor_timeout)
 
                 stream = TcpStreamReader(conn)
-                challenge_line: Optional[str] = stream.read_line()
+                challenge_line = stream.read_line(
+                    deadline=time.monotonic() + tor_timeout
+                )
 
                 if not challenge_line:
                     raise ConnectionError('Handshake incomplete.')

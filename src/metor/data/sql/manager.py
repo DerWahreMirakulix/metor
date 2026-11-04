@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Callable, Dict, Iterator, List, Optional, TYPE_CHECKING, Tuple, cast
 
 from metor.shared import secure_clear_buffer
-from metor.versioning import DB_SCHEMA_MIN_SUPPORTED, DB_SCHEMA_VERSION
+from metor.versioning import DB_SCHEMA_VERSION
 
 # Local Package Imports
 from metor.data.sql.backends import (
@@ -16,11 +16,7 @@ from metor.data.sql.backends import (
     sqlite3,
 )
 from metor.data.sql.history import HistoryRepository
-from metor.data.sql.errors import (
-    DatabaseCorruptedError,
-    LegacyDatabaseSchemaError,
-    NewerDatabaseSchemaError,
-)
+from metor.data.sql.errors import DatabaseCorruptedError
 from metor.data.sql.message import MessageRepository
 from metor.data.sql.migrations import migrate_schema
 from metor.data.sql.peer import PeerRepository, compare_aliases
@@ -33,7 +29,8 @@ from metor.data.sql.runtime_mirror import (
     refresh_runtime_mirror,
 )
 from metor.data.sql.schema import (
-    has_user_schema,
+    DATABASE_APPLICATION_ID,
+    check_schema_version,
     initialize_database,
     read_schema_version,
 )
@@ -138,10 +135,10 @@ class SqlManager:
         if not source_db.exists():
             return
 
+        if target_db.exists() and source_db.samefile(target_db):
+            raise ValueError('Database export requires a distinct destination.')
         cls.close_connection(source_db)
-        target_db.parent.mkdir(parents=True, exist_ok=True)
-        target_db.unlink(missing_ok=True)
-
+        replacing_target = False
         conn = sqlite3.connect(str(source_db.absolute()), check_same_thread=False)
         try:
             if current_key:
@@ -152,12 +149,10 @@ class SqlManager:
             cursor.execute('SELECT count(*) FROM sqlite_master;')
             cursor.fetchone()
             source_version = read_schema_version(cursor)
-            if source_version > DB_SCHEMA_VERSION:
-                raise NewerDatabaseSchemaError('Cannot export a newer database schema.')
-            if source_version < DB_SCHEMA_MIN_SUPPORTED:
-                raise LegacyDatabaseSchemaError(
-                    'Cannot export an unsupported database schema.'
-                )
+            check_schema_version(cursor, source_version)
+            target_db.parent.mkdir(parents=True, exist_ok=True)
+            target_db.unlink(missing_ok=True)
+            replacing_target = True
 
             safe_target_path: str = str(target_db.absolute()).replace("'", "''")
             target_key_clause = f"x'{target_key.hex()}'" if target_key else ''
@@ -166,6 +161,9 @@ class SqlManager:
             )
             try:
                 cursor.execute("SELECT sqlcipher_export('migrated')")
+                cursor.execute(
+                    f'PRAGMA migrated.application_id = {DATABASE_APPLICATION_ID}'
+                )
                 cursor.execute(f'PRAGMA migrated.user_version = {source_version}')
             finally:
                 try:
@@ -175,7 +173,8 @@ class SqlManager:
 
             conn.commit()
         except (sqlite3.DatabaseError, sqlite3.OperationalError, MemoryError):
-            target_db.unlink(missing_ok=True)
+            if replacing_target:
+                target_db.unlink(missing_ok=True)
             raise DatabaseCorruptedError(
                 'Profile database could not be migrated safely.'
             ) from None
@@ -317,26 +316,11 @@ class SqlManager:
                     schema_version: int = read_schema_version(cursor)
 
                     if schema_version == 0:
-                        if has_user_schema(cursor):
-                            raise LegacyDatabaseSchemaError(
-                                'Populated development database has schema version 0. '
-                                'Recreate it before the first public release.'
-                            )
                         initialize_database(conn)
-                    elif schema_version > DB_SCHEMA_VERSION:
-                        raise NewerDatabaseSchemaError(
-                            'Database schema '
-                            f'{schema_version} is newer than supported schema '
-                            f'{DB_SCHEMA_VERSION}.'
-                        )
-                    elif schema_version < DB_SCHEMA_MIN_SUPPORTED:
-                        raise LegacyDatabaseSchemaError(
-                            'Database schema '
-                            f'{schema_version} predates minimum supported schema '
-                            f'{DB_SCHEMA_MIN_SUPPORTED}.'
-                        )
-                    elif schema_version < DB_SCHEMA_VERSION:
-                        migrate_schema(conn, schema_version)
+                    else:
+                        check_schema_version(cursor, schema_version)
+                        if schema_version < DB_SCHEMA_VERSION:
+                            migrate_schema(conn, schema_version)
 
                     try:
                         refresh_runtime_mirror(

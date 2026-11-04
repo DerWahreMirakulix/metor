@@ -72,3 +72,8 @@ runs:
     - name: Check GUI editor diagnostics
       shell: bash
       run: python scripts/check_gui_diagnostics.py
+
+    - name: Check public dependency pins for all supported platforms
+      if: runner.os == 'Linux'
+      shell: bash
+      run: python -m scripts.check_dependency_advisories

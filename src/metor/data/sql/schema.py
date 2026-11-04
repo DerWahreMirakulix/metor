@@ -4,7 +4,12 @@ import secrets
 
 from metor.shared import Constants
 from metor.data.sql.backends import SqlCipherConnection, SqlCipherCursor
-from metor.versioning import DB_SCHEMA_VERSION
+from metor.data.sql.errors import LegacyDatabaseSchemaError, NewerDatabaseSchemaError
+from metor.versioning import DB_SCHEMA_MIN_SUPPORTED, DB_SCHEMA_VERSION
+
+
+# SQLite's file-format discriminator, independent of the schema generation.
+DATABASE_APPLICATION_ID = int.from_bytes(b'METR', 'big')
 
 
 PEER_TABLE_QUERY: str = """
@@ -162,6 +167,7 @@ def initialize_schema(cursor: SqlCipherCursor) -> None:
         None
     """
     create_core_schema(cursor)
+    cursor.execute(f'PRAGMA application_id = {DATABASE_APPLICATION_ID}')
     cursor.execute(f'PRAGMA user_version = {DB_SCHEMA_VERSION}')
 
 
@@ -177,7 +183,15 @@ def initialize_database(connection: SqlCipherConnection) -> None:
     cursor = connection.cursor()
     try:
         cursor.execute('BEGIN IMMEDIATE')
-        initialize_schema(cursor)
+        version = read_schema_version(cursor)
+        if version:
+            check_schema_version(cursor, version)
+        elif has_user_schema(cursor):
+            raise LegacyDatabaseSchemaError(
+                'Populated database has no supported Metor schema version.'
+            )
+        else:
+            initialize_schema(cursor)
         connection.commit()
     except Exception:
         try:
@@ -203,17 +217,36 @@ def read_schema_version(cursor: SqlCipherCursor) -> int:
     return row[0]
 
 
+def check_schema_version(cursor: SqlCipherCursor, version: int) -> None:
+    """Require a supported schema belonging to the stable Metor database format."""
+    if version > DB_SCHEMA_VERSION:
+        raise NewerDatabaseSchemaError(
+            f'Database schema {version} is newer than supported schema {DB_SCHEMA_VERSION}.'
+        )
+    if version < DB_SCHEMA_MIN_SUPPORTED:
+        raise LegacyDatabaseSchemaError(
+            f'Database schema {version} predates minimum supported schema {DB_SCHEMA_MIN_SUPPORTED}.'
+        )
+    cursor.execute('PRAGMA application_id')
+    if cursor.fetchone() != (DATABASE_APPLICATION_ID,):
+        raise LegacyDatabaseSchemaError(
+            'Database does not belong to the stable Metor format.'
+        )
+
+
 def has_user_schema(cursor: SqlCipherCursor) -> bool:
-    """Reports whether an unversioned database already contains application tables.
+    """Report whether an unversioned database is owned or contains application objects.
 
     Args:
         cursor (SqlCipherCursor): Cursor on an already keyed database.
 
     Returns:
-        bool: True when a non-internal table already exists.
+        bool: True when bootstrapping would adopt an existing format or schema.
     """
+    cursor.execute('PRAGMA application_id')
+    if cursor.fetchone() != (0,):
+        return True
     cursor.execute(
-        "SELECT name FROM sqlite_master WHERE type = 'table' "
-        "AND name NOT LIKE 'sqlite_%' LIMIT 1"
+        "SELECT name FROM sqlite_master WHERE name NOT GLOB 'sqlite_*' LIMIT 1"
     )
     return cursor.fetchone() is not None

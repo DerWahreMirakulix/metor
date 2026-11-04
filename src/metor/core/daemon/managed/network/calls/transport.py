@@ -40,7 +40,9 @@ def connect(controller: 'CallController', session: CallSession) -> None:
                 return
             connection.settimeout(Constants.CALL_PEER_TIMEOUT_SEC)
             stream = TcpStreamReader(connection)
-            challenge_line = stream.read_line()
+            challenge_line = stream.read_line(
+                deadline=time.monotonic() + Constants.CALL_PEER_TIMEOUT_SEC
+            )
             if challenge_line is None:
                 raise ConnectionError('Call authentication incomplete.')
             challenge, peer_current, peer_min = HandshakeProtocol.parse_challenge_line(

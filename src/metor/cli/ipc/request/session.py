@@ -1,6 +1,7 @@
 """Stateful CLI-side IPC request orchestration for one command exchange."""
 
 import socket
+import time
 from typing import Callable, Optional
 
 from metor.core.api import (
@@ -123,7 +124,8 @@ class IpcRequestSession:
         Returns:
             IpcRequestResult: Typed response or explicit incomplete exchange.
         """
-        sock.settimeout(self._pm.config.get_float(SettingKey.IPC_TIMEOUT))
+        timeout = self._pm.config.get_float(SettingKey.IPC_TIMEOUT)
+        sock.settimeout(timeout)
         reader: BufferedIpcEventReader = BufferedIpcEventReader()
         request_id: str = ensure_request_id(cmd)
         auth_exchange: IpcAuthExchange = self._build_auth_exchange(
@@ -144,8 +146,26 @@ class IpcRequestSession:
                 )
             return IpcRequestResult(message='Command executed successfully.')
 
+        deadline = time.monotonic() + timeout
         while True:
-            event: Optional[IpcEvent] = reader.read_from_socket(sock)
+            try:
+                event = reader.read_from_socket(sock, deadline=deadline)
+            except socket.timeout:
+                return IpcRequestResult(
+                    message=(
+                        'The daemon did not confirm this command before its deadline. '
+                        'Its outcome is unknown; check its status before retrying.'
+                    ),
+                    failed=True,
+                )
+            except ValueError:
+                return IpcRequestResult(
+                    message=(
+                        'The daemon sent an invalid response. The command outcome '
+                        'is unknown; check its status before retrying.'
+                    ),
+                    failed=True,
+                )
             if event is None:
                 break
 
@@ -182,6 +202,9 @@ class IpcRequestSession:
                     )
                 if auth_result.resend_original_command:
                     self._send_socket_command(sock, cmd)
+                # Interactive input and proof derivation belong to the preceding
+                # auth step. Give its follow-up the configured response budget.
+                deadline = time.monotonic() + timeout
                 continue
 
             if (
