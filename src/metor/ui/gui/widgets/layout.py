@@ -15,7 +15,12 @@ def reveal_focus(widget: Widget, focused: bool) -> None:
     parent = widget.parent
     while parent is not None and parent.parent is not parent:
         if isinstance(parent, ScrollView):
-            parent.scroll_to(widget, padding=Geometry.EDGE, animate=False)
+            # Repeated focus requests must measure the latest viewport transform.
+            parent.update_from_scroll()
+            padding = min(
+                Geometry.EDGE, max(0, (parent.height - widget.height) / (2 * dp(1)))
+            )
+            parent.scroll_to(widget, padding=padding, animate=False)
             break
         parent = parent.parent
 

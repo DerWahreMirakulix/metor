@@ -23,6 +23,7 @@ runs:
         xvfb-run -a --server-args='-screen 0 1280x1024x24' python tests/gui_native_capture.py --view root_refresh --width 360 --height 640 --font-scale 1.5 --output "${RUNNER_TEMP}/root-refresh.png" > "${RUNNER_TEMP}/root-refresh.log" 2>&1
         xvfb-run -a --server-args='-screen 0 1280x1024x24' python tests/gui_native_capture.py --view root_refresh --width 360 --height 640 --font-scale 2 --output "${RUNNER_TEMP}/root-refresh-200.png" > "${RUNNER_TEMP}/root-refresh-200.log" 2>&1
         xvfb-run -a --server-args='-screen 0 1280x1024x24' python tests/gui_native_capture.py --view setting_keyboard --width 360 --height 640 --font-scale 1.5 --output "${RUNNER_TEMP}/setting-keyboard.png" > "${RUNNER_TEMP}/setting-keyboard.log" 2>&1
+        xvfb-run -a --server-args='-screen 0 1280x1024x24' python tests/gui_native_capture.py --view setting_keyboard --width 360 --height 640 --font-scale 2 --output "${RUNNER_TEMP}/setting-keyboard-200.png" > "${RUNNER_TEMP}/setting-keyboard-200.log" 2>&1
         xvfb-run -a --server-args='-screen 0 1280x1024x24' python tests/gui_native_capture.py --view settings --width 360 --height 640 --font-scale 1.5 --output "${RUNNER_TEMP}/settings.png" > "${RUNNER_TEMP}/settings.log" 2>&1
         xvfb-run -a --server-args='-screen 0 1920x1080x24' python tests/gui_native_capture.py --view settings --width 1800 --height 960 --font-scale 1.5 --output "${RUNNER_TEMP}/settings-wide.png" > "${RUNNER_TEMP}/settings-wide.log" 2>&1
         xvfb-run -a --server-args='-screen 0 1280x1024x24' python tests/gui_native_capture.py --view lock --width 360 --height 640 --font-scale 1.5 --output "${RUNNER_TEMP}/lock.png" > "${RUNNER_TEMP}/lock.log" 2>&1
@@ -82,6 +83,8 @@ runs:
           ${{ runner.temp }}/dpi-reflow.png
           ${{ runner.temp }}/root-refresh.log
           ${{ runner.temp }}/setting-keyboard.log
+          ${{ runner.temp }}/setting-keyboard-200.png
+          ${{ runner.temp }}/setting-keyboard-200.log
           ${{ runner.temp }}/qr-wide.log
           ${{ runner.temp }}/dpi-reflow.log
           ${{ runner.temp }}/gui-presentation.png

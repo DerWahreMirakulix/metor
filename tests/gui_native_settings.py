@@ -342,7 +342,17 @@ def exercise_setting_keyboard(app: MetorApp, complete: Callable[[], None]) -> No
         for action in sheet.actions.children:
             assert action.height >= dp(48)
             assert action.to_window(*action.pos)[1] >= keyboard.top + dp(8)
-        assert sheet.field.to_window(*sheet.field.pos)[1] >= sheet.actions.top
+        field_y = sheet.field.to_window(*sheet.field.pos)[1]
+        viewport_y = sheet.scroll.to_window(*sheet.scroll.pos)[1]
+        assert (
+            viewport_y <= field_y
+            and field_y + sheet.field.height <= viewport_y + sheet.scroll.height
+        ), (field_y, sheet.field.height, viewport_y, sheet.scroll.height)
+        title_line = TextMeasure(
+            font_name=sheet.title_label.font_name,
+            font_size=sheet.title_label.font_size,
+        ).get_extents('Ag')[1]
+        assert sheet.title_viewport.height >= title_line
         complete()
 
     def numbers(_elapsed: float) -> None:

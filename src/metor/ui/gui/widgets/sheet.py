@@ -3,6 +3,7 @@
 from collections.abc import Callable
 from typing import ClassVar
 
+from kivy.clock import Clock
 from kivy.core.text import Label as TextMeasure
 from kivy.core.window import Window
 from kivy.input.motionevent import MotionEvent
@@ -20,7 +21,7 @@ from metor.ui.gui.theme import color
 
 # Local Package Imports
 from .controls import Action, Label, Panel
-from .layout import ActionRow
+from .layout import ActionRow, reveal_focus
 from .symbol import IconAction
 from .tooltip import PointerTooltip
 
@@ -87,6 +88,7 @@ class ActionSheet(ModalView):
         self._snapshot = id(controller.state.snapshot)
         self._busy = controller.state.busy
         self._disposed = False
+        self._reveal_keyboard = Clock.create_trigger(self._reveal_keyboard_focus, 0)
         self._return_focus: FocusBehavior | None = None
         self.body = Panel(orientation='vertical', padding='24dp', spacing='16dp')
         self.add_widget(self.body)
@@ -120,6 +122,7 @@ class ActionSheet(ModalView):
         self._update_invitation_indicator()
         self.body.add_widget(header)
         self.scroll = ScrollView(do_scroll_x=False, always_overscroll=False)
+        self.scroll.bind(size=self._reveal_keyboard, pos=self._reveal_keyboard)
         self.column = BoxLayout(
             orientation='vertical', spacing='12dp', size_hint_y=None
         )
@@ -213,9 +216,21 @@ class ActionSheet(ModalView):
             + self.actions.height
             + (self.footer.height if self.footer is not None else 0)
         )
+        focused_field = self._keyboard_field()
+        body_minimum = max(
+            dp(Geometry.TARGET),
+            focused_field.height + 2 * dp(Geometry.EDGE) if focused_field else 0,
+        )
+        title_minimum = max(
+            dp(Geometry.TARGET),
+            TextMeasure(
+                font_name=self.title_label.font_name,
+                font_size=self.title_label.font_size,
+            ).get_extents('Ag')[1],
+        )
         self.title_viewport.height = min(
-            max(dp(Geometry.TARGET), self.title_label.height),
-            max(dp(Geometry.TARGET), available - fixed_height - dp(Geometry.TARGET)),
+            max(title_minimum, self.title_label.height),
+            max(title_minimum, available - fixed_height - body_minimum),
         )
         self.title_viewport.do_scroll_y = (
             self.title_label.height > self.title_viewport.height
@@ -224,6 +239,32 @@ class ActionSheet(ModalView):
         self.height = available if self.stable_frame else min(available, desired_height)
         self.scroll.do_scroll_y = self.height < desired_height
         self._align_center()
+
+    def _keyboard_field(self) -> TextInput | None:
+        """Find only the current local keyboard's focused input in this sheet."""
+        if (
+            self._disposed
+            or not self._keyboard_top
+            or self.controller.state.covered
+            or self.controller.state.generation != self._generation
+        ):
+            return None
+        return next(
+            (
+                widget
+                for widget in self.column.walk()
+                if isinstance(widget, TextInput)
+                and widget.focus
+                and not widget.disabled
+            ),
+            None,
+        )
+
+    def _reveal_keyboard_focus(self, _elapsed: float) -> None:
+        """Reapply input visibility after the keyboard changes the measured viewport."""
+        field = self._keyboard_field()
+        if field is not None and ActionSheet.current is self:
+            reveal_focus(field, True)
 
     def _align_center(self, *_args: object) -> None:
         """Centers the modal within the space above the local keyboard.
@@ -351,6 +392,7 @@ class ActionSheet(ModalView):
             None
         """
         self._disposed = True
+        self._reveal_keyboard.cancel()
         Window.unbind(size=self._resize, on_key_down=self._begin_focus)
         if self.footer is not None:
             self.footer.unbind(height=self._resize)
