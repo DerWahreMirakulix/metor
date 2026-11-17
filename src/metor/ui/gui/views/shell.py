@@ -21,8 +21,9 @@ from .entry import entry_view
 from .root import root_view, RootContinuity, RootPanel
 from .peer import PeerView, PeerProjections
 from .secondary import secondary_view
+from .secondary_pane import FULL_PANE_VIEWS, SecondaryPane
 from .contacts import ContactListView
-from .security import security_view, LockedActivity
+from .security import security_view, LockedActivity, LockedView
 from .purge import purge_view
 from .device import device_view
 from .metric_continuity import (
@@ -130,6 +131,19 @@ class Shell(BoxLayout):
                 if isinstance(widget, LockedActivity):
                     widget.update()
         prompt = self.controller.interactions.prompt
+        if (
+            state.covered
+            and state.route.view == 'V05'
+            and prompt is None
+            and not self.controller.native_lifecycle_failed
+            and isinstance(self._security_panel, LockedView)
+            and self._security_panel.get_root_window() is not None
+            and self._security_panel.identity == self._security_panel.current_identity()
+        ):
+            self._security_panel.update()
+            return
+        if isinstance(self._security_panel, LockedView):
+            self._security_panel.revoke()
         wide = self.width >= dp(Geometry.BREAKPOINT)
         root_context = (
             state.generation,
@@ -459,7 +473,9 @@ class Shell(BoxLayout):
                 panel.add_widget(self._peer_panel)
             else:
                 secondary = retained_contacts or secondary_view(
-                    self.controller, self.refresh
+                    self.controller,
+                    self.refresh,
+                    content_width=Geometry.WIDE_MAX if wide else Geometry.COMPACT_MAX,
                 )
                 if retained_contacts is not None:
                     retained_contacts.update()
@@ -467,9 +483,17 @@ class Shell(BoxLayout):
                 if isinstance(secondary, ContactListView):
                     self._contacts_panel = secondary
                     self._contacts_key = peer_key
-            self.add_widget(
-                self._center(panel, Geometry.WIDE_MAX if wide else Geometry.COMPACT_MAX)
-            )
+            if state.route.view in FULL_PANE_VIEWS:
+                # The whole detail pane owns wheel input; only its content is narrow.
+                panel.padding = 0
+                self.add_widget(panel)
+                self.set_input_inset(self.keyboard_inset)
+            else:
+                self.add_widget(
+                    self._center(
+                        panel, Geometry.WIDE_MAX if wide else Geometry.COMPACT_MAX
+                    )
+                )
             if self._contacts_panel is not None and contact_search_focused:
                 self._contacts_panel.search.focus = True
             if self._peer_panel is not None and peer_continuity is not None:
@@ -524,9 +548,15 @@ class Shell(BoxLayout):
         """
         self.keyboard_inset = height
         if self._detail is not None:
-            self._detail.padding[3] = dp(
-                Geometry.KEYBOARD_GAP if height else Geometry.EDGE
+            target = next(
+                (
+                    child
+                    for child in self._detail.children
+                    if isinstance(child, SecondaryPane)
+                ),
+                self._detail,
             )
+            target.padding[3] = dp(Geometry.KEYBOARD_GAP if height else Geometry.EDGE)
 
     @staticmethod
     def _center(panel: BoxLayout, content_width: int) -> AnchorLayout:

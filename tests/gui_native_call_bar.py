@@ -80,7 +80,9 @@ class CallBarHarness(App):
         self.gui.submit = Mock(return_value=True)
         self.gui.state.covered = False
         self.gui.state.route = Route('V08', PEER, Delivery.DROP)
-        self.gui.state.capabilities = frozenset({'calls'})
+        self.gui.state.capabilities = frozenset(
+            {'calls_pcm_duplex', 'call_exact_owner', 'call_transport_lease'}
+        )
         self.gui.state.snapshot = RuntimeSnapshotEvent(
             'fixture',
             '',

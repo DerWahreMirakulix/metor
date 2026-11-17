@@ -18,6 +18,7 @@ from metor.client import FrontendLaunchContext, MetorClient, build_session_auth_
 from metor.client.platform import PlatformBindings
 from metor.core.api import (
     ClientAccessRestrictedEvent,
+    ClientRestrictedEvent,
     ClientReauthorizedEvent,
     ClientUnlockMethod,
     Delivery,
@@ -31,6 +32,7 @@ from metor.core.api import (
     GuiPreferencesRejectedEvent,
     IpcEvent,
     IpcCommand,
+    LocalAuthRateLimitedEvent,
     ReauthorizeClientCommand,
     SetGuiPreferencesCommand,
 )
@@ -50,6 +52,47 @@ from metor.utils import Constants
 _SECURITY_WORKER_TIMEOUT_SEC: float = (
     Constants.DEFAULT_IPC_TIMEOUT + Constants.FILE_LOCK_TIMEOUT_SEC
 )
+
+
+class GuiUnlockCooldownTests(unittest.TestCase):
+    """Check the UI cooldown without running a Core or shortening its retry policy."""
+
+    def test_monotonic_countdown_blocks_all_unlock_paths_until_deadline(self) -> None:
+        """Observe rounded seconds and retain the challenge without automatic retries."""
+        controller = GuiController(FrontendLaunchContext('cooldown-fixture', Mock()))
+        controller.client = Mock()
+        controller.submit = Mock(return_value=True)
+        controller.state.route = Route('V05')
+        security = controller.security
+        security.restriction = ClientRestrictedEvent(
+            ClientUnlockMethod.PIN, '11' * 32, '22' * 16
+        )
+        restriction = security.restriction
+        with patch('metor.ui.gui.runtime.security.controller.time.monotonic') as clock:
+            clock.return_value = 100
+            security.install('security:unlock', LocalAuthRateLimitedEvent(3))
+            self.assertEqual(security.retry_seconds, 3)
+            self.assertFalse(security.unlock('1234'))
+            self.assertFalse(security.unlock(password=True))
+            clock.return_value = 101.01
+            self.assertTrue(security.update_retry())
+            self.assertEqual(security.retry_seconds, 2)
+            self.assertFalse(security.update_retry())
+            controller.state.status = 'New authoritative feedback'
+            clock.return_value = 102.99
+            self.assertTrue(security.update_retry())
+            self.assertEqual(security.retry_seconds, 1)
+            self.assertFalse(security.unlock('1234'))
+            clock.return_value = 103
+            self.assertTrue(security.update_retry())
+            self.assertEqual(security.retry_seconds, 0)
+            self.assertEqual(controller.state.status, 'New authoritative feedback')
+            self.assertIs(security.restriction, restriction)
+            self.assertTrue(controller.state.covered)
+            controller.submit.assert_not_called()
+            self.assertTrue(security.unlock('1234'))
+            controller.submit.assert_called_once()
+            self.assertTrue(controller.state.covered)
 
 
 class GuiSecurityIntegrationTests(unittest.TestCase):

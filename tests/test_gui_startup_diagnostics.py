@@ -109,6 +109,7 @@ class GuiStartupDiagnosticsTests(unittest.TestCase):
                     lifecycle=SimpleNamespace(exit_ready=exit_ready)
                 )
                 self.exit_status = 0
+                self_outer.assertEqual(os.environ['SDL_MOUSE_FOCUS_CLICKTHROUGH'], '1')
 
             def on_stop(self) -> None:
                 """Record cleanup even after an abnormal toolkit return.
@@ -143,7 +144,10 @@ class GuiStartupDiagnosticsTests(unittest.TestCase):
             patch(
                 'metor.ui.gui.launcher.read_configuration', return_value=configuration
             ),
-            patch.dict(os.environ, {'SDL_VIDEODRIVER': 'offscreen'}),
+            patch.dict(
+                os.environ,
+                {'SDL_VIDEODRIVER': 'offscreen', 'SDL_MOUSE_FOCUS_CLICKTHROUGH': '0'},
+            ),
             redirect_stderr(sink),
         ):
             status = GuiEntry()(

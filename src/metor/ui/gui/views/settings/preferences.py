@@ -50,9 +50,10 @@ def call_preferences(
         SettingRow(
             'Accept calls without unlocking',
             'On' if preferences.accept_calls_locked else 'Off',
-            'This profile · explicit acceptance of one exact call only',
+            'This profile · explicit acceptance of one exact call only'
+            if controller.calls.supported
+            else 'Unavailable: the connected service does not support protected calls',
             toggle,
-            disabled=controller.state.busy
-            or 'calls' not in controller.state.capabilities,
+            disabled=controller.state.busy or not controller.calls.supported,
         )
     )

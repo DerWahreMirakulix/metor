@@ -1,6 +1,7 @@
 """Per-client restriction, one-use reauthorization and graphical PIN management."""
 
 from dataclasses import replace
+import math
 import time
 from typing import TYPE_CHECKING
 
@@ -51,6 +52,7 @@ class SecurityController:
         self.pending = False
         self.restoring = False
         self.retry_at = 0.0
+        self._retry_display_seconds = 0
         self.profile_label = ''
         self._profile_instance: str | None = None
         self._policy = GuiPreferences()
@@ -187,6 +189,22 @@ class SecurityController:
 
         return self.controller.submit('security:unlock', request)
 
+    @property
+    def retry_seconds(self) -> int:
+        """Return the rounded-up remaining Core-issued cooldown using monotonic time."""
+        return max(0, math.ceil(self.retry_at - time.monotonic()))
+
+    def update_retry(self) -> bool:
+        """Advance covered feedback without submitting a new authentication attempt."""
+        if not self.retry_at:
+            return False
+        remaining = self.retry_seconds
+        changed = remaining != self._retry_display_seconds
+        self._retry_display_seconds = remaining
+        if not remaining:
+            self.retry_at = 0.0
+        return changed
+
     def configure(
         self,
         method: ClientUnlockMethod,
@@ -282,8 +300,10 @@ class SecurityController:
             )
         elif isinstance(event, LocalAuthRateLimitedEvent):
             self.retry_at = time.monotonic() + event.retry_after
-            state.status = f'Try again in {event.retry_after} seconds'
+            state.status = ''
+            self.update_retry()
         elif isinstance(event, ClientReauthorizedEvent):
+            self.retry_at = 0.0
             self.restriction = None
             self.restoring = True
             state.status = 'Opening Metor…'

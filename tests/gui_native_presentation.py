@@ -309,7 +309,7 @@ def exercise_sheet_refresh(app: MetorApp, complete: Callable[[], None]) -> None:
         ActionSheet.reconcile()
         target.keyboard_on_key_up(Window, (13, 'enter'))
         assert committed.call_count == 0 and not target._keyboard_armed
-        assert sheet.cancel.focus and ActionSheet.current is sheet
+        assert not sheet.cancel.focus and ActionSheet.current is sheet
         settled(revoke_confirmation)
 
     def revoke_confirmation() -> None:

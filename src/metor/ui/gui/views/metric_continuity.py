@@ -228,6 +228,11 @@ class SecondaryMetricContinuity:
             None
         """
         state = controller.state
+        scroll_target = (
+            self.scroll_y
+            if self.scroll_y is not None
+            else state.secondary_scroll.get(self.route, 1.0)
+        )
 
         def apply(_elapsed: float) -> None:
             """Applies only to the newly attached authorized panel.
@@ -252,8 +257,6 @@ class SecondaryMetricContinuity:
                 ),
                 None,
             )
-            if scroll is not None and self.scroll_y is not None:
-                scroll.scroll_y = self.scroll_y
             fields = [
                 item
                 for item in panel.walk(restrict=True)
@@ -268,8 +271,11 @@ class SecondaryMetricContinuity:
                 ):
                     field.focus = True
                     field.cursor = self.cursor
-                    return
             _restore_action(panel, self.action_identity)
+            # Focus restoration may reveal an off-screen action. A background
+            # repaint must retain the user's subsequent intentional scroll.
+            if scroll is not None:
+                scroll.scroll_y = scroll_target
 
         Clock.schedule_once(lambda _elapsed: Clock.schedule_once(apply, 0), 0)
 

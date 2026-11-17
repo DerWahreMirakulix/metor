@@ -2,6 +2,7 @@
 
 import base64
 import sys
+import threading
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, PropertyMock, patch
@@ -17,6 +18,7 @@ from metor.core.api import (
 from metor.ui.gui.platform.audio import HeadsetAudio, PcmVoice
 from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.state import Route
+from metor.ui.gui.state.mailbox import Update
 
 
 class AudioSelectionTests(unittest.TestCase):
@@ -33,7 +35,9 @@ class AudioSelectionTests(unittest.TestCase):
         self.gui.state.snapshot = RuntimeSnapshotEvent(
             'fixture', '', epoch='epoch', profile_instance_id='instance'
         )
-        self.gui.state.capabilities = frozenset({'calls'})
+        self.gui.state.capabilities = frozenset(
+            {'calls_pcm_duplex', 'call_exact_owner', 'call_transport_lease'}
+        )
         self.gui.client = Mock()
         self.routes = self.gui.voice.routes
         self.routes.scanned = True
@@ -61,6 +65,38 @@ class AudioSelectionTests(unittest.TestCase):
                     endpoints.assert_not_called()
                     self.assertIsNone(self.gui.voice.audio)
                     self.assertIsNone(self.gui.playback.audio)
+
+    def test_enumeration_is_local_pending_without_disabling_settings(self) -> None:
+        """Held endpoint read preserves foreground state and rejects repeated scans."""
+        self.gui.state.route = Route('V17')
+        self.gui.state.status = 'Existing setting feedback'
+        self.gui.client = None
+        started, release = threading.Event(), threading.Event()
+        self.addCleanup(release.set)
+        current = self.routes.endpoints
+
+        def enumerate_devices() -> tuple[AudioEndpoint, ...]:
+            """Waits on the synthetic native boundary without opening an audio stream."""
+            started.set()
+            if not release.wait(3):
+                raise TimeoutError('Synthetic enumeration was not released')
+            return current
+
+        with patch.object(HeadsetAudio, 'endpoints', enumerate_devices):
+            self.assertTrue(self.routes.scan())
+            self.assertTrue(started.wait(1))
+            self.assertTrue(self.routes.scanning)
+            self.assertFalse(self.gui.state.busy)
+            self.assertFalse(self.routes.scan())
+            self.assertFalse(self.routes.select(1, microphone=True))
+            release.set()
+            assert self.gui._worker is not None
+            self.gui._worker.join(3)
+            self.gui.poll()
+        self.assertFalse(self.routes.scanning)
+        self.assertFalse(self.gui.state.busy)
+        self.assertEqual(self.gui.state.status, 'Existing setting feedback')
+        self.assertEqual(self.routes.endpoints, current)
 
     def test_output_only_selection_supports_actual_manual_playback(self) -> None:
         """An explicit output alone plays the complete source without microphone setup."""
@@ -109,6 +145,38 @@ class AudioSelectionTests(unittest.TestCase):
         native_output.close.assert_called_once()
         assert self.gui.playback.progress is not None
         self.assertEqual(self.gui.playback.progress.state, 'complete')
+
+    def test_failed_or_covered_scan_releases_only_local_pending_state(self) -> None:
+        """Scan completion cannot erase its local error or repopulate a privacy cover."""
+        self.gui.client = None
+        with patch.object(
+            HeadsetAudio, 'endpoints', side_effect=RuntimeError('synthetic')
+        ):
+            self.assertTrue(self.routes.scan())
+            assert self.gui._worker is not None
+            self.gui._worker.join(3)
+            self.gui.poll()
+        self.assertFalse(self.routes.scanning)
+        self.assertIn('could not', self.routes.status)
+        previous = self.routes.endpoints
+        self.routes.scanning = True
+        self.gui.state.covered = True
+        self.assertTrue(
+            self.routes.install(Update(0, 'audio-routes', audio_endpoints=()))
+        )
+        self.assertEqual(self.routes.endpoints, previous)
+        self.routes.install(Update(0, 'audio-scan'))
+        self.assertFalse(self.routes.scanning)
+        generation = self.gui.state.generation
+        self.gui.close()
+        current = self.gui.voice.routes
+        self.assertFalse(current.scanning)
+        self.gui.mailbox.put(
+            Update(generation, 'audio-routes', audio_endpoints=previous)
+        )
+        self.gui.mailbox.put(Update(generation, 'audio-scan'))
+        self.gui.poll()
+        self.assertEqual(current.endpoints, ())
 
     def test_microphone_and_speaker_choices_admit_call_without_confirmation(
         self,

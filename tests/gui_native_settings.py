@@ -28,6 +28,8 @@ from metor.ui.gui.views.settings.editor import SettingEditor
 from metor.ui.gui.widgets import Action, Label, SettingRow
 from metor.ui.gui.widgets.sheet import ActionSheet
 from metor.ui.gui.widgets.keyboard import KeyboardKey
+from gui_native_security import exercise_unlock_modal
+from gui_native_settings_interactions import exercise_settings_interactions
 
 
 def exercise_settings_loading(app: MetorApp, complete: Callable[[], None]) -> None:
@@ -175,7 +177,11 @@ def exercise_settings_loading(app: MetorApp, complete: Callable[[], None]) -> No
             widget for widget in shell._detail.walk() if isinstance(widget, ScrollView)
         )
         assert timeout.focus and '120 s' in timeout.accessible_name
-        assert abs(scroll.scroll_y - 0.4) < 0.001
+        assert abs(scroll.scroll_y - 0.4) < 0.001, (
+            scroll.scroll_y,
+            scroll.height,
+            scroll.children[0].height,
+        )
         unlock = next(
             row
             for row in shell.walk()
@@ -200,7 +206,9 @@ def exercise_settings_loading(app: MetorApp, complete: Callable[[], None]) -> No
         if unlock.width <= dp(320) and Metrics.fontscale >= 1.5:
             assert abs(value.x - scope.x) <= dp(1) and value.top <= scope.y
         timeout.focus = False
-        complete()
+        exercise_unlock_modal(
+            app, lambda: exercise_settings_interactions(app, complete)
+        )
 
     Clock.schedule_once(ready, 0)
 

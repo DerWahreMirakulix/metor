@@ -27,6 +27,8 @@ class AudioRoutes:
         self.input: int | None = None
         self.output: int | None = None
         self.scanned = False
+        self.scanning = False
+        self.status = ''
 
     @property
     def available(self) -> bool:
@@ -43,7 +45,12 @@ class AudioRoutes:
             bool: Whether the bounded scan operation was admitted.
         """
         controller = self.voice.controller
-        if not self.available or controller.state.covered or self.blocked:
+        if (
+            not self.available
+            or controller.state.covered
+            or self.blocked
+            or self.scanning
+        ):
             return False
         generation = controller.state.generation
 
@@ -68,7 +75,12 @@ class AudioRoutes:
             )
             return None
 
-        return controller.submit('audio-scan', probe)
+        if not controller.submit('audio-scan', probe, background=True):
+            self.status = 'Another operation is still running. Try refreshing again.'
+            return False
+        self.scanning = True
+        self.status = ''
+        return True
 
     @property
     def blocked(self) -> bool:
@@ -92,7 +104,12 @@ class AudioRoutes:
             bool: Whether the idle route was installed; playback needs only output.
         """
         controller = self.voice.controller
-        if not self.available or controller.state.covered or self.blocked:
+        if (
+            not self.available
+            or controller.state.covered
+            or self.blocked
+            or self.scanning
+        ):
             return False
         valid = any(
             item.index == endpoint
@@ -123,9 +140,16 @@ class AudioRoutes:
         Returns:
             bool: Whether the result belongs to route selection.
         """
+        if update.operation == 'audio-scan':
+            self.scanning = False
+            if update.status:
+                self.status = 'Audio devices could not be read. Try refreshing again.'
+            return True
         if update.audio_endpoints is None:
             return False
+        if self.voice.controller.state.covered:
+            return True
         self.endpoints = update.audio_endpoints
         self.scanned = True
-        self.voice.controller.state.status = update.status
+        self.status = update.status
         return True

@@ -10,6 +10,7 @@ from kivy.metrics import dp
 from kivy.uix.behaviors import ButtonBehavior, FocusBehavior
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.label import Label as KivyLabel
+from kivy.uix.modalview import ModalView
 from kivy.uix.scrollview import ScrollView
 
 from metor.ui.gui.constants import Geometry
@@ -208,7 +209,10 @@ class Action(FocusBehavior, ButtonBehavior, Panel):  # pyright: ignore[reportInc
             minimum_height=self._measure,
         )
         self._feedback()
-        Window.bind(mouse_pos=self._pointer)
+        Window.bind(
+            mouse_pos=self._pointer,
+            children=self._refresh_pointer,
+        )
 
     @property
     def accessible_name(self) -> str:
@@ -254,15 +258,27 @@ class Action(FocusBehavior, ButtonBehavior, Panel):  # pyright: ignore[reportInc
             *self.to_widget(*position, relative=False)
         ):
             return False
+        modal = next(
+            (child for child in Window.children if isinstance(child, ModalView)), None
+        )
+        layer = self
         ancestor = self.parent
         while ancestor is not None and ancestor is not Window:
+            layer = ancestor
             if isinstance(ancestor, ScrollView):
                 left, bottom = ancestor.to_window(ancestor.x, ancestor.y)
                 right, top = ancestor.to_window(ancestor.right, ancestor.top)
                 if not (left <= position[0] <= right and bottom <= position[1] <= top):
                     return False
             ancestor = ancestor.parent
-        return True
+        return (
+            modal is None
+            or layer in Window.children[: Window.children.index(modal) + 1]
+        )
+
+    def _refresh_pointer(self, *_args: object) -> None:
+        """Rechecks stationary hover when the native window's modal layer changes."""
+        self._pointer(Window, Window.mouse_pos)
 
     def on_touch_down(  # pyright: ignore[reportIncompatibleMethodOverride]
         self, touch: MotionEvent

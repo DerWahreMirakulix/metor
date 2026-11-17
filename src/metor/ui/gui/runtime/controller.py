@@ -717,6 +717,7 @@ class GuiController:
             changed = True
         if self._operations.foreground_pending(self.state.generation):
             self.state.busy = True
+        changed = self.security.update_retry() or changed
         self.security.poll()
         # Exact uncertain-action readbacks precede general projection refreshes.
         # Continuous state notifications must not prevent their confirmation.

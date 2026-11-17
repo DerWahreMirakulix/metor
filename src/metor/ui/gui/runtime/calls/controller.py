@@ -77,6 +77,15 @@ class CallActions:
             self.revision += 1
 
     @property
+    def supported(self) -> bool:
+        """Requires advertised duplex, exact-owner and transport-lease guarantees."""
+        return {
+            'calls_pcm_duplex',
+            'call_exact_owner',
+            'call_transport_lease',
+        } <= self.controller.state.capabilities
+
+    @property
     def active(self) -> bool:
         """Reports accepted same-client authority independently of native startup."""
         return bool(
@@ -127,11 +136,7 @@ class CallActions:
             return False
         if self._handover.pending is not None:
             return False
-        if (
-            controller.simulator
-            or controller.client is None
-            or 'calls' not in controller.state.capabilities
-        ):
+        if controller.simulator or controller.client is None or not self.supported:
             self.status = 'Calls are unavailable'
             self.visible = True
             self.revision += 1
@@ -408,7 +413,7 @@ class CallActions:
             client is not None
             and self._handover.pending is None
             and not self._end_reconciliation.pending
-            and 'calls' in controller.state.capabilities
+            and self.supported
             and not self._snapshot_pending
             and now - self._snapshot_at >= GuiLimits.CALL_SNAPSHOT_SECONDS
             and controller.submit('call-snapshot', client.get_calls, background=True)

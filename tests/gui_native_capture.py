@@ -50,6 +50,7 @@ from gui_native_purge import configure_purge
 from gui_native_render import capture_viewport
 from gui_native_responsive import exercise_responsive
 from gui_native_root import exercise_root_navigation, exercise_root_refresh
+from gui_native_security import exercise_lock_feedback
 from gui_native_settings import (
     exercise_setting_editor,
     exercise_setting_keyboard,
@@ -1047,6 +1048,11 @@ def main() -> None:
                 exercise_timeline(app)
                 exercise_root_pages(app)
                 native_probes_done = True
+                if args.view == 'lock':
+                    exercise_lock_feedback(
+                        app, args.output, lambda: Clock.schedule_once(capture, 0.3)
+                    )
+                    return
                 if args.view == 'root_load':
                     exercise_native_load(
                         app,
@@ -1247,12 +1253,16 @@ def main() -> None:
             args.window_output = None
         if args.view == 'confirmation' and not confirmation_checked:
             sheet = ActionSheet.current
-            assert sheet is not None and sheet.cancel.focus
+            assert sheet is not None and not sheet.cancel.focus
             assert abs(sheet.center_y - Window.center[1]) < dp(1)
             assert sheet.height <= Window.height - dp(48)
             if args.font_scale >= 1.5:
                 assert sheet.actions.orientation == 'vertical'
                 assert sheet.actions.children[0] is sheet.cancel
+            Window.dispatch('on_key_down', 13, 40, '\r', [])
+            Window.dispatch('on_key_up', 13, 40)
+            assert ActionSheet.current is sheet and not confirmed_actions
+            sheet.cancel.focus = True
             Window.dispatch('on_key_down', 13, 40, '\r', [])
             Window.dispatch('on_key_up', 13, 40)
             assert ActionSheet.current is None and not confirmed_actions

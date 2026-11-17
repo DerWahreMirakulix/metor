@@ -23,6 +23,9 @@ runs:
         xvfb-run -a --server-args='-screen 0 1280x1024x24' python tests/gui_native_capture.py --view root_refresh --width 360 --height 640 --font-scale 1.5 --output "${RUNNER_TEMP}/root-refresh.png" > "${RUNNER_TEMP}/root-refresh.log" 2>&1
         xvfb-run -a --server-args='-screen 0 1280x1024x24' python tests/gui_native_capture.py --view root_refresh --width 360 --height 640 --font-scale 2 --output "${RUNNER_TEMP}/root-refresh-200.png" > "${RUNNER_TEMP}/root-refresh-200.log" 2>&1
         xvfb-run -a --server-args='-screen 0 1280x1024x24' python tests/gui_native_capture.py --view setting_keyboard --width 360 --height 640 --font-scale 1.5 --output "${RUNNER_TEMP}/setting-keyboard.png" > "${RUNNER_TEMP}/setting-keyboard.log" 2>&1
+        xvfb-run -a --server-args='-screen 0 1280x1024x24' python tests/gui_native_capture.py --view settings --width 360 --height 640 --font-scale 1.5 --output "${RUNNER_TEMP}/settings.png" > "${RUNNER_TEMP}/settings.log" 2>&1
+        xvfb-run -a --server-args='-screen 0 1920x1080x24' python tests/gui_native_capture.py --view settings --width 1800 --height 960 --font-scale 1.5 --output "${RUNNER_TEMP}/settings-wide.png" > "${RUNNER_TEMP}/settings-wide.log" 2>&1
+        xvfb-run -a --server-args='-screen 0 1280x1024x24' python tests/gui_native_capture.py --view lock --width 360 --height 640 --font-scale 1.5 --output "${RUNNER_TEMP}/lock.png" > "${RUNNER_TEMP}/lock.log" 2>&1
         xvfb-run -a --server-args='-screen 0 1280x1024x24' python tests/gui_native_capture.py --view qr --width 1180 --height 760 --font-scale 1.5 --output "${RUNNER_TEMP}/qr-wide.png" > "${RUNNER_TEMP}/qr-wide.log" 2>&1
         xvfb-run -a --server-args='-screen 0 1280x1024x24' python tests/gui_native_dpi.py --output "${RUNNER_TEMP}/dpi-reflow.png" > "${RUNNER_TEMP}/dpi-reflow.log" 2>&1
         xvfb-run -a --server-args='-screen 0 1280x1024x24' python tests/gui_native_presentation.py --output "${RUNNER_TEMP}/gui-presentation.png" > "${RUNNER_TEMP}/gui-presentation.log" 2>&1
@@ -69,6 +72,12 @@ runs:
           ${{ runner.temp }}/root-refresh-200.png
           ${{ runner.temp }}/root-refresh-200.log
           ${{ runner.temp }}/setting-keyboard.png
+          ${{ runner.temp }}/settings.png
+          ${{ runner.temp }}/settings.log
+          ${{ runner.temp }}/settings-wide.png
+          ${{ runner.temp }}/settings-wide.log
+          ${{ runner.temp }}/lock*.png
+          ${{ runner.temp }}/lock.log
           ${{ runner.temp }}/qr-wide.png
           ${{ runner.temp }}/dpi-reflow.png
           ${{ runner.temp }}/root-refresh.log

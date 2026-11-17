@@ -79,6 +79,8 @@ def _revision(controller: GuiController) -> tuple[object, ...]:
     return (
         controller.state.busy,
         voice.routes.scanned,
+        voice.routes.scanning,
+        voice.routes.status,
         voice.routes.endpoints,
         voice.routes.input,
         voice.routes.output,
@@ -142,7 +144,7 @@ def _choose_endpoint(
                     item.name if advanced else group.name,
                     partial(select, item.index),
                     surface='liveSurface' if item.index == selected else 'raised',
-                    disabled=bool(error) or routes.blocked,
+                    disabled=bool(error) or routes.blocked or routes.scanning,
                 )
                 body.add_widget(action)
                 if error:
@@ -232,9 +234,13 @@ def audio_routes_body(
 
     body.add_widget(
         Action(
-            'Refresh audio devices' if routes.scanned else 'Find audio devices',
+            'Finding audio devices…'
+            if routes.scanning
+            else 'Refresh audio devices'
+            if routes.scanned
+            else 'Find audio devices',
             scan,
-            disabled=blocked or controller.state.busy,
+            disabled=blocked or controller.state.busy or routes.scanning,
         )
     )
     for microphone, heading, selected in (
@@ -262,10 +268,12 @@ def audio_routes_body(
             Action(
                 'Choose microphone' if microphone else 'Choose audio output',
                 partial(_choose_endpoint, controller, refresh, microphone=microphone),
-                disabled=blocked or not endpoints,
+                disabled=blocked or routes.scanning or not endpoints,
             )
         )
-    if routes.scanned and not routes.endpoints:
+    if routes.status:
+        body.add_widget(Label(routes.status, role='support'))
+    elif routes.scanned and not routes.endpoints:
         body.add_widget(
             Label(
                 'No audio devices found. Connect a device and refresh.', role='support'

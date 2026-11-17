@@ -43,7 +43,9 @@ class CallHandoverTests(unittest.TestCase):
         )
         self.gui.simulator = False
         self.gui.state.covered = False
-        self.gui.state.capabilities = frozenset({'calls'})
+        self.gui.state.capabilities = frozenset(
+            {'calls_pcm_duplex', 'call_exact_owner', 'call_transport_lease'}
+        )
         self.source, self.target = _onion(1), _onion(2)
         self.gui.state.route = Route('V08', self.source)
         self.gui.state.snapshot = RuntimeSnapshotEvent(
@@ -455,7 +457,9 @@ class CallHandoverIpcTests(unittest.TestCase):
         gui.simulator = False
         gui.client = h.sender.client
         gui.state.covered = False
-        gui.state.capabilities = frozenset({'calls'})
+        gui.state.capabilities = frozenset(
+            {'calls_pcm_duplex', 'call_exact_owner', 'call_transport_lease'}
+        )
         gui.state.snapshot = snapshot
         gui.voice.configure(HeadsetAudio(1, 2), headset_confirmed=True)
         gui.voice.routes.input, gui.voice.routes.output = 1, 2
@@ -518,7 +522,9 @@ class CallHandoverIpcTests(unittest.TestCase):
         gui.simulator = False
         gui.client = h.sender.client
         gui.state.covered = False
-        gui.state.capabilities = frozenset({'calls'})
+        gui.state.capabilities = frozenset(
+            {'calls_pcm_duplex', 'call_exact_owner', 'call_transport_lease'}
+        )
         gui.state.snapshot = snapshot
         gui.state.route = Route('V08', h.receiver.onion)
         gui.voice.configure(HeadsetAudio(1, 2), headset_confirmed=True)

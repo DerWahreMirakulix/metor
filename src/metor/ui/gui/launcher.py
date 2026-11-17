@@ -47,6 +47,7 @@ class GuiEntry:
         os.environ['KIVY_NO_CONFIG'] = '1'
         os.environ['KIVY_NO_CONSOLELOG'] = '1'
         os.environ['KIVY_LOG_MODE'] = 'PYTHON'
+        os.environ['SDL_MOUSE_FOCUS_CLICKTHROUGH'] = '1'
         toolkit_logger = logging.getLogger('kivy')
         toolkit_logger.addHandler(logging.NullHandler())
         toolkit_logger.propagate = False

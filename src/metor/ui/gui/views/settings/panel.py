@@ -22,6 +22,7 @@ from .timeout import TimeoutEditor
 from .privacy import notification_preference, profile_name_preference
 from .loading import show_initial_loading
 from ..profiles import request_exit
+from ..unlock_method import UnlockMethodSheet
 
 
 def settings_body(controller: GuiController, refresh: Callable[[], None]) -> BoxLayout:
@@ -147,7 +148,7 @@ def settings_body(controller: GuiController, refresh: Callable[[], None]) -> Box
         Returns:
             None
         """
-        controller.navigate(Route('V04'))
+        UnlockMethodSheet(controller, refresh).show()
         refresh()
 
     body.add_widget(

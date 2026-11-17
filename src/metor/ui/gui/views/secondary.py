@@ -5,11 +5,12 @@ from collections.abc import Callable
 from kivy.metrics import dp
 from kivy.clock import Clock
 from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.anchorlayout import AnchorLayout
 from kivy.uix.scrollview import ScrollView
 
 from metor.core.api import Delivery
 from metor.ui.gui.runtime import GuiController
-from metor.ui.gui.constants import GuiLimits
+from metor.ui.gui.constants import Geometry, GuiLimits
 from metor.ui.gui.state import Route
 from metor.ui.gui.widgets import ActionRow, Label
 from metor.ui.gui.widgets.symbol import IconAction
@@ -20,14 +21,21 @@ from .contacts import contacts_body, ContactListView
 from .notifications import notification_center
 from .history import history_body, confirm_history_clear
 from .profiles import profiles_body
+from .secondary_pane import SecondaryPane
 
 
-def secondary_view(controller: GuiController, refresh: Callable[[], None]) -> BoxLayout:
+def secondary_view(
+    controller: GuiController,
+    refresh: Callable[[], None],
+    *,
+    content_width: int = Geometry.COMPACT_MAX,
+) -> BoxLayout:
     """Builds saved contacts and truthful unavailable integration surfaces.
 
     Args:
         controller: Public service controller.
         refresh: Native repaint callback.
+        content_width: Maximum readable card width inside the full detail viewport.
     Returns:
         BoxLayout: Foreground secondary panel.
     """
@@ -37,7 +45,9 @@ def secondary_view(controller: GuiController, refresh: Callable[[], None]) -> Bo
     if state.route.view == 'V16':
         return notification_center(controller, refresh)
     route = state.route
-    panel = BoxLayout(orientation='vertical', spacing=dp(16))
+    panel = SecondaryPane(
+        orientation='vertical', spacing=dp(16), padding=(0, dp(24), 0, dp(24))
+    )
     title = {
         'V11': 'New Drop' if route.delivery == Delivery.DROP else 'Start Live',
         'V12': 'Contacts',
@@ -92,9 +102,23 @@ def secondary_view(controller: GuiController, refresh: Callable[[], None]) -> Bo
                 or 'history_metadata_pages' not in state.capabilities,
             )
         )
-    panel.add_widget(header)
+    header_frame = AnchorLayout(
+        anchor_x='center', size_hint_y=None, height=header.height
+    )
+    header.bind(height=header_frame.setter('height'))
+    header.size_hint_x = None
+    header_frame.bind(
+        width=lambda _owner, width: setattr(
+            header,
+            'width',
+            min(max(0, width - dp(2 * Geometry.EDGE)), dp(content_width)),
+        )
+    )
+    header_frame.add_widget(header)
+    panel.add_widget(header_frame)
     # Wheel overscroll can leave footer actions clipped when rendering is slow.
     scroll = ScrollView(do_scroll_x=False, always_overscroll=False)
+    panel.scroll = scroll
     generation = state.generation
     remembered_scroll = state.secondary_scroll.get(route, 1.0)
 
@@ -154,6 +178,14 @@ def secondary_view(controller: GuiController, refresh: Callable[[], None]) -> Bo
 
         body.bind(minimum_height=fit_profiles)
         scroll.bind(height=fit_profiles)
+
+    def center_content(_owner: BoxLayout, width: float) -> None:
+        """Keep full-width wheel hit testing while constraining only the column."""
+        gutter = max(dp(Geometry.EDGE), (width - dp(content_width)) / 2)
+        body.padding = (gutter, 0, gutter, 0)
+
+    body.bind(width=center_content)
+    center_content(body, body.width)
     scroll.add_widget(body)
     panel.add_widget(scroll)
     if route.view in {'V11', 'V12', 'V13', 'V14', 'V15'}:

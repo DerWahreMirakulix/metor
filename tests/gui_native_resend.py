@@ -19,12 +19,14 @@ from kivy.config import Config
 Config.set('graphics', 'width', '360')
 Config.set('graphics', 'height', '664')
 
+from gui_native_render import capture_viewport
 from kivy.app import App
 from kivy.base import EventLoop
 from kivy.clock import Clock
 from kivy.core.window import Window
-from kivy.metrics import Metrics
 from kivy.input.providers.mouse import MouseMotionEvent
+from kivy.metrics import Metrics
+from kivy.uix.behaviors import FocusBehavior
 from kivy.uix.boxlayout import BoxLayout
 
 from metor.client import FrontendLaunchContext
@@ -39,11 +41,10 @@ from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.runtime.transcript import TranscriptItem
 from metor.ui.gui.state import Route
 from metor.ui.gui.views.actions.messages import message_menu
-from metor.ui.gui.views.shell import Shell
 from metor.ui.gui.views.peer.timeline import Timeline
+from metor.ui.gui.views.shell import Shell
 from metor.ui.gui.widgets import Action
 from metor.ui.gui.widgets.sheet import ActionSheet
-from gui_native_render import capture_viewport
 
 
 class ResendHarness(App):
@@ -100,10 +101,16 @@ class ResendHarness(App):
         self.timeline = Timeline(self.gui, self.gui.state.route, lambda: None)
         self.timeline.update(active=True)
         self.completed = False
+        self._seek_patch = None
         Clock.schedule_once(self.settle, 0)
         root = BoxLayout()
         root.add_widget(self.timeline)
         return root
+
+    def on_stop(self) -> None:
+        """Restores the local playback boundary even when a native assertion fails."""
+        if self._seek_patch is not None:
+            self._seek_patch.stop()
 
     def settle(self, _elapsed: float) -> None:
         """Waits a native frame after initial attachment before testing and capturing layout.
@@ -131,36 +138,64 @@ class ResendHarness(App):
                 for widget in row.walk()
             )
         row = self.timeline._widgets[(MessageDirectionCode.OUT, 'source')]
-        with patch.object(self.gui.playback, 'play', return_value=True) as play:
-            row.seek.focus = True
-            Window.dispatch('on_key_down', 275, 79, '', [])
-            Window.dispatch('on_key_up', 275, 79)
-            Window.dispatch('on_key_down', 13, 40, '\r', [])
-            Window.dispatch('on_key_up', 13, 40)
-            play.assert_called_once_with(self.target, offset=3200)
+        assert not row.seek.is_focusable
+        self._seek_patch = patch.object(self.gui.playback, 'play', return_value=True)
+        self.seek_play = self._seek_patch.start()
+        # Select the middle of the expected two-byte sample, avoiding boundary rounding.
+        point = row.seek.to_window(
+            row.seek.x + row.seek.width * (3201 / 64000), row.seek.center_y
+        )
+        touch = MouseMotionEvent(
+            'mouse',
+            'waveform-seek',
+            (point[0] / (Window.width - 1), point[1] / (Window.height - 1), 'left'),
+            is_touch=True,
+        )
+        touch.scale_for_screen(Window.width, Window.height)
+        EventLoop.post_dispatch_input('begin', touch)
+        EventLoop.post_dispatch_input('end', touch)
+        Clock.schedule_once(self.seek_finished, 0.3)
+
+    def seek_finished(self, _elapsed: float) -> None:
+        """Checks one pointer seek after native scroll arbitration, then opens the menu."""
+        self.seek_play.assert_called_once_with(self.target, offset=3200)
+        self._seek_patch.stop()
+        self._seek_patch = None
+        row = self.timeline._widgets[(MessageDirectionCode.OUT, 'source')]
         assert row.seek.height >= 48
         assert row.seek.right <= row.right and row.seek.x >= row.play.right
         with patch.object(self.gui.playback, 'play', return_value=True) as play:
-            for control in (
-                row.seek,
-                row.play,
-                self.timeline._widgets[
-                    (MessageDirectionCode.OUT, 'text-source')
-                ]._bubble,
-            ):
-                control.focus = True
-                Window.dispatch('on_key_down', 291, 67, '', ['shift'])
-                Window.dispatch('on_key_down', 291, 67, '', ['shift'])
-                Window.dispatch('on_key_up', 291, 67)
-                assert ActionSheet.current is not None
-                assert self.action().label.text == 'Resend as Drop'
-                ActionSheet.current.dismiss(animation=False)
+            row.play.focus = True
+            Window.dispatch('on_key_down', 291, 67, '', ['shift'])
+            Window.dispatch('on_key_down', 291, 67, '', ['shift'])
+            Window.dispatch('on_key_up', 291, 67)
+            assert ActionSheet.current is not None
+            assert self.action().label.text == 'Resend as Drop'
+            ActionSheet.current.dismiss(animation=False)
+            text_row = self.timeline._widgets[(MessageDirectionCode.OUT, 'text-source')]
+            assert not text_row._bubble.is_focusable
+            text_more = next(
+                item
+                for item in text_row.walk()
+                if isinstance(item, Action)
+                and item.is_focusable
+                and item.accessible_name == 'Message actions'
+            )
+            text_more.focus = True
+            assert text_more.focus, 'Text More did not receive focus'
+            Window.dispatch('on_key_down', 13, 40, '\r', [])
+            assert text_more._keyboard_armed, 'Text More did not receive Enter'
+            Window.dispatch('on_key_up', 13, 40)
+            assert ActionSheet.current is not None
+            assert self.action().label.text == 'Resend as Drop'
+            ActionSheet.current.dismiss(animation=False)
+            point = row.seek.to_window(*row.seek.center)
             touch = MouseMotionEvent(
                 'mouse',
                 'waveform-context',
                 (
-                    row.seek.center_x / Window.width,
-                    row.seek.center_y / Window.height,
+                    point[0] / (Window.width - 1),
+                    point[1] / (Window.height - 1),
                     'right',
                 ),
                 is_touch=True,
@@ -208,11 +243,23 @@ class ResendHarness(App):
         Returns:
             None
         """
-        assert ActionSheet.current.cancel.focus
+        sheet = ActionSheet.current
+        assert not any(
+            isinstance(widget, FocusBehavior) and widget.focus
+            for widget in sheet.walk()
+        )
+        Window.dispatch('on_key_down', 9, 0, '', [])
+        Window.dispatch('on_key_up', 9, 0)
+        assert sheet.close_action.focus
         action = self.action()
         assert not action.disabled
         with patch.object(self.gui.resend, 'start', return_value=True) as start:
-            action.focus = True
+            for _ in tuple(sheet.walk()):
+                if action.focus:
+                    break
+                Window.dispatch('on_key_down', 9, 0, '', [])
+                Window.dispatch('on_key_up', 9, 0)
+            assert action.focus
             Window.dispatch('on_key_down', 13, 40, '\r', [])
             Window.dispatch('on_key_down', 13, 40, '\r', [])
             Window.dispatch('on_key_up', 13, 40)
@@ -292,8 +339,9 @@ def main() -> None:
                 'received_live_no_resend': 'pass',
                 'same_count_root_invalidation': 'pass',
                 'delivered_voice_and_text_timeline_more': 'pass',
-                'native_keyboard_seek_exact_pcm_boundary': 'pass',
-                'text_play_waveform_context_keyboard': 'pass',
+                'native_pointer_seek_exact_pcm_boundary': 'pass',
+                'text_play_context_keyboard': 'pass',
+                'unfocused_resend_menu_tab_entry': 'pass',
                 'waveform_right_click_never_plays': 'pass',
             },
             indent=2,

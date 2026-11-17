@@ -60,7 +60,7 @@ def exercise_profile_editor(app: MetorApp, complete: Callable[[], None]) -> None
         Returns:
             None
         """
-        assert sheet.cancel.focus
+        assert not sheet.cancel.focus
         assert not sheet.scroll.do_scroll_y
         sheet.name.text = 'Travel_2026'
         sheet.name.focus = True
@@ -154,7 +154,7 @@ def exercise_profile_address(app: MetorApp, complete: Callable[[], None]) -> Non
         Returns:
             None
         """
-        assert sheet.cancel.focus
+        assert not sheet.cancel.focus
         sheet.current_password.text = 'synthetic-full-password'
         primary = next(
             item

@@ -25,6 +25,7 @@ from kivy.uix.floatlayout import FloatLayout
 from gui_native_action_lifetime import (
     verify_clipped_action_hover,
     verify_detached_action_input,
+    verify_modal_input,
 )
 from metor.ui.gui.widgets.context import ContextAction
 from metor.ui.gui.widgets import Action, TextField
@@ -294,6 +295,11 @@ class GestureHarness(App):
         self.gui.state.covered = False
         self.gui.client = Mock()
         self.gui.submit = Mock(return_value=True)
+        verify_modal_input(self.panel, self.gui, self.live_invitation)
+
+    def live_invitation(self) -> None:
+        """Starts invitation checks after native modal ownership has been exercised."""
+        self.field.focus = True
         self.gui.live_invitations.observe(
             IncomingConnectionEvent('Peer', 'peer', 'exact-call')
         )
@@ -537,6 +543,12 @@ def main() -> None:
                 'detached_ancestor_pointer_release_cancelled': 'pass',
                 'reattached_ancestor_fresh_actions': 'pass',
                 'clipped_scrolling_action_has_no_hover': 'pass',
+                'modal_background_hover_and_activation_blocked': 'pass',
+                'modal_opens_without_focused_action': 'pass',
+                'modal_tab_and_reverse_tab_after_empty_click': 'pass',
+                'modal_invoker_focus_restored': 'pass',
+                'modal_outside_wheel_preserves_input_and_background': 'pass',
+                'modal_inside_wheel_scrolls_content': 'pass',
                 'tooltip_revalidates_scrolling_viewport': 'pass',
                 'context_free_reattach_and_stale_release': 'pass',
                 'reattached_first_click': 'pass',

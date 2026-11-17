@@ -16,6 +16,8 @@ from metor.core.api import (
     ConfigListDataEvent,
     SetConfigCommand,
     ConfigUpdatedEvent,
+    InitCommand,
+    InitEvent,
     IpcEvent,
     InvalidConfigKeyEvent,
     BeginVoiceCommand,
@@ -29,10 +31,38 @@ from metor.data import SettingKey, Settings
 from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.state import Route
 from metor.ui.gui.state.mailbox import Update
+from metor.versioning import IPC_PROTOCOL_VERSION, IPC_PROTOCOL_MIN_SUPPORTED
 
 
 class SettingsCoreTests(unittest.TestCase):
     """Verifies stale native-form intent through two actual encrypted Core clients."""
+
+    def test_actual_core_advertises_required_call_features_and_protects_setting(
+        self,
+    ) -> None:
+        """Core handshake capabilities enable the GUI policy without needing audio devices."""
+        h = support.GuiProducerTests()
+        h.setUp()
+        self.addCleanup(h.doCleanups)
+        gui = GuiController(FrontendLaunchContext('voice-owned', Mock()))
+        self.addCleanup(gui.close)
+        event = h.client.request(
+            InitCommand(IPC_PROTOCOL_VERSION, IPC_PROTOCOL_MIN_SUPPORTED), InitEvent
+        )
+        gui.state.capabilities = frozenset(event.capabilities)
+        self.assertTrue(gui.calls.supported)
+        displayed = h.client.request(GetGuiPreferencesCommand(), GuiPreferencesEvent)
+        saved = h.client.request(
+            SetGuiPreferencesCommand(
+                displayed.preferences_revision,
+                replace(displayed.preferences, accept_calls_locked=True),
+            ),
+            GuiPreferencesEvent,
+        )
+        self.assertTrue(saved.preferences.accept_calls_locked)
+        for feature in ('calls_pcm_duplex', 'call_exact_owner', 'call_transport_lease'):
+            gui.state.capabilities = frozenset(event.capabilities) - {feature}
+            self.assertFalse(gui.calls.supported)
 
     def test_descriptor_retry_clears_initial_read_error(self) -> None:
         """A successful explicit retry replaces the failed initial read outcome."""

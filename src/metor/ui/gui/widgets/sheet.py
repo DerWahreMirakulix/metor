@@ -3,10 +3,11 @@
 from collections.abc import Callable
 from typing import ClassVar
 
-from kivy.clock import Clock
 from kivy.core.text import Label as TextMeasure
 from kivy.core.window import Window
+from kivy.input.motionevent import MotionEvent
 from kivy.metrics import dp
+from kivy.uix.behaviors import FocusBehavior
 from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.modalview import ModalView
 from kivy.uix.scrollview import ScrollView
@@ -86,6 +87,7 @@ class ActionSheet(ModalView):
         self._snapshot = id(controller.state.snapshot)
         self._busy = controller.state.busy
         self._disposed = False
+        self._return_focus: FocusBehavior | None = None
         self.body = Panel(orientation='vertical', padding='24dp', spacing='16dp')
         self.add_widget(self.body)
         header = ActionRow(spacing='12dp')
@@ -260,7 +262,7 @@ class ActionSheet(ModalView):
         self._resize()
 
     def show(self) -> None:
-        """Opens under current authorization and initially focuses safe dismissal.
+        """Opens under current authorization without selecting or arming an action.
 
         Args:
             None
@@ -273,24 +275,43 @@ class ActionSheet(ModalView):
         if ActionSheet.current is not None:
             ActionSheet.current.dismiss(animation=False)
         if not self.controller.state.covered and not self._disposed:
+            for root in Window.children:
+                for widget in root.walk():
+                    if isinstance(widget, FocusBehavior) and widget.focus:
+                        self._return_focus = widget
+                        widget.focus = False
             ActionSheet.current = self
             self.open(animation=False)
-            Clock.schedule_once(self._focus_cancel, 0)
+            Window.bind(on_key_down=self._begin_focus)
 
-    def _focus_cancel(self, _elapsed: float) -> None:
-        """Prevents opening a destructive confirmation from implicitly arming its operation.
-
-        Args:
-            _elapsed: Native scheduler interval.
-        Returns:
-            None
-        """
-        if ActionSheet.current is self and not any(
-            bool(getattr(widget, 'focus', False))
-            for widget in self.body.walk()
-            if widget is not self.cancel
+    def _begin_focus(
+        self,
+        _window: object,
+        key: int,
+        _scan: int | None = None,
+        _text: str | None = None,
+        modifiers: list[str] | None = None,
+    ) -> bool:
+        """Starts native traversal after opening or an empty-space click clears focus."""
+        if (
+            ActionSheet.current is not self
+            or key != 9
+            or set(modifiers or ()) - {'shift'}
         ):
-            self.cancel.focus = True
+            return False
+        choices = [
+            widget
+            for widget in self.walk()
+            if isinstance(widget, FocusBehavior)
+            and widget.is_focusable
+            and not widget.disabled
+        ]
+        if any(widget.focus for widget in choices):
+            return False
+        if choices:
+            choices[-1 if 'shift' in (modifiers or ()) else 0].focus = True
+            self.controller.security.activity()
+        return True
 
     def dismiss(self, *args: object, **kwargs: object) -> None:
         """Closes immediately so the next visible control can receive input.
@@ -304,6 +325,23 @@ class ActionSheet(ModalView):
         kwargs['animation'] = False
         super().dismiss(*args, **kwargs)
 
+    def on_touch_up(self, touch: MotionEvent) -> bool:
+        """Keeps outside dismissal from clearing the restored keyboard invoker."""
+        if touch.is_mouse_scrolling and (
+            self in touch.ud or not self.collide_point(*touch.pos)
+        ):
+            return True
+        if self.auto_dismiss and self._touch_started_inside is False:
+            FocusBehavior.ignored_touch.append(touch)
+        return bool(super().on_touch_up(touch))
+
+    def on_touch_down(self, touch: MotionEvent) -> bool:
+        """Consumes wheel input over the veil without starting an outside dismissal."""
+        if touch.is_mouse_scrolling and not self.collide_point(*touch.pos):
+            touch.ud[self] = True
+            return True
+        return bool(super().on_touch_down(touch))
+
     def _dismissed(self, *_args: object) -> None:
         """Releases old labels and the global modal reference immediately.
 
@@ -313,7 +351,7 @@ class ActionSheet(ModalView):
             None
         """
         self._disposed = True
-        Window.unbind(size=self._resize)
+        Window.unbind(size=self._resize, on_key_down=self._begin_focus)
         if self.footer is not None:
             self.footer.unbind(height=self._resize)
         self._revoke_widgets(self.body)
@@ -323,6 +361,16 @@ class ActionSheet(ModalView):
         self.body.clear_widgets()
         if ActionSheet.current is self:
             ActionSheet.current = None
+        invoker, self._return_focus = self._return_focus, None
+        if (
+            invoker is not None
+            and not self.controller.state.covered
+            and self.controller.state.generation == self._generation
+            and invoker.get_root_window() is not None
+            and invoker.is_focusable
+            and not invoker.disabled
+        ):
+            invoker.focus = True
 
     @classmethod
     def reconcile(cls) -> None:
@@ -358,8 +406,6 @@ class ActionSheet(ModalView):
                 sheet.primary_action.cancel_input()
             if sheet.rebuild_on_snapshot:
                 sheet._build()
-                if not sheet.close_action.focus:
-                    sheet.cancel.focus = True
 
     def _update_invitation_indicator(self) -> None:
         """Makes incoming activity reachable above the native modal without stealing focus.
@@ -395,7 +441,7 @@ def confirm(
     explanation: str,
     action: Callable[[], object],
 ) -> None:
-    """Presents a concrete local destructive action with a safely focused Cancel.
+    """Presents a concrete local destructive action requiring deliberate activation.
 
     Args:
         controller: Current authorization owner.

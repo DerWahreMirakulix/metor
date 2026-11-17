@@ -101,8 +101,7 @@ def contact_sheet(
             Action(
                 call_label,
                 call,
-                disabled=controller.state.busy
-                or 'calls' not in controller.state.capabilities,
+                disabled=controller.state.busy or not controller.calls.supported,
             )
         )
 

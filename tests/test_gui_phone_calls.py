@@ -36,7 +36,9 @@ class PhonePresentationTests(unittest.TestCase):
         self.gui.simulator = False
         self.gui.state.covered = False
         self.gui.state.route = Route('V08', 'bob')
-        self.gui.state.capabilities = frozenset({'calls'})
+        self.gui.state.capabilities = frozenset(
+            {'calls_pcm_duplex', 'call_exact_owner', 'call_transport_lease'}
+        )
         self.gui.client = Mock()
         self.gui.voice.configure(HeadsetAudio(1, 2), headset_confirmed=True)
         self.gui.voice.routes.input = 1

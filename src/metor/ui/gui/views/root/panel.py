@@ -90,7 +90,7 @@ class RootPanel(BoxLayout):
         def position_indicator(*_args: object) -> None:
             """Keep the current mode identifiable by shape as well as its accent."""
             indicator.pos = (
-                current_tab.center_x - indicator.size[0] / 2,
+                current_tab.x + (current_tab.width - indicator.size[0]) / 2,
                 current_tab.y + dp(4),
             )
 

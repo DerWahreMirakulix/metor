@@ -1,14 +1,135 @@
 """Native input regression for actions whose containing route leaves the window."""
 
+from collections.abc import Callable
+
 from kivy.base import EventLoop
+from kivy.clock import Clock
 from kivy.core.window import Window
 from kivy.input.providers.mouse import MouseMotionEvent
 from kivy.metrics import dp
+from kivy.uix.behaviors import FocusBehavior
+from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.floatlayout import FloatLayout
 from kivy.uix.scrollview import ScrollView
 
-from metor.ui.gui.widgets import Action
+from metor.ui.gui.runtime import GuiController
+from metor.ui.gui.widgets import Action, TextField
+from metor.ui.gui.widgets.sheet import ActionSheet
 from metor.ui.gui.widgets.symbol import IconAction
+
+
+def verify_modal_input(
+    panel: FloatLayout, controller: GuiController, complete: Callable[[], None]
+) -> None:
+    """Checks native modal hover, idle keyboard entry and safe invoker restoration."""
+    calls: list[str] = []
+    backdrop = ScrollView(do_scroll_x=False)
+    backdrop.add_widget(FloatLayout(size_hint_y=None, height=dp(2000)))
+    panel.add_widget(backdrop, index=len(panel.children))
+    background = IconAction(
+        'ellipsis',
+        'Background action',
+        lambda: calls.append('background'),
+        pos=(dp(10), dp(10)),
+    )
+    panel.add_widget(background)
+    background.focus = True
+    Window.mouse_pos = background.to_window(*background.center)
+    assert background._hovered
+    field = TextField(multiline=False)
+    inside_scroll = ScrollView(do_scroll_x=False, size_hint_y=None, height=dp(120))
+    inside_scroll.add_widget(FloatLayout(size_hint_y=None, height=dp(1000)))
+
+    def build(body: BoxLayout) -> None:
+        """Adds a field and a native scrolling surface to exercise wheel ownership."""
+        body.add_widget(field)
+        body.add_widget(inside_scroll)
+
+    sheet = ActionSheet(
+        controller,
+        build,
+        title='Modal keyboard ownership',
+        primary=('Commit', lambda: calls.append('commit')),
+        rebuild_on_snapshot=False,
+    )
+    sheet.show()
+
+    def key(code: int, shift: bool = False) -> None:
+        """Delivers a complete native key event through the window's normal bindings."""
+        Window.dispatch('on_key_down', code, 0, '', ['shift'] if shift else [])
+        Window.dispatch('on_key_up', code, 0)
+
+    def click(point: tuple[float, float], identity: str, button: str = 'left') -> None:
+        """Delivers a pointer press and release through the real event-loop dispatch."""
+        touch = MouseMotionEvent(
+            'mouse',
+            identity,
+            (point[0] / (Window.width - 1), point[1] / (Window.height - 1), button),
+            is_touch=True,
+        )
+        touch.scale_for_screen(Window.width, Window.height)
+        EventLoop.post_dispatch_input('begin', touch)
+        EventLoop.post_dispatch_input('end', touch)
+
+    def inspect(_elapsed: float) -> None:
+        """Exercises focus transitions once the actual modal geometry has settled."""
+        choices = [item for item in sheet.walk() if isinstance(item, FocusBehavior)]
+        assert not any(item.focus for item in choices) and not background.focus
+        assert not background._hovered and background.tooltip._pending is None
+        key(13)
+        assert not calls and ActionSheet.current is sheet
+        key(9)
+        assert choices[0].focus
+        for item in choices[1:] + choices[:1]:
+            key(9)
+            assert item.focus
+        key(9, shift=True)
+        assert choices[-1].focus
+        click((sheet.x + dp(2), sheet.center_y), 'empty-modal-space')
+        assert not any(item.focus for item in choices)
+        key(9, shift=True)
+        assert choices[-1].focus
+        click((sheet.x + dp(2), sheet.center_y), 'empty-modal-space-again')
+        key(9)
+        assert choices[0].focus
+        field.focus = True
+        Window.mouse_pos = sheet.close_action.to_window(*sheet.close_action.center)
+        assert sheet.close_action._hovered and not background._hovered
+        Window.mouse_pos = background.to_window(*background.center)
+        assert not background._hovered
+        field.text = 'Retain this modal input'
+        backdrop.scroll_y = inside_scroll.scroll_y = 0.5
+        for button in ('scrollup', 'scrolldown', 'scrollleft', 'scrollright'):
+            click((dp(4), dp(4)), 'outside-modal-' + button, button)
+            assert ActionSheet.current is sheet
+            assert field.text == 'Retain this modal input' and field.focus
+            assert backdrop.scroll_y == 0.5
+        click(
+            inside_scroll.to_window(*inside_scroll.center), 'inside-wheel', 'scrollup'
+        )
+        Clock.schedule_once(finish, 0.2)
+
+    def finish(_elapsed: float) -> None:
+        """Checks wheel scrolling remains local before deliberately dismissing by click."""
+        assert ActionSheet.current is sheet and backdrop.scroll_y == 0.5
+        assert inside_scroll.scroll_y != 0.5
+        assert field.text == 'Retain this modal input' and field.focus
+        click(Window.mouse_pos, 'outside-modal')
+        assert ActionSheet.current is None and background.focus
+        assert not calls and background._hovered
+        click(Window.mouse_pos, 'after-modal')
+        assert calls == ['background']
+        background.cancel_input()
+        background.tooltip.cancel()
+        pointer_sheet = ActionSheet(controller, lambda _body: None)
+        pointer_sheet.show()
+        pointer_sheet.dismiss()
+        assert not background.focus
+        panel.remove_widget(background)
+        panel.remove_widget(backdrop)
+        complete()
+
+    Clock.schedule_once(inspect, 0.2)
 
 
 def verify_detached_action_input(panel: FloatLayout) -> None:

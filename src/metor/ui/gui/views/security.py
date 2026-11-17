@@ -3,8 +3,8 @@
 from collections.abc import Callable
 
 from kivy.core.text import Label as TextMeasure
+from kivy.metrics import dp
 from kivy.uix.anchorlayout import AnchorLayout
-from kivy.uix.boxlayout import BoxLayout
 from kivy.uix.gridlayout import GridLayout
 
 from metor.core.api import ClientUnlockMethod, NotificationPrivacy, Delivery
@@ -14,6 +14,7 @@ from metor.ui.gui.widgets import Action, Label, SecretInput
 
 # Local Package Imports
 from .cover import PrivateForm
+from .unlock_method import build_unlock_methods
 
 
 class LockedActivity(Action):
@@ -47,6 +48,13 @@ class LockedActivity(Action):
         super().__init__('', activate)
         self.update()
 
+    def _measure(self, *_args: object) -> None:
+        """Exclude an absent activity cue from the private form's height."""
+        if self.opacity:
+            super()._measure(*_args)
+        else:
+            self.height = 0
+
     def update(self) -> None:
         """Repaints only permitted generic activity, preserving focused controls nearby.
 
@@ -64,7 +72,6 @@ class LockedActivity(Action):
         )
         self.opacity = 1 if visible else 0
         self.disabled = not visible
-        self.height = '48dp' if visible else 0
         activity = self.controller.notifications.locked_activity
         text = (
             'New Drop'
@@ -76,31 +83,49 @@ class LockedActivity(Action):
         self.label.text = self.accessible_name = (
             text + ' · Unlock to view' if visible else ''
         )
+        self._measure()
 
 
-def security_view(
-    controller: GuiController, refresh: Callable[[], None]
-) -> AnchorLayout:
-    """Uses a full opaque viewport with no contact-bearing master panel.
+class LockFeedback(Label):
+    """Reserve the ordinary failure message's measured space before the first attempt."""
 
-    Args:
-        controller: Active client authorization owner.
-        refresh: Native repaint request.
-    Returns:
-        AnchorLayout: Centered, measured private form.
-    """
-    outer = PrivateForm()
-    body = outer.body
-    state, security = controller.state, controller.security
-    if state.route.view == 'V05':
+    def _measure(self, *_args: object) -> None:
+        """Measure reserved feedback even while its native text texture is empty."""
+        super()._measure(*_args)
+        self._height()
+
+    def _height(self, *_args: object) -> None:
+        """Keep the centered form steady when empty or failed attempts report feedback."""
+        measured = TextMeasure(
+            text='Could not unlock. Try again.',
+            font_name=self.font_name,
+            font_size=self.font_size,
+            text_size=(self.width, None),
+        )
+        self.height = max(
+            dp(self._line_units), measured.render()[1], self.texture_size[1]
+        )
+
+
+class LockedView(PrivateForm):
+    """Retain masked input and layout while a challenge or cooldown updates."""
+
+    def __init__(self, controller: GuiController, refresh: Callable[[], None]) -> None:
+        """Build one cover for the current unlock method and generation."""
+        super().__init__()
+        self.controller = controller
+        state, security = controller.state, controller.security
+        self.identity = self.current_identity()
+        body = self.body
         body.add_widget(Label('Locked', role='title'))
-        body.add_widget(LockedActivity(controller, refresh))
+        self.activity = LockedActivity(controller, refresh)
+        body.add_widget(self.activity)
         if security.profile_label:
             body.add_widget(Label(security.profile_label, role='support'))
         restriction = security.restriction
         if restriction is not None:
             method = restriction.unlock_method
-            secret = SecretInput(
+            self.secret = secret = SecretInput(
                 accessible_name='PIN'
                 if method is ClientUnlockMethod.PIN
                 else 'Profile password'
@@ -126,6 +151,8 @@ def security_view(
                 Returns:
                     None
                 """
+                if state.busy or security.retry_seconds:
+                    return
                 value = secret.text
                 secret.text = ''
                 security.unlock(value)
@@ -174,7 +201,7 @@ def security_view(
                         press,
                         surface='drop' if key == 'Unlock' else 'raised',
                         tone='onAccent' if key == 'Unlock' else 'text',
-                        disabled=state.busy,
+                        disabled=state.busy or bool(security.retry_seconds),
                     )
                     button.padding = ('4dp', '8dp')
                     if key == 'Unlock':
@@ -205,7 +232,7 @@ def security_view(
                     Action(
                         'Forgot PIN?',
                         forgot_pin,
-                        disabled=state.busy,
+                        disabled=state.busy or bool(security.retry_seconds),
                     )
                 )
             else:
@@ -215,142 +242,65 @@ def security_view(
                         unlock,
                         surface='drop',
                         tone='onAccent',
-                        disabled=state.busy,
+                        disabled=state.busy or bool(security.retry_seconds),
                     )
                 )
-    else:
-        body.add_widget(Label('Secure Metor', role='title'))
-        body.add_widget(
-            Label(
-                'Choose how to unlock this application. Opening an encrypted profile still requires its password.',
-                tone='textSecondary',
-            )
+        self.feedback = LockFeedback('', role='support', tone='info')
+        self.body.add_widget(self.feedback)
+        self.update()
+
+    def current_identity(self) -> tuple[object, ...]:
+        """Separate method transitions and client generations from new challenges."""
+        security = self.controller.security
+        return (
+            self.controller.state.generation,
+            security.restriction.unlock_method if security.restriction else None,
+            security.profile_label,
         )
-        pin = SecretInput(accessible_name='New PIN')
-        confirm = SecretInput(accessible_name='Confirm PIN')
-        pin.input_purpose = confirm.input_purpose = 'pin'
-        error = Label('', role='support', tone='danger')
 
-        def configure_pin() -> None:
-            """Matches user entry before Core performs sensitive authorization.
-
-            Args:
-                None
-            Returns:
-                None
-            """
-            if not pin.text or pin.text != confirm.text:
-                error.text = 'Enter matching PINs'
-                return
-            value = pin.text
-            pin.text = confirm.text = ''
-            security.configure(ClientUnlockMethod.PIN, value)
-            refresh()
-
-        def configure(method: ClientUnlockMethod) -> None:
-            """Applies an explicit setup choice through protected Core metadata.
-
-            Args:
-                method: Selected unlock method.
-            Returns:
-                None
-            """
-            security.configure(method)
-            refresh()
-
-        def show_pin() -> None:
-            """Opens PIN input only after the user selects this setup method.
-
-            Args:
-                None
-            Returns:
-                None
-            """
-            body.clear_widgets()
-            body.add_widget(Label('Set PIN', role='title'))
-            body.add_widget(Label('New PIN', role='support'))
-            body.add_widget(pin)
-            body.add_widget(Label('Confirm PIN', role='support'))
-            body.add_widget(confirm)
-            body.add_widget(error)
-            body.add_widget(
-                Action(
-                    'Save PIN',
-                    configure_pin,
-                    surface='drop',
-                    tone='onAccent',
-                    disabled=state.busy,
-                )
-            )
-            body.add_widget(
-                Action(
-                    'Use profile password',
-                    lambda: configure(ClientUnlockMethod.PROFILE_PASSWORD),
-                    disabled=state.busy,
-                )
-            )
-
-        body.add_widget(Action('Set PIN', show_pin, disabled=state.busy))
-        body.add_widget(
-            Action(
-                'Use profile password',
-                lambda: configure(ClientUnlockMethod.PROFILE_PASSWORD),
-                surface='drop',
-                tone='onAccent',
-                disabled=state.busy,
-            )
+    def update(self) -> None:
+        """Refresh safe feedback and submission eligibility without rebuilding controls."""
+        state, security = self.controller.state, self.controller.security
+        self.activity.update()
+        seconds = security.retry_seconds
+        unit = 'second' if seconds == 1 else 'seconds'
+        self.feedback.text = (
+            f'Try again in {seconds} {unit}' if seconds else state.status
         )
-        warning = BoxLayout(
-            orientation='vertical', spacing='12dp', size_hint_y=None, height=0
+        for widget in self.body.walk():
+            if isinstance(widget, Action) and widget is not self.activity:
+                widget.disabled = state.busy or bool(security.retry_seconds)
+
+    def revoke(self) -> None:
+        """Clear a departing challenge's input and native focus before detaching it."""
+        for widget in self.body.walk():
+            if isinstance(widget, SecretInput):
+                widget.text = ''
+                widget.focus = False
+                widget.disabled = True
+            elif isinstance(widget, Action):
+                widget.cancel_input()
+                widget.focus = False
+                widget.disabled = True
+
+
+def security_view(
+    controller: GuiController, refresh: Callable[[], None]
+) -> AnchorLayout:
+    """Present the opaque lock cover or initial profile setup."""
+    if controller.state.route.view == 'V05':
+        return LockedView(controller, refresh)
+    outer = PrivateForm()
+    outer.body.add_widget(Label('Secure Metor', role='title'))
+
+    def later() -> None:
+        """Leave the conservative initial password policy in place."""
+        controller.state.route = Route('V06')
+        refresh()
+
+    build_unlock_methods(controller, refresh, outer.body, later, lambda: None)
+    if controller.state.status:
+        outer.body.add_widget(
+            Label(controller.state.status, role='support', tone='info')
         )
-        warning.bind(minimum_height=warning.setter('height'))
-
-        def warn_none() -> None:
-            """Requires a separate explicit confirmation before weakening lock policy.
-
-            Args:
-                None
-            Returns:
-                None
-            """
-            warning.clear_widgets()
-            warning.add_widget(
-                Label(
-                    'Anyone with access to this running application can unlock it. The profile password is still required at startup.',
-                    tone='danger',
-                )
-            )
-            warning.add_widget(
-                Action(
-                    'Confirm no screen lock',
-                    lambda: configure(ClientUnlockMethod.NONE),
-                    surface='danger',
-                    tone='onAccent',
-                    disabled=state.busy,
-                )
-            )
-
-        body.add_widget(Action('No screen lock', warn_none, disabled=state.busy))
-        body.add_widget(warning)
-
-        def later() -> None:
-            """Leaves the conservative uncompleted password default in force.
-
-            Args:
-                None
-            Returns:
-                None
-            """
-            state.route = Route('V06')
-            refresh()
-
-        body.add_widget(
-            Action(
-                'Later',
-                later,
-                disabled=state.busy,
-            )
-        )
-    if state.status:
-        body.add_widget(Label(state.status, role='support', tone='info'))
     return outer

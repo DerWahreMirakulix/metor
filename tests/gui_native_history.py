@@ -98,7 +98,7 @@ def exercise_history(app: MetorApp, complete: Callable[[], None]) -> None:
             None
         """
         sheet = ActionSheet.current
-        assert sheet is not None and sheet.cancel.focus
+        assert sheet is not None and not sheet.cancel.focus
         primary = next(
             widget
             for widget in sheet.actions.children
@@ -115,7 +115,7 @@ def exercise_history(app: MetorApp, complete: Callable[[], None]) -> None:
         complete()
 
     def cancel(_elapsed: float) -> None:
-        """Verifies initial Enter remains on Cancel and submits no destruction.
+        """Verifies deliberate Cancel submits no destruction.
 
         Args:
             _elapsed: Native scheduling delay.
@@ -123,7 +123,7 @@ def exercise_history(app: MetorApp, complete: Callable[[], None]) -> None:
             None
         """
         sheet = ActionSheet.current
-        assert sheet is not None and sheet.cancel.focus
+        assert sheet is not None and not sheet.cancel.focus
         with patch.object(app.controller.history, 'clear') as clear:
             enter(sheet.cancel)
             clear.assert_not_called()
@@ -181,7 +181,15 @@ def exercise_history(app: MetorApp, complete: Callable[[], None]) -> None:
             if isinstance(widget, Action) and widget.accessible_name == 'Refresh newest'
         )
         assert focused is not None and replacement is not focused
-        assert not focused.focus and replacement.focus
+        assert not focused.focus and replacement.focus, (
+            focused.focus,
+            replacement.focus,
+            [
+                getattr(item, 'accessible_name', '')
+                for item in app.shell.walk()
+                if getattr(item, 'focus', False)
+            ],
+        )
         focused = replacement
         app.controller.state.secondary_scroll[app.controller.state.route] = 1.0
         app.controller.history.revision += 1
@@ -203,7 +211,15 @@ def exercise_history(app: MetorApp, complete: Callable[[], None]) -> None:
             if isinstance(widget, Action) and widget.accessible_name == 'Refresh newest'
         )
         assert focused is not None and replacement is not focused
-        assert not focused.focus and replacement.focus
+        assert not focused.focus and replacement.focus, (
+            focused.focus,
+            replacement.focus,
+            [
+                getattr(item, 'accessible_name', '')
+                for item in app.shell.walk()
+                if getattr(item, 'focus', False)
+            ],
+        )
         scroll.scroll_y = 0
         Clock.schedule_once(page, 0.3)
 

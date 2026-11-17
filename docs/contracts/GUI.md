@@ -473,6 +473,9 @@ policy. The GUI shows only supported controls and displays failed updates as
 failures. Initial supported service and device metadata resolve behind one
 loading state before the complete settings layout becomes interactive. Later
 reloads retain visible controls, scroll position and keyboard focus.
+The detail pane owns scrolling across its full width, with its scrollbar at
+the outer edge and readable content centered inside it. Changing the unlock
+method opens a dialog over Settings; Later returns to that same position.
 Accept calls without unlocking, lock notification privacy,
 application idle timeout, profile-name visibility, keyboard layout, and pins are
 independent protected preferences. Accept calls without unlocking defaults Off;
@@ -545,7 +548,8 @@ settings opens the same closed configuration dialog. Microphone and audio output
 selection each open a separate device chooser and return to configuration;
 Back from either chooser returns to Audio settings, while Close leaves
 configuration. Device selections apply immediately while media is idle, without
-an extra confirmation. Playback needs only an output, recording needs only a
+an extra confirmation. Refreshing devices shows progress in the audio dialog
+without rebuilding the page behind it. Playback needs only an output, recording needs only a
 microphone, and calls need both. Speakers may cause echo during calls; the lack
 of echo cancellation does not itself disable calling. The primary chooser groups
 device variants by name; Other device variants exposes their individual host APIs.
@@ -626,7 +630,10 @@ crash dumps, or physical media recovery.
 Application Lock or short configured Power restricts this client while the
 daemon and other authenticated clients may continue. It does not issue a Core
 hard-lock command. Core validates PIN, password, cooldown, and locked-action
-scope. A PIN cannot authenticate a cold or new client, and PIN-only access
+scope. A Core-issued cooldown counts down visibly and disables unlock until
+its deadline; expiration does not submit another attempt automatically.
+Authentication feedback updates the retained form without moving its input.
+A PIN cannot authenticate a cold or new client, and PIN-only access
 cannot weaken profile credentials. Forgot PIN requests a password challenge.
 An unconfirmed restriction stays covered and cannot create a second
 unrestricted connection. App restriction permits neither LIVE invitation
@@ -650,7 +657,11 @@ Selection alone does not start communication. A focused PTT control may own
 Space down/up, but text fields and global shortcuts cannot capture that press.
 The text composer uses Enter for explicit Send and Shift+Enter for a newline.
 Incoming call UI does not steal an active typing or PTT owner. Modal focus
-returns to a safe invoker; Escape/Back closes a reversible overlay before
+starts empty; Tab or Shift+Tab enters the dialog, including after clicking
+empty space, and stays within it. Background controls do not show hover
+feedback while a modal is open. Wheel input outside the dialog neither
+scrolls the background nor dismisses the dialog. Closing restores a prior keyboard invoker;
+Escape/Back closes a reversible overlay before
 navigating and cannot dismiss a privacy cover or accepted destructive work.
 Closing an action sheet removes its input surface immediately; an invisible
 closing animation cannot intercept the next foreground action.
@@ -751,7 +762,7 @@ Closing the keyboard restores the full header when space permits.
 
 The master toolbar groups Contacts, Settings and Notifications in that order.
 The notification dot stays inside the bell's touch target and the active
-DROP/LIVE tab has a visible underline. In wide windows the empty detail
+DROP/LIVE tab has a centered underline that follows its current bounds. In wide windows the empty detail
 centers its next step. Conversation previews leave room for the unread
 count and menu. A fixed-size avatar shows up to two complete initials or a
 contact icon when neither initial fits or has a packaged glyph. In the

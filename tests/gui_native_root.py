@@ -5,6 +5,7 @@ from dataclasses import replace
 
 from kivy.clock import Clock
 from kivy.core.text import Label as TextMeasure
+from kivy.graphics import RoundedRectangle
 from kivy.metrics import dp
 from kivy.uix.scrollview import ScrollView
 
@@ -12,6 +13,21 @@ from metor.core.api import Delivery, DropConversationSummaryEntry
 from metor.ui.gui.app import MetorApp
 from metor.ui.gui.state import Route
 from metor.ui.gui.widgets import Action, Label
+
+
+def assert_selected_indicator(action: Action) -> None:
+    """Checks the rendered underline against the selected button's current bounds."""
+    indicators = [
+        instruction
+        for instruction in action.canvas.after.children
+        if isinstance(instruction, RoundedRectangle)
+    ]
+    assert len(indicators) == 1
+    indicator = indicators[0]
+    left_gap = indicator.pos[0] - action.x
+    right_gap = action.right - indicator.pos[0] - indicator.size[0]
+    assert abs(left_gap - right_gap) <= dp(0.1), (left_gap, right_gap)
+    assert abs(indicator.pos[1] - action.y - dp(4)) <= dp(0.1)
 
 
 def exercise_root_navigation(app: MetorApp, complete: Callable[[], None]) -> None:
@@ -37,6 +53,7 @@ def exercise_root_navigation(app: MetorApp, complete: Callable[[], None]) -> Non
         assert state.route.view == view
         assert shell._root_panel is not None
         assert shell._root_panel.get_root_window() is not None
+        assert_selected_indicator(shell._root_panel.tabs[state.root_delivery])
         if shell.width >= dp(960):
             assert any(
                 isinstance(widget, Label) and widget.text == 'Choose a conversation'
@@ -47,6 +64,16 @@ def exercise_root_navigation(app: MetorApp, complete: Callable[[], None]) -> Non
 
     assert_overview('V06')
     root = shell._root_panel
+    selected = root.tabs[Delivery.DROP]
+    original_size, original_pos = tuple(selected.size), tuple(selected.pos)
+    try:
+        for width in (dp(154), dp(240), dp(177)):
+            selected.width = width
+            assert_selected_indicator(selected)
+            selected.x += dp(13)
+            assert_selected_indicator(selected)
+    finally:
+        selected.size, selected.pos = original_size, original_pos
     contacts, settings, bell = (
         root.header_actions[view] for view in ('V12', 'V17', 'V16')
     )
@@ -221,6 +248,8 @@ def exercise_root_refresh(app: MetorApp, complete: Callable[[], None]) -> None:
 
     assert app.shell is not None
     controller = app.controller
+    assert app.shell._root_panel is not None
+    assert_selected_indicator(app.shell._root_panel.tabs[Delivery.DROP])
     controller.state.root_pages[Delivery.DROP] = 0
     snapshot = controller.state.snapshot
     assert snapshot is not None
@@ -382,6 +411,7 @@ def exercise_root_refresh(app: MetorApp, complete: Callable[[], None]) -> None:
                 None
             """
             current = app.shell._root_panel
+            assert_selected_indicator(current.tabs[Delivery.DROP])
             replacement = next(
                 widget
                 for widget in current.walk()
