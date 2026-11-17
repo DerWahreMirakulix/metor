@@ -2,10 +2,11 @@
 
 import json
 import socket
+import time
 from typing import Dict, Optional
 
 from metor.core.api import IpcEvent, JsonValue
-from metor.utils import Constants
+from metor.shared import Constants, recv_before
 
 
 class BufferedIpcEventReader:
@@ -48,6 +49,8 @@ class BufferedIpcEventReader:
         """
         line: str = line_bytes.decode('utf-8').strip()
         event_dict: Dict[str, JsonValue] = json.loads(line)
+        if not isinstance(event_dict, dict):
+            raise TypeError('An IPC event must be an object.')
         return IpcEvent.from_dict(event_dict)
 
     def append_bytes(self, data: bytes) -> None:
@@ -64,8 +67,19 @@ class BufferedIpcEventReader:
             None
         """
         self._buffer.extend(data)
-        if len(self._buffer) > Constants.MAX_IPC_BYTES:
-            raise ValueError('Daemon response exceeded the IPC size limit.')
+        if len(self._buffer) <= Constants.MAX_IPC_BYTES:
+            return
+
+        frame_start: int = 0
+        while True:
+            frame_end: int = self._buffer.find(b'\n', frame_start)
+            if frame_end < 0:
+                if len(self._buffer) - frame_start > Constants.MAX_IPC_BYTES:
+                    raise ValueError('Daemon response exceeded the IPC size limit.')
+                return
+            if frame_end - frame_start + 1 > Constants.MAX_IPC_BYTES:
+                raise ValueError('Daemon response exceeded the IPC size limit.')
+            frame_start = frame_end + 1
 
     def pop_event(self) -> Optional[IpcEvent]:
         """
@@ -86,23 +100,30 @@ class BufferedIpcEventReader:
 
         return None
 
-    def read_from_socket(self, sock: socket.socket) -> Optional[IpcEvent]:
+    def read_from_socket(
+        self, sock: socket.socket, *, deadline: float | None = None
+    ) -> Optional[IpcEvent]:
         """
         Reads one complete IPC event from a connected socket.
 
         Args:
             sock (socket.socket): The connected IPC socket.
+            deadline: Optional monotonic deadline for the whole operation, including fragmented frames.
 
         Returns:
             Optional[IpcEvent]: The decoded event, or None when the stream ends.
         """
+        if deadline is not None and time.monotonic() >= deadline:
+            raise socket.timeout('IPC operation deadline elapsed.')
         while True:
-            buffered_event: Optional[IpcEvent] = self.pop_event()
+            try:
+                buffered_event = self.pop_event()
+            except (ValueError, TypeError, RecursionError):
+                # Invalid enum values, fields and JSON can contain private peer data.
+                raise ValueError('The daemon sent an invalid IPC event.') from None
             if buffered_event is not None:
                 return buffered_event
-
-            data: bytes = sock.recv(Constants.TCP_BUFFER_SIZE)
+            data = recv_before(sock, Constants.TCP_BUFFER_SIZE, deadline)
             if not data:
                 return None
-
             self.append_bytes(data)

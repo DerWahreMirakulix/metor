@@ -5,7 +5,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable, Dict, Iterator, List, Optional, TYPE_CHECKING, Tuple, cast
 
-from metor.utils import secure_clear_buffer
+from metor.shared import secure_clear_buffer
+from metor.versioning import DB_SCHEMA_VERSION
 
 # Local Package Imports
 from metor.data.sql.backends import (
@@ -15,28 +16,35 @@ from metor.data.sql.backends import (
     sqlite3,
 )
 from metor.data.sql.history import HistoryRepository
+from metor.data.sql.errors import DatabaseCorruptedError
 from metor.data.sql.message import MessageRepository
-from metor.data.sql.peer import PeerRepository
+from metor.data.sql.migrations import migrate_schema
+from metor.data.sql.peer import PeerRepository, compare_aliases
+from metor.data.sql.metadata import ProfileMetadataRepository
+from metor.data.sql.producers import VoiceProducerRepository
 from metor.data.sql.runtime_mirror import (
     capture_sqlcipher_stderr,
     cleanup_runtime_mirror_file,
     get_runtime_db_path,
     refresh_runtime_mirror,
 )
-from metor.data.sql.schema import ensure_core_schema
+from metor.data.sql.schema import (
+    DATABASE_APPLICATION_ID,
+    check_schema_version,
+    initialize_database,
+    read_schema_version,
+)
 
 if TYPE_CHECKING:
     from metor.data.profile import Config
-
-
-class DatabaseCorruptedError(ValueError):
-    """Raised when the profile database cannot be opened safely."""
 
 
 class SqlManager:
     """Manages one pooled SQLCipher connection and the central persistence schema."""
 
     _connections: Dict[str, SqlCipherConnection] = {}
+    _metadata_repositories: Dict[str, ProfileMetadataRepository] = {}
+    _producer_repositories: Dict[str, VoiceProducerRepository] = {}
     _pool_lock: threading.Lock = threading.Lock()
     _db_lock: threading.Lock = threading.Lock()
     _log_callback: Optional[Callable[[str], None]] = None
@@ -81,26 +89,30 @@ class SqlManager:
         Args:
             db_path (str | Path): The database path whose connection should be closed.
 
+        Raises:
+            Exception: If the pooled connection cannot be closed. Pool ownership is
+                retained so the caller can report or retry the failed release.
+
         Returns:
             None
         """
         path_str: str = str(Path(db_path).absolute())
-        with cls._pool_lock:
-            conn = cls._connections.pop(path_str, None)
-
-        if conn is not None:
-            try:
-                conn.close()
-            except Exception:
-                pass
+        with cls._db_lock:
+            with cls._pool_lock:
+                conn = cls._connections.get(path_str)
+                if conn is not None:
+                    conn.close()
+                    cls._connections.pop(path_str, None)
+                cls._metadata_repositories.pop(path_str, None)
+                cls._producer_repositories.pop(path_str, None)
 
     @classmethod
     def export_database_copy(
         cls,
         source_path: str | Path,
         target_path: str | Path,
-        current_password: Optional[str] = None,
-        target_password: Optional[str] = None,
+        current_key: Optional[bytes] = None,
+        target_key: Optional[bytes] = None,
     ) -> None:
         """
         Exports one profile database into a new database file with the target encryption mode.
@@ -108,8 +120,8 @@ class SqlManager:
         Args:
             source_path (str | Path): The current database path.
             target_path (str | Path): The destination database path.
-            current_password (Optional[str]): The current SQLCipher password, if any.
-            target_password (Optional[str]): The target SQLCipher password, if any.
+            current_key (Optional[bytes]): Current raw SQLCipher key, if encrypted.
+            target_key (Optional[bytes]): Target raw SQLCipher key, if encrypted.
 
         Raises:
             DatabaseCorruptedError: If the source database cannot be opened or exported safely.
@@ -123,30 +135,36 @@ class SqlManager:
         if not source_db.exists():
             return
 
+        if target_db.exists() and source_db.samefile(target_db):
+            raise ValueError('Database export requires a distinct destination.')
         cls.close_connection(source_db)
-        target_db.parent.mkdir(parents=True, exist_ok=True)
-        target_db.unlink(missing_ok=True)
-
+        replacing_target = False
         conn = sqlite3.connect(str(source_db.absolute()), check_same_thread=False)
         try:
-            if current_password:
-                safe_current_password: str = current_password.replace("'", "''")
-                conn.execute(f"PRAGMA key = '{safe_current_password}'")
+            if current_key:
+                conn.execute(f'PRAGMA key = "x\'{current_key.hex()}\'"')
 
             cursor = conn.cursor()
             cursor.execute('PRAGMA foreign_keys = ON')
             cursor.execute('SELECT count(*) FROM sqlite_master;')
             cursor.fetchone()
+            source_version = read_schema_version(cursor)
+            check_schema_version(cursor, source_version)
+            target_db.parent.mkdir(parents=True, exist_ok=True)
+            target_db.unlink(missing_ok=True)
+            replacing_target = True
 
             safe_target_path: str = str(target_db.absolute()).replace("'", "''")
-            safe_target_password: str = (
-                target_password.replace("'", "''") if target_password else ''
-            )
+            target_key_clause = f"x'{target_key.hex()}'" if target_key else ''
             cursor.execute(
-                f"ATTACH DATABASE '{safe_target_path}' AS migrated KEY '{safe_target_password}'"
+                f'ATTACH DATABASE \'{safe_target_path}\' AS migrated KEY "{target_key_clause}"'
             )
             try:
                 cursor.execute("SELECT sqlcipher_export('migrated')")
+                cursor.execute(
+                    f'PRAGMA migrated.application_id = {DATABASE_APPLICATION_ID}'
+                )
+                cursor.execute(f'PRAGMA migrated.user_version = {source_version}')
             finally:
                 try:
                     cursor.execute('DETACH DATABASE migrated')
@@ -154,12 +172,12 @@ class SqlManager:
                     pass
 
             conn.commit()
-        except (sqlite3.DatabaseError, sqlite3.OperationalError, MemoryError) as exc:
-            target_db.unlink(missing_ok=True)
-            error_text: str = str(exc).strip() or exc.__class__.__name__
+        except (sqlite3.DatabaseError, sqlite3.OperationalError, MemoryError):
+            if replacing_target:
+                target_db.unlink(missing_ok=True)
             raise DatabaseCorruptedError(
-                f'Profile database could not be migrated safely. Details: {error_text}'
-            ) from exc
+                'Profile database could not be migrated safely.'
+            ) from None
         finally:
             try:
                 conn.close()
@@ -170,7 +188,7 @@ class SqlManager:
         self,
         db_path: str | Path,
         config: 'Config',
-        password: Optional[str] = None,
+        encryption_key: Optional[bytes] = None,
     ) -> None:
         """
         Initializes the database connection and ensures the central schema exists.
@@ -178,22 +196,70 @@ class SqlManager:
         Args:
             db_path (str | Path): The absolute path to the SQLite database file.
             config (Config): The profile configuration instance.
-            password (Optional[str]): The master password for SQLCipher encryption.
+            encryption_key (Optional[bytes]): PMK-derived SQLCipher key.
 
         Returns:
             None
         """
         self.db_path: Path = Path(db_path)
         self._config: 'Config' = config
-        self._password: Optional[bytearray] = None
-        self._uses_sqlcipher_password: bool = password is not None
-        if password is not None:
-            self._password = bytearray(password.encode('utf-8'))
+        self._encryption_key: Optional[bytearray] = None
+        self._uses_sqlcipher_key: bool = encryption_key is not None
+        if encryption_key is not None:
+            self._encryption_key = bytearray(encryption_key)
 
         self._ensure_tables()
         self.peers: PeerRepository = PeerRepository(self)
         self.messages: MessageRepository = MessageRepository(self)
         self.history: HistoryRepository = HistoryRepository(self)
+        with SqlManager._pool_lock:
+            self.metadata: ProfileMetadataRepository = (
+                SqlManager._metadata_repositories.setdefault(
+                    str(self.db_path.absolute()),
+                    ProfileMetadataRepository(self, self._uses_sqlcipher_key),
+                )
+            )
+
+            self.producers: VoiceProducerRepository = (
+                SqlManager._producer_repositories.setdefault(
+                    str(self.db_path.absolute()),
+                    VoiceProducerRepository(self, self._uses_sqlcipher_key),
+                )
+            )
+
+    @classmethod
+    def opened_voice_producers(cls, db_path: str | Path) -> VoiceProducerRepository:
+        """Returns producer persistence belonging to an already opened runtime.
+
+        Args:
+            db_path: Active Core-owned profile database identity.
+        Returns:
+            VoiceProducerRepository: Existing bounded claim/cleanup repository.
+        Raises:
+            ValueError: If the runtime has no initialized database for this path.
+        """
+        with cls._pool_lock:
+            repository = cls._producer_repositories.get(str(Path(db_path).absolute()))
+            if repository is None:
+                raise ValueError('Profile database is not open')
+            return repository
+
+    @classmethod
+    def opened_profile_metadata(cls, db_path: str | Path) -> ProfileMetadataRepository:
+        """Resolves metadata from storage already opened by the active runtime.
+
+        Args:
+            db_path: Runtime-owned profile database identity.
+        Returns:
+            ProfileMetadataRepository: Existing repository with its actual protection mode.
+        Raises:
+            ValueError: If no initialized runtime database owns this path.
+        """
+        with cls._pool_lock:
+            repository = cls._metadata_repositories.get(str(Path(db_path).absolute()))
+            if repository is None:
+                raise ValueError('Profile database is not open')
+            return repository
 
     def _get_connection(self) -> SqlCipherConnection:
         """
@@ -209,16 +275,19 @@ class SqlManager:
 
         with SqlManager._pool_lock:
             if path_str in SqlManager._connections:
+                if self._encryption_key is not None:
+                    secure_clear_buffer(self._encryption_key)
+                    self._encryption_key = None
                 return SqlManager._connections[path_str]
 
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
             conn = sqlite3.connect(path_str, check_same_thread=False)
+            conn.create_collation('METOR_ALIAS', compare_aliases)
             conn.execute('PRAGMA foreign_keys = ON')
-            if self._password:
-                safe_password: str = self._password.decode('utf-8').replace("'", "''")
-                conn.execute(f"PRAGMA key = '{safe_password}'")
-                secure_clear_buffer(self._password)
-                self._password = None
+            if self._encryption_key:
+                conn.execute(f'PRAGMA key = "x\'{self._encryption_key.hex()}\'"')
+                secure_clear_buffer(self._encryption_key)
+                self._encryption_key = None
 
             SqlManager._connections[path_str] = conn
             return conn
@@ -240,26 +309,31 @@ class SqlManager:
             with capture_sqlcipher_stderr(self._config, SqlManager._log_callback):
                 conn = self._get_connection()
                 with SqlManager._db_lock:
-                    with conn:
-                        cursor = conn.cursor()
-                        cursor.execute('PRAGMA foreign_keys = ON')
-                        cursor.execute('SELECT count(*) FROM sqlite_master;')
-                        cursor.fetchone()
+                    cursor = conn.cursor()
+                    cursor.execute('PRAGMA foreign_keys = ON')
+                    cursor.execute('SELECT count(*) FROM sqlite_master;')
+                    cursor.fetchone()
+                    schema_version: int = read_schema_version(cursor)
 
-                        ensure_core_schema(cursor)
+                    if schema_version == 0:
+                        initialize_database(conn)
+                    else:
+                        check_schema_version(cursor, schema_version)
+                        if schema_version < DB_SCHEMA_VERSION:
+                            migrate_schema(conn, schema_version)
 
-                        try:
-                            refresh_runtime_mirror(
-                                conn,
-                                self.db_path,
-                                self._uses_sqlcipher_password,
-                                self._config,
-                            )
-                        except Exception:
-                            SqlManager._report_runtime_mirror_error(
-                                'Failed to refresh the runtime database mirror.'
-                            )
-        except (sqlite3.DatabaseError, sqlite3.OperationalError, MemoryError) as exc:
+                    try:
+                        refresh_runtime_mirror(
+                            conn,
+                            self.db_path,
+                            self._uses_sqlcipher_key,
+                            self._config,
+                        )
+                    except Exception:
+                        SqlManager._report_runtime_mirror_error(
+                            'Failed to refresh the runtime database mirror.'
+                        )
+        except DatabaseCorruptedError:
             path_str: str = str(self.db_path.absolute())
             with SqlManager._pool_lock:
                 if path_str in SqlManager._connections:
@@ -268,10 +342,28 @@ class SqlManager:
                     except Exception:
                         pass
                     del SqlManager._connections[path_str]
-            error_text: str = str(exc).strip() or exc.__class__.__name__
+                    SqlManager._metadata_repositories.pop(path_str, None)
+                    SqlManager._producer_repositories.pop(path_str, None)
+            raise
+        except (
+            sqlite3.DatabaseError,
+            sqlite3.OperationalError,
+            MemoryError,
+            ValueError,
+        ):
+            path_str = str(self.db_path.absolute())
+            with SqlManager._pool_lock:
+                if path_str in SqlManager._connections:
+                    try:
+                        SqlManager._connections[path_str].close()
+                    except Exception:
+                        pass
+                    del SqlManager._connections[path_str]
+                    SqlManager._metadata_repositories.pop(path_str, None)
+                    SqlManager._producer_repositories.pop(path_str, None)
             raise DatabaseCorruptedError(
-                f'Profile database could not be opened safely. Details: {error_text}'
-            ) from exc
+                'Profile database could not be opened safely.'
+            ) from None
 
     @contextmanager
     def transaction(self) -> Iterator[SqlCipherCursor]:
@@ -283,6 +375,9 @@ class SqlManager:
 
         Yields:
             SqlCipherCursor: The active transaction cursor.
+
+        Returns:
+            Iterator[SqlCipherCursor]: The resulting value.
         """
         conn = self._get_connection()
         with SqlManager._db_lock:
@@ -293,7 +388,7 @@ class SqlManager:
                     refresh_runtime_mirror(
                         conn,
                         self.db_path,
-                        self._uses_sqlcipher_password,
+                        self._uses_sqlcipher_key,
                         self._config,
                     )
                 except Exception:
@@ -368,3 +463,4 @@ class SqlManager:
             cursor.execute('DELETE FROM history_ledger')
             cursor.execute('DELETE FROM message_receipts')
             cursor.execute('DELETE FROM peers')
+            cursor.execute('DELETE FROM profile_metadata WHERE name = ?', ('ui.gui',))

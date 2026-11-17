@@ -3,10 +3,11 @@ Module for managing user-profile runtime state and filesystem metadata.
 Enforces validation checks to prevent runtime operation on tampered profiles.
 """
 
+import sys
 from pathlib import Path
 from typing import List, Optional
 
-from metor.utils import Constants, ProcessManager
+from metor.utils import Constants, ProcessManager, open_private_binary_file
 
 # Local Package Imports
 from metor.data.profile.config import Config
@@ -39,7 +40,7 @@ class ProfileManager:
         try:
             with file_path.open('r') as f:
                 raw_value: str = f.read().strip()
-            return int(raw_value)
+            return int(raw_value.split(':', 1)[0])
         except (OSError, ValueError):
             return None
 
@@ -54,10 +55,36 @@ class ProfileManager:
             None
         """
         self.profile_name: str = (
-            profile_name if profile_name else self.load_default_profile()
+            profile_name
+            if profile_name is not None
+            else self.load_default_profile() or 'default'
         )
         self.paths: Paths = Paths(self.profile_name)
         self.config: Config = Config(self.paths)
+        from metor.data.profile.lifecycle import recover_profile_security_migration
+
+        recover_profile_security_migration(self.profile_name)
+
+    @classmethod
+    def for_migration_staging(
+        cls,
+        source_profile_name: str,
+        staged_path: Path,
+    ) -> 'ProfileManager':
+        """Creates an internal manager for one verified transaction generation.
+
+        Args:
+            source_profile_name (str): Valid public source profile identity.
+            staged_path (Path): Exact internal migration staging path.
+
+        Returns:
+            ProfileManager: Manager bound only to the staged generation.
+        """
+        instance = cls.__new__(cls)
+        instance.paths = Paths.for_migration_staging(source_profile_name, staged_path)
+        instance.profile_name = instance.paths.profile_name
+        instance.config = Config(instance.paths)
+        return instance
 
     def validate_integrity(self) -> None:
         """
@@ -97,21 +124,26 @@ class ProfileManager:
                 )
 
         hs_dir = self.paths.get_hidden_service_dir()
-        salt_file: Path = hs_dir / 'crypto.salt'
+        keyslot_file = self.paths.get_keyslot_file()
         metor_key_path: Path = hs_dir / Constants.METOR_SECRET_KEY
+        tor_key_path: Path = hs_dir / f'{Constants.TOR_SECRET_KEY}.enc'
 
-        if security_mode is ProfileSecurityMode.PLAINTEXT and salt_file.exists():
+        if security_mode is ProfileSecurityMode.PLAINTEXT and keyslot_file.exists():
             raise ValueError(
-                "Profile state corruption detected: security_mode is 'plaintext', but encrypted key salt exists. Use the security migration workflow or delete the profile."
+                "Profile state corruption detected: security_mode is 'plaintext', but protected PMK material exists. Use the security migration workflow or delete the profile."
             )
 
         if (
             security_mode is ProfileSecurityMode.ENCRYPTED
-            and metor_key_path.exists()
-            and not salt_file.exists()
+            and (
+                self.paths.get_db_file().exists()
+                or metor_key_path.exists()
+                or tor_key_path.exists()
+            )
+            and not keyslot_file.exists()
         ):
             raise ValueError(
-                "Profile state corruption detected: security_mode is 'encrypted', but the key salt is missing. Use the security migration workflow or delete the profile."
+                "Profile state corruption detected: security_mode is 'encrypted', but the PMK keyslot is missing. Development profiles using the retired direct-password format must be recreated."
             )
 
     def exists(self) -> bool:
@@ -227,13 +259,17 @@ class ProfileManager:
             self.initialize()
 
         if pid is not None:
-            with self.paths.get_daemon_pid_file().open('w') as f:
-                f.write(str(pid))
-            self.paths.get_daemon_pid_file().chmod(0o600)
+            identity_payload = ProcessManager.process_identity_payload(
+                pid,
+                self.profile_name,
+                role=Constants.PROCESS_ROLE_DAEMON,
+                executable=Path(sys.executable),
+            ).encode('utf-8')
+            with open_private_binary_file(self.paths.get_daemon_pid_file()) as f:
+                f.write(identity_payload)
 
-        with self.paths.get_daemon_port_file().open('w') as f:
-            f.write(str(port))
-        self.paths.get_daemon_port_file().chmod(0o600)
+        with open_private_binary_file(self.paths.get_daemon_port_file()) as f:
+            f.write(str(port).encode('ascii'))
 
     def get_daemon_pid(self) -> Optional[int]:
         """
@@ -248,7 +284,11 @@ class ProfileManager:
         if self.is_remote():
             return None
 
-        return self._read_int_file(self.paths.get_daemon_pid_file())
+        return ProcessManager.managed_process_pid(
+            self.paths.get_daemon_pid_file(),
+            self.profile_name,
+            Constants.PROCESS_ROLE_DAEMON,
+        )
 
     def get_daemon_port(self) -> Optional[int]:
         """
@@ -264,9 +304,15 @@ class ProfileManager:
             return self.get_static_port()
 
         daemon_pid: Optional[int] = self.get_daemon_pid()
-        if daemon_pid is not None and not ProcessManager.is_pid_running(daemon_pid):
-            self.clear_daemon_port(expected_pid=daemon_pid)
-            return None
+        if daemon_pid is not None:
+            process_status: Optional[bool] = ProcessManager.is_managed_process_running(
+                self.paths.get_daemon_pid_file(),
+                self.profile_name,
+            )
+            if process_status is not True:
+                if process_status is False:
+                    self.clear_daemon_port(expected_pid=daemon_pid)
+                return None
 
         return self._read_int_file(self.paths.get_daemon_port_file())
 
@@ -395,6 +441,7 @@ class ProfileManager:
         is_remote: bool = False,
         port: Optional[int] = None,
         security_mode: ProfileSecurityMode = ProfileSecurityMode.ENCRYPTED,
+        master_password: Optional[str] = None,
     ) -> ProfileOperationResult:
         """
         Creates a new profile directory safely.
@@ -403,13 +450,21 @@ class ProfileManager:
             name (str): Profile name.
             is_remote (bool): Is remote configuration.
             port (Optional[int]): Static port.
+            security_mode (ProfileSecurityMode): Requested storage security mode.
+            master_password (Optional[str]): Password for encrypted local storage.
 
         Returns:
             ProfileOperationResult: Structured local outcome for the CLI layer.
         """
         from metor.data.profile.lifecycle import add_profile_folder
 
-        return add_profile_folder(name, is_remote, port, security_mode)
+        return add_profile_folder(
+            name,
+            is_remote,
+            port,
+            security_mode,
+            master_password,
+        )
 
     @classmethod
     def migrate_profile_security(
@@ -477,16 +532,35 @@ class ProfileManager:
         return rename_profile_folder(old_name, new_name)
 
     @classmethod
-    def clear_profile_db(cls, name: str) -> ProfileOperationResult:
+    def clear_profile_db(
+        cls,
+        name: str,
+        master_password: Optional[str] = None,
+    ) -> ProfileOperationResult:
         """
         Clears the SQLite database for a profile.
 
         Args:
             name (str): The profile name.
+            master_password (Optional[str]): Required credential for encrypted storage.
 
         Returns:
             ProfileOperationResult: Structured local outcome for the CLI layer.
         """
         from metor.data.profile.lifecycle import clear_profile_db
 
-        return clear_profile_db(name)
+        return clear_profile_db(name, master_password)
+
+    @classmethod
+    def purge_all_data(cls) -> None:
+        """Destroys all profile keyslots before global filesystem cleanup.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        from metor.data.profile.lifecycle import purge_all_profile_data
+
+        purge_all_profile_data()

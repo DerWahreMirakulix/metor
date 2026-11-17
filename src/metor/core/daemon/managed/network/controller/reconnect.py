@@ -11,6 +11,7 @@ from metor.core.api import (
     ConnectionOrigin,
 )
 from metor.utils import Constants
+from metor.data import SettingKey
 
 # Local Package Imports
 from metor.core.daemon.managed.network.controller.support import (
@@ -28,6 +29,8 @@ class ConnectionControllerReconnectMixin(ConnectionControllerSupportMixin):
             self,
             target: str,
             origin: ConnectionOrigin = ConnectionOrigin.INCOMING,
+            *,
+            expected_pending: Optional[socket.socket] = None,
         ) -> None:
             """
             Accepts one pending live connection through the session facade.
@@ -45,6 +48,8 @@ class ConnectionControllerReconnectMixin(ConnectionControllerSupportMixin):
             self,
             target: str,
             origin: ConnectionOrigin = ConnectionOrigin.MANUAL,
+            *,
+            expected_context_generation: Optional[int] = None,
         ) -> None:
             """
             Starts one outbound live connection attempt through the session facade.
@@ -93,10 +98,12 @@ class ConnectionControllerReconnectMixin(ConnectionControllerSupportMixin):
         Returns:
             bool: True if the peer was added to the queue.
         """
+        generation = self._state.accepted_live_context_generation(onion)
+        entry = (onion, generation)
         with self._live_reconnect_lock:
-            if onion in self._live_reconnect_queue:
+            if entry in self._live_reconnect_queue:
                 return False
-            self._live_reconnect_queue.append(onion)
+            self._live_reconnect_queue.append(entry)
             return True
 
     def on_live_consumer_available(self) -> None:
@@ -112,24 +119,67 @@ class ConnectionControllerReconnectMixin(ConnectionControllerSupportMixin):
         for onion in self._state.get_pending_connections_with_reason(
             PendingConnectionReason.CONSUMER_ABSENT
         ):
+            with self._operation_lock, self._state.snapshot_barrier():
+                pending = self._state.pending_identity(onion)
+                if (
+                    self._stop_flag.is_set()
+                    or pending is None
+                    or self._state.get_pending_connection_reason(onion)
+                    is not PendingConnectionReason.CONSUMER_ABSENT
+                ):
+                    continue
+                expected_pending = pending[0]
+                auto_accept_origin = (
+                    self._state.get_pending_connection_origin(onion)
+                    or ConnectionOrigin.INCOMING
+                )
+                accepted_generation = self._state.accepted_live_context_generation(
+                    onion
+                )
+
             alias: Optional[str] = self._cm.ensure_alias_for_onion(onion)
             if not alias:
                 continue
 
-            auto_accept_origin: ConnectionOrigin = (
-                self._state.get_pending_connection_origin(onion)
-                or ConnectionOrigin.INCOMING
-            )
-
-            self._broadcast(
-                ConnectionAutoAcceptedEvent(
-                    alias=alias,
-                    onion=onion,
-                    origin=auto_accept_origin,
-                    actor=ConnectionActor.SYSTEM,
+            with self._operation_lock, self._state.snapshot_barrier():
+                current_pending = self._state.pending_identity(onion)
+                if (
+                    self._stop_flag.is_set()
+                    or current_pending is None
+                    or current_pending[0] is not expected_pending
+                    or self._state.get_pending_connection_reason(onion)
+                    is not PendingConnectionReason.CONSUMER_ABSENT
+                    or (
+                        self._state.get_pending_connection_origin(onion)
+                        or ConnectionOrigin.INCOMING
+                    )
+                    is not auto_accept_origin
+                    or self._state.accepted_live_context_generation(onion)
+                    != accepted_generation
+                    or (
+                        auto_accept_origin
+                        in {
+                            ConnectionOrigin.AUTO_RECONNECT,
+                            ConnectionOrigin.GRACE_RECONNECT,
+                            ConnectionOrigin.RETUNNEL,
+                        }
+                        and accepted_generation is None
+                    )
+                ):
+                    continue
+                self._broadcast(
+                    ConnectionAutoAcceptedEvent(
+                        alias=alias,
+                        onion=onion,
+                        origin=auto_accept_origin,
+                        actor=ConnectionActor.SYSTEM,
+                    )
                 )
-            )
-            self.accept(onion, origin=auto_accept_origin)
+                self.accept(
+                    onion,
+                    origin=auto_accept_origin,
+                    expected_pending=expected_pending,
+                )
 
     def _live_reconnect_worker(self) -> None:
         """
@@ -146,12 +196,19 @@ class ConnectionControllerReconnectMixin(ConnectionControllerSupportMixin):
             time.sleep(Constants.WORKER_SLEEP_SLOW_SEC)
             try:
                 onion: Optional[str] = None
+                generation: Optional[int] = None
 
                 with self._live_reconnect_lock:
                     if self._live_reconnect_queue:
-                        onion = self._live_reconnect_queue.pop(0)
+                        onion, generation = self._live_reconnect_queue.pop(0)
 
                 if onion:
+                    if (
+                        generation is not None
+                        and self._state.accepted_live_context_generation(onion)
+                        != generation
+                    ):
+                        continue
                     if not self._state.has_scheduled_auto_reconnect(onion):
                         continue
 
@@ -184,8 +241,23 @@ class ConnectionControllerReconnectMixin(ConnectionControllerSupportMixin):
                         secrets.randbelow(Constants.LIVE_RECONNECT_JITTER_MAX_MS)
                         / Constants.LIVE_RECONNECT_JITTER_DIVISOR
                     )
+                    recovery_deadline = self._state.accepted_live_recovery_deadline(
+                        onion
+                    )
+                    if recovery_deadline is not None:
+                        remaining = recovery_deadline - time.monotonic()
+                        handshake_budget = self._config.get_float(
+                            SettingKey.TOR_TIMEOUT
+                        )
+                        backoff = min(backoff, max(0.0, remaining - handshake_budget))
 
                     self._sleep_live_reconnect_delay(backoff)
+                    if (
+                        generation is not None
+                        and self._state.accepted_live_context_generation(onion)
+                        != generation
+                    ):
+                        continue
                     if not self._state.has_scheduled_auto_reconnect(onion):
                         continue
 
@@ -209,6 +281,7 @@ class ConnectionControllerReconnectMixin(ConnectionControllerSupportMixin):
                         self.connect_to(
                             onion,
                             origin=ConnectionOrigin.AUTO_RECONNECT,
+                            expected_context_generation=generation,
                         )
             except Exception:
                 pass
@@ -223,5 +296,17 @@ class ConnectionControllerReconnectMixin(ConnectionControllerSupportMixin):
         Returns:
             None
         """
-        for onion in self._state.get_active_onions():
-            self.disconnect(onion, initiated_by_self=True)
+        onions = set(self._state.get_active_onions()) | {
+            onion
+            for onion in self._state.get_relevant_live_onions()
+            if self._state.has_unrevoked_live_context(onion)
+        }
+        for onion in onions:
+            with self._operation_lock, self._state.snapshot_barrier():
+                outbound = self._state.pop_outbound_socket(onion)
+                try:
+                    self.disconnect(onion, initiated_by_self=True)
+                finally:
+                    self._state.revoke_accepted_live_context(onion)
+                    if outbound is not None:
+                        self._state.retire_connection(outbound)

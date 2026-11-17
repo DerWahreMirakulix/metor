@@ -1,9 +1,16 @@
 """Central schema bootstrap helpers for the SQL persistence package."""
 
-from metor.data.sql.backends import SqlCipherCursor
+import secrets
+
+from metor.shared import Constants
+from metor.data.sql.backends import SqlCipherConnection, SqlCipherCursor
+from metor.data.sql.errors import LegacyDatabaseSchemaError, NewerDatabaseSchemaError
+from metor.versioning import DB_SCHEMA_MIN_SUPPORTED, DB_SCHEMA_VERSION
 
 
-SCHEMA_VERSION: int = 3
+# SQLite's file-format discriminator, independent of the schema generation.
+DATABASE_APPLICATION_ID = int.from_bytes(b'METR', 'big')
+
 
 PEER_TABLE_QUERY: str = """
 CREATE TABLE IF NOT EXISTS peers (
@@ -37,8 +44,10 @@ CREATE TABLE IF NOT EXISTS message_receipts (
     msg_id TEXT NOT NULL CHECK (msg_id <> ''),
     peer_onion TEXT NOT NULL CHECK (peer_onion <> '') REFERENCES peers(onion) ON DELETE RESTRICT,
     direction TEXT NOT NULL CHECK (direction IN ('in', 'out')),
-    transport_kind TEXT NOT NULL CHECK (transport_kind IN ('text', 'drop_text', 'live_text')),
-    status TEXT NOT NULL CHECK (status IN ('pending', 'delivered', 'unread', 'read')),
+    delivery TEXT NOT NULL CHECK (delivery IN ('live', 'drop')),
+    content_type TEXT NOT NULL CHECK (content_type IN ('text', 'voice')),
+    retained_bytes INTEGER NOT NULL DEFAULT 0 CHECK (retained_bytes >= 0),
+    status TEXT NOT NULL CHECK (status IN ('pending', 'delivered', 'unread', 'read', 'draft')),
     visible_in_history INTEGER NOT NULL DEFAULT 0 CHECK (visible_in_history IN (0, 1)),
     created_at TEXT NOT NULL CHECK (created_at <> ''),
     updated_at TEXT NOT NULL CHECK (updated_at <> '')
@@ -66,6 +75,57 @@ CREATE TABLE IF NOT EXISTS message_archive (
 )
 """
 
+PROFILE_METADATA_TABLE_QUERY: str = """
+CREATE TABLE IF NOT EXISTS profile_metadata (
+    name TEXT PRIMARY KEY NOT NULL CHECK (name IN ('instance_id', 'ui.gui')),
+    revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
+    value TEXT NOT NULL
+)
+"""
+
+
+def create_profile_metadata(cursor: SqlCipherCursor) -> None:
+    """Creates profile-owned metadata and assigns one stable random instance ID.
+
+    Args:
+        cursor: Cursor within the schema creation or migration transaction.
+    Returns:
+        None
+    """
+    cursor.execute(PROFILE_METADATA_TABLE_QUERY)
+    cursor.execute(
+        'INSERT OR IGNORE INTO profile_metadata (name, value) VALUES (?, ?)',
+        ('instance_id', secrets.token_hex(Constants.PROFILE_INSTANCE_BYTES)),
+    )
+
+
+VOICE_PRODUCERS_TABLE_QUERY: str = """
+CREATE TABLE IF NOT EXISTS voice_producer_items (
+    msg_id TEXT PRIMARY KEY NOT NULL CHECK (msg_id <> ''),
+    peer_onion TEXT NOT NULL CHECK (peer_onion <> ''),
+    owner_token TEXT NOT NULL CHECK (owner_token <> ''),
+    delivery TEXT NOT NULL CHECK (delivery IN ('live', 'drop')),
+    interrupted INTEGER NOT NULL DEFAULT 0 CHECK (interrupted IN (0, 1)),
+    allocated_ids TEXT NOT NULL DEFAULT '[]',
+    cleanup_payload TEXT
+)
+"""
+
+
+def create_voice_producers(cursor: SqlCipherCursor) -> None:
+    """Creates durable owner claims and retryable disposable cleanup intents.
+
+    Args:
+        cursor: Active creation or migration transaction.
+    Returns:
+        None
+    """
+    cursor.execute(VOICE_PRODUCERS_TABLE_QUERY)
+    cursor.execute(
+        'CREATE INDEX IF NOT EXISTS idx_voice_producer_owner ON voice_producer_items (owner_token)'
+    )
+
+
 INDEX_QUERIES: tuple[str, ...] = (
     'CREATE UNIQUE INDEX IF NOT EXISTS idx_message_receipts_identity ON message_receipts (peer_onion, msg_id, direction)',
     'CREATE INDEX IF NOT EXISTS idx_message_receipts_unread ON message_receipts (peer_onion, direction, status)',
@@ -75,7 +135,7 @@ INDEX_QUERIES: tuple[str, ...] = (
 )
 
 
-def ensure_core_schema(cursor: SqlCipherCursor) -> None:
+def create_core_schema(cursor: SqlCipherCursor) -> None:
     """
     Creates the central persistence schema on the active cursor.
 
@@ -91,15 +151,102 @@ def ensure_core_schema(cursor: SqlCipherCursor) -> None:
     cursor.execute(INBOUND_SPOOL_TABLE_QUERY)
     cursor.execute(OUTBOX_SPOOL_TABLE_QUERY)
     cursor.execute(MESSAGE_ARCHIVE_TABLE_QUERY)
+    create_profile_metadata(cursor)
+    create_voice_producers(cursor)
     for index_query in INDEX_QUERIES:
         cursor.execute(index_query)
 
-    # Catch up pre-transport databases: CREATE TABLE IF NOT EXISTS leaves existing
-    # tables untouched, so the column is added explicitly. The table_info check
-    # prevents a duplicate-column error on freshly created databases.
-    cursor.execute('PRAGMA table_info(history_ledger)')
-    has_transport_column: bool = any(row[1] == 'transport' for row in cursor.fetchall())
-    if not has_transport_column:
-        cursor.execute('ALTER TABLE history_ledger ADD COLUMN transport TEXT')
 
-    cursor.execute(f'PRAGMA user_version = {SCHEMA_VERSION}')
+def initialize_schema(cursor: SqlCipherCursor) -> None:
+    """Creates a new schema and stamps it only after all DDL succeeds.
+
+    Args:
+        cursor (SqlCipherCursor): Cursor for a new, empty database transaction.
+
+    Returns:
+        None
+    """
+    create_core_schema(cursor)
+    cursor.execute(f'PRAGMA application_id = {DATABASE_APPLICATION_ID}')
+    cursor.execute(f'PRAGMA user_version = {DB_SCHEMA_VERSION}')
+
+
+def initialize_database(connection: SqlCipherConnection) -> None:
+    """Creates and versions an empty database in one explicit transaction.
+
+    Args:
+        connection (SqlCipherConnection): Keyed connection to an empty database.
+
+    Returns:
+        None
+    """
+    cursor = connection.cursor()
+    try:
+        cursor.execute('BEGIN IMMEDIATE')
+        version = read_schema_version(cursor)
+        if version:
+            check_schema_version(cursor, version)
+        elif has_user_schema(cursor):
+            raise LegacyDatabaseSchemaError(
+                'Populated database has no supported Metor schema version.'
+            )
+        else:
+            initialize_schema(cursor)
+        connection.commit()
+    except Exception:
+        try:
+            cursor.execute('ROLLBACK')
+        except Exception:
+            pass
+        raise
+
+
+def read_schema_version(cursor: SqlCipherCursor) -> int:
+    """Reads the durable SQLite schema generation.
+
+    Args:
+        cursor (SqlCipherCursor): Cursor on an already keyed database.
+
+    Returns:
+        int: Current ``PRAGMA user_version`` value.
+    """
+    cursor.execute('PRAGMA user_version')
+    row: object = cursor.fetchone()
+    if not isinstance(row, tuple) or not row or type(row[0]) is not int:
+        raise ValueError('Database schema version could not be read.')
+    return row[0]
+
+
+def check_schema_version(cursor: SqlCipherCursor, version: int) -> None:
+    """Require a supported schema belonging to the stable Metor database format."""
+    if version > DB_SCHEMA_VERSION:
+        raise NewerDatabaseSchemaError(
+            f'Database schema {version} is newer than supported schema {DB_SCHEMA_VERSION}.'
+        )
+    if version < DB_SCHEMA_MIN_SUPPORTED:
+        raise LegacyDatabaseSchemaError(
+            f'Database schema {version} predates minimum supported schema {DB_SCHEMA_MIN_SUPPORTED}.'
+        )
+    cursor.execute('PRAGMA application_id')
+    if cursor.fetchone() != (DATABASE_APPLICATION_ID,):
+        raise LegacyDatabaseSchemaError(
+            'Database does not belong to the stable Metor format.'
+        )
+
+
+def has_user_schema(cursor: SqlCipherCursor) -> bool:
+    """Report whether an unversioned database is owned or contains application objects.
+
+    Args:
+        cursor (SqlCipherCursor): Cursor on an already keyed database.
+
+    Returns:
+        bool: True when bootstrapping would adopt an existing format or schema.
+    """
+    cursor.execute('PRAGMA application_id')
+    if cursor.fetchone() != (0,):
+        return True
+    cursor.execute(
+        "SELECT name FROM sqlite_master WHERE name NOT GLOB 'sqlite_*' LIMIT 1"
+    )
+    return cursor.fetchone() is not None

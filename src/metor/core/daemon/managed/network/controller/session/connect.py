@@ -1,6 +1,7 @@
 """Outbound connection setup helpers for the connection controller."""
 
 import socket
+import time
 from typing import Optional, Tuple
 
 from metor.core.api import (
@@ -19,7 +20,11 @@ from metor.data import (
     HistoryReasonCode,
     SettingKey,
 )
-from metor.utils import Constants
+from metor.versioning import (
+    PEER_PROTOCOL_MIN_SUPPORTED,
+    PEER_PROTOCOL_VERSION,
+    negotiate_protocol_generation,
+)
 
 # Local Package Imports
 from metor.core.daemon.managed.network.handshake import HandshakeProtocol
@@ -27,31 +32,15 @@ from metor.core.daemon.managed.network.controller.session.protocols import (
     ConnectControllerProtocol,
 )
 from metor.core.daemon.managed.network.stream import TcpStreamReader
-
-
-def _close_socket(conn: Optional[socket.socket]) -> None:
-    """
-    Closes one failed outbound socket quietly.
-
-    Args:
-        conn (Optional[socket.socket]): The socket to close.
-
-    Returns:
-        None
-    """
-    if conn is None:
-        return
-
-    try:
-        conn.close()
-    except OSError:
-        pass
+from .recovery import _expire_accepted_recovery, schedule_accepted_recovery
 
 
 def connect_to(
     controller: ConnectControllerProtocol,
     target: str,
     origin: ConnectionOrigin = ConnectionOrigin.MANUAL,
+    *,
+    expected_context_generation: Optional[int] = None,
 ) -> None:
     """
     Initiates one outbound live connection attempt with retry and retunnel handling.
@@ -70,24 +59,48 @@ def connect_to(
     if not resolved or resolved[1] == controller._tm.onion:
         return
     alias, onion = resolved
+    recovery_deadline = controller._state.accepted_live_recovery_deadline(onion)
+    if recovery_deadline is not None and recovery_deadline <= time.monotonic():
+        if origin is not ConnectionOrigin.MANUAL:
+            return
+        previous_generation = controller._state.known_live_context_generation(onion)
+        if previous_generation is not None:
+            _expire_accepted_recovery(
+                controller, alias, onion, previous_generation, recovery_deadline
+            )
+    with controller._state.snapshot_barrier():
+        accepted_generation = controller._state.accepted_live_context_generation(onion)
+        if (
+            expected_context_generation is not None
+            and accepted_generation != expected_context_generation
+        ):
+            return
+        if accepted_generation is not None and origin is ConnectionOrigin.MANUAL:
+            origin = ConnectionOrigin.GRACE_RECONNECT
     retunnel_reconnect: bool = (
         origin is ConnectionOrigin.RETUNNEL and controller._state.is_retunneling(onion)
     )
 
-    if origin is ConnectionOrigin.MANUAL:
-        controller._state.clear_local_recovery_opt_out(onion)
-
-    if origin is not ConnectionOrigin.AUTO_RECONNECT:
-        controller._state.clear_scheduled_auto_reconnect(onion)
-
-    if controller._state.get_connection(onion) and not retunnel_reconnect:
-        return
-
-    implicit_accept: bool = False
-    if onion in controller._state.get_pending_connections_keys():
-        implicit_accept = True
-    else:
-        controller._state.add_outbound_attempt(onion, origin=origin)
+    with controller._state.snapshot_barrier():
+        if (
+            accepted_generation is not None
+            and controller._state.accepted_live_context_generation(onion)
+            != accepted_generation
+        ):
+            return
+        if origin is ConnectionOrigin.MANUAL:
+            controller._state.clear_local_recovery_opt_out(onion)
+        if origin is not ConnectionOrigin.AUTO_RECONNECT:
+            controller._state.clear_scheduled_auto_reconnect(onion)
+        if controller._state.get_connection(onion) and not retunnel_reconnect:
+            return
+        implicit_accept: bool = (
+            onion in controller._state.get_pending_connections_keys()
+        )
+        if not implicit_accept:
+            if controller._state.has_outbound_attempt(onion):
+                return
+            controller._state.add_outbound_attempt(onion, origin=origin)
 
     if implicit_accept:
         controller._broadcast(
@@ -101,11 +114,16 @@ def connect_to(
         controller.accept(target, origin=origin)
         return
 
+    attempt_id = controller._state.get_outbound_attempt_id(onion)
+    if attempt_id is None:
+        return
     max_conn: int = controller._config.get_int(SettingKey.MAX_CONCURRENT_CONNECTIONS)
     tracked_socket_count: int = controller._state.get_tracked_live_socket_count()
     if tracked_socket_count >= max_conn and not retunnel_reconnect:
-        controller._state.discard_outbound_attempt(onion)
-        if origin is ConnectionOrigin.AUTO_RECONNECT:
+        controller._state.discard_outbound_attempt(onion, attempt_id)
+        if accepted_generation is not None:
+            schedule_accepted_recovery(controller, alias, onion, accepted_generation)
+        elif origin is ConnectionOrigin.AUTO_RECONNECT:
             controller._state.clear_scheduled_auto_reconnect(onion)
         controller._broadcast(
             MaxConnectionsReachedEvent(
@@ -125,12 +143,13 @@ def connect_to(
     )
 
     handshake_success: bool = False
-    last_error: Optional[str] = None
     try:
         max_retries: int = controller._config.get_int(SettingKey.MAX_CONNECT_RETRIES)
         for retry_index in range(max_retries + 1):
             if controller._stop_flag.is_set():
                 break
+            if controller._state.get_outbound_attempt_id(onion) != attempt_id:
+                return
             if not retunnel_reconnect and controller._state.is_connected_or_pending(
                 onion
             ):
@@ -138,37 +157,49 @@ def connect_to(
             conn: Optional[socket.socket] = None
             try:
                 conn = controller._tm.connect(onion)
-                controller._state.bind_outbound_socket(onion, conn)
-                conn.settimeout(controller._config.get_float(SettingKey.TOR_TIMEOUT))
+                if not controller._state.bind_outbound_socket(onion, conn, attempt_id):
+                    controller._state.retire_connection(conn)
+                    return
+                tor_timeout = controller._config.get_float(SettingKey.TOR_TIMEOUT)
+                conn.settimeout(tor_timeout)
 
                 stream = TcpStreamReader(conn)
-                challenge_line: Optional[str] = stream.read_line()
+                challenge_line = stream.read_line(
+                    deadline=time.monotonic() + tor_timeout
+                )
 
                 if not challenge_line:
                     raise ConnectionError('Handshake incomplete.')
 
-                challenge, peer_version = HandshakeProtocol.parse_challenge_line(
-                    challenge_line
+                challenge, peer_current, peer_minimum = (
+                    HandshakeProtocol.parse_challenge_line(challenge_line)
                 )
-                if peer_version < Constants.PEER_PROTOCOL_MIN_SUPPORTED:
-                    raise ValueError(f'Peer protocol version {peer_version} is too old')
+                negotiated_version: int | None = negotiate_protocol_generation(
+                    PEER_PROTOCOL_VERSION,
+                    PEER_PROTOCOL_MIN_SUPPORTED,
+                    peer_current,
+                    peer_minimum,
+                )
+                if negotiated_version is None:
+                    raise ValueError('Peer protocol ranges do not overlap')
                 signature: Optional[str] = controller._crypto.sign_challenge(challenge)
 
                 if not signature:
-                    conn.close()
+                    controller._state.retire_connection(conn)
                     raise ConnectionError('Failed to sign live handshake challenge.')
 
                 local_onion: Optional[str] = controller._tm.onion
                 if not local_onion:
-                    conn.close()
+                    controller._state.retire_connection(conn)
                     raise ConnectionError('Local onion unavailable for live handshake.')
 
-                conn.sendall(
+                controller._state.send_frame(
+                    conn,
                     HandshakeProtocol.build_auth_line(
                         local_onion,
                         signature,
                         origin=origin,
-                    ).encode('utf-8')
+                    ).encode('utf-8'),
                 )
 
                 conn.settimeout(
@@ -192,17 +223,16 @@ def connect_to(
                 handshake_success = True
                 conn = None
                 return
-            except Exception as exc:
-                _close_socket(conn)
+            except Exception:
                 if conn is not None:
+                    controller._state.retire_connection(conn)
                     controller._state.clear_bound_outbound_socket(onion, conn)
-                if not controller._state.has_outbound_attempt(onion):
+                if controller._state.get_outbound_attempt_id(onion) != attempt_id:
                     return
                 if not retunnel_reconnect and controller._state.is_connected_or_pending(
                     onion
                 ):
                     return
-                last_error = str(exc).strip() or exc.__class__.__name__
                 if retry_index < max_retries:
                     controller._broadcast(
                         ConnectionRetryEvent(
@@ -216,7 +246,7 @@ def connect_to(
                     )
                     controller._sleep_connect_retry_backoff()
                 else:
-                    failure_reason: str = last_error or 'Connection timeout/exhausted'
+                    failure_reason = 'Connection attempt failed.'
                     controller._hm.log_event(
                         HistoryEvent.CONNECTION_LOST,
                         onion,
@@ -238,6 +268,11 @@ def connect_to(
                                 onion,
                                 failure_reason,
                             )
+                    elif accepted_generation is not None:
+                        controller._state.discard_outbound_attempt(onion, attempt_id)
+                        schedule_accepted_recovery(
+                            controller, alias, onion, accepted_generation
+                        )
                     else:
                         if origin is ConnectionOrigin.AUTO_RECONNECT:
                             controller._state.clear_scheduled_auto_reconnect(onion)
@@ -255,4 +290,4 @@ def connect_to(
                         )
     finally:
         if not handshake_success:
-            controller._state.discard_outbound_attempt(onion)
+            controller._state.discard_outbound_attempt(onion, attempt_id)

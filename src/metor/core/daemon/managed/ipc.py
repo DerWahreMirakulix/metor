@@ -8,6 +8,8 @@ import os
 import socket
 import threading
 import json
+import secrets
+import time
 from typing import List, Callable, Dict, Optional, Iterable
 
 from metor.core.api import (
@@ -21,7 +23,9 @@ from metor.core.api import (
 )
 from metor.data import SettingKey
 from metor.data.profile import ProfileManager
+from metor.shared import recv_before
 from metor.utils import Constants
+from metor.core.daemon.managed.writer import BoundedSocketWriter, FrameQueueFull
 
 
 class IpcServer:
@@ -63,7 +67,7 @@ class IpcServer:
     def __init__(
         self,
         pm: ProfileManager,
-        command_callback: Callable[[IpcCommand, socket.socket], None],
+        command_callback: Callable[[IpcCommand, socket.socket], bool | None],
         disconnect_callback: Optional[Callable[[socket.socket], None]] = None,
         error_callback: Optional[Callable[[str], None]] = None,
     ) -> None:
@@ -72,7 +76,7 @@ class IpcServer:
 
         Args:
             pm (ProfileManager): To store and retrieve the active daemon port.
-            command_callback (Callable): The function to call when a valid command arrives.
+            command_callback (Callable): Dispatch a typed command; only True admits persistent idle use.
             disconnect_callback (Optional[Callable]): Hook to clean up socket states externally.
             error_callback (Optional[Callable[[str], None]]): Hook to surface
                 unexpected runtime errors without terminating the acceptor.
@@ -81,7 +85,7 @@ class IpcServer:
             None
         """
         self._pm: ProfileManager = pm
-        self._command_callback: Callable[[IpcCommand, socket.socket], None] = (
+        self._command_callback: Callable[[IpcCommand, socket.socket], bool | None] = (
             command_callback
         )
         self._disconnect_callback: Optional[Callable[[socket.socket], None]] = (
@@ -91,9 +95,18 @@ class IpcServer:
 
         self._clients: List[socket.socket] = []
         self._lock: threading.Lock = threading.Lock()
+        self._client_write_locks: Dict[socket.socket, threading.Lock] = {}
+        self._client_writers: Dict[socket.socket, BoundedSocketWriter] = {}
+        self._revision_lock: threading.Lock = threading.Lock()
+        self._publication_lock: threading.Lock = threading.Lock()
+        self._state_revision: int = 0
+        self._epoch: str = secrets.token_hex(Constants.UUID_MSG_BYTES)
         self._stop_flag: threading.Event = threading.Event()
+        self._lifecycle_lock: threading.Lock = threading.Lock()
+        self._active_stops: int = 0
         self.port: Optional[int] = None
         self._server: Optional[socket.socket] = None
+        self._acceptor_thread: Optional[threading.Thread] = None
 
     def _report_internal_error(self, message: str) -> None:
         """
@@ -126,6 +139,18 @@ class IpcServer:
         with self._lock:
             return len(self._clients) > 0
 
+    def active_clients(self) -> set[socket.socket]:
+        """Returns a lock-safe snapshot of attached IPC sockets.
+
+        Args:
+            None
+
+        Returns:
+            set[socket.socket]: The resulting value.
+        """
+        with self._lock:
+            return set(self._clients)
+
     def start(self) -> None:
         """
         Starts the local IPC server in a background thread.
@@ -136,21 +161,57 @@ class IpcServer:
         Returns:
             None
         """
-        self._stop_flag.clear()
-        server: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        with self._lifecycle_lock:
+            if (
+                self._active_stops
+                or self._server is not None
+                or (
+                    self._acceptor_thread is not None
+                    and self._acceptor_thread.is_alive()
+                )
+            ):
+                raise RuntimeError('IPC listener is already active or stopping')
+            self._stop_flag.clear()
+            server: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            try:
+                server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
-        static_port: Optional[int] = self._pm.get_static_port()
-        bind_port: int = static_port if static_port else 0
+                static_port: Optional[int] = self._pm.get_static_port()
+                bind_port: int = static_port if static_port else 0
 
-        server.bind((Constants.LOCALHOST, bind_port))
-        server.listen(Constants.SERVER_BACKLOG)
+                server.bind((Constants.LOCALHOST, bind_port))
+                server.listen(Constants.SERVER_BACKLOG)
 
-        self._server = server
-        self.port = server.getsockname()[1]
-        self._pm.set_daemon_port(self.port, os.getpid())
+                self._server = server
+                self.port = server.getsockname()[1]
+                self._pm.set_daemon_port(self.port, os.getpid())
 
-        threading.Thread(target=self._acceptor, daemon=True).start()
+                acceptor = threading.Thread(target=self._acceptor, daemon=True)
+                self._acceptor_thread = acceptor
+                acceptor.start()
+            except BaseException:
+                self._stop_flag.set()
+                failed_port = self.port
+                try:
+                    server.close()
+                except Exception:
+                    self._server = server
+                else:
+                    self._server = None
+                    self.port = None
+                if failed_port is not None:
+                    try:
+                        self._pm.clear_daemon_port(
+                            expected_pid=os.getpid(), expected_port=failed_port
+                        )
+                    except Exception:
+                        pass
+                if (
+                    self._acceptor_thread is not None
+                    and not self._acceptor_thread.is_alive()
+                ):
+                    self._acceptor_thread = None
+                raise
 
     def stop(self) -> None:
         """
@@ -162,21 +223,60 @@ class IpcServer:
         Returns:
             None
         """
-        self._stop_flag.set()
-        if self._server:
+        with self._lifecycle_lock:
+            self._active_stops += 1
+            self._stop_flag.set()
+            server = self._server
+            self._server = None
+            acceptor = self._acceptor_thread
+        try:
+            self._stop_listener(server, acceptor)
+        finally:
+            with self._lifecycle_lock:
+                self._active_stops -= 1
+
+    def _stop_listener(
+        self,
+        server: Optional[socket.socket],
+        acceptor: Optional[threading.Thread],
+    ) -> None:
+        """Release a claimed listener without holding the lifecycle lock.
+
+        Args:
+            server: Listener socket claimed for this stop attempt.
+            acceptor: Acceptor thread claimed for this stop attempt.
+        Returns:
+            None
+        """
+        if server is not None:
             try:
-                self._server.close()
+                server.close()
             except Exception:
                 pass
-            self._server = None
+        acceptor_alive = False
+        if acceptor is not None and threading.current_thread() is not acceptor:
+            if acceptor.ident is not None:
+                acceptor.join(timeout=Constants.IPC_ACCEPTOR_STOP_TIMEOUT_SEC)
+            acceptor_alive = acceptor.is_alive()
+            if not acceptor_alive:
+                with self._lifecycle_lock:
+                    if self._acceptor_thread is acceptor:
+                        self._acceptor_thread = None
         with self._lock:
             clients: List[socket.socket] = list(self._clients)
             self._clients.clear()
+            self._client_write_locks.clear()
+            writers = list(self._client_writers.values())
+            self._client_writers.clear()
+        for writer in writers:
+            writer.close()
         for client in clients:
             try:
                 client.close()
             except Exception:
                 pass
+        if acceptor_alive:
+            raise TimeoutError('IPC acceptor did not stop within the shutdown bound')
 
     def broadcast(self, event: IpcEvent) -> None:
         """
@@ -194,6 +294,8 @@ class IpcServer:
         self,
         event: IpcEvent,
         recipients: Optional[Iterable[socket.socket]] = None,
+        *,
+        exclude: Optional[Iterable[socket.socket]] = None,
     ) -> None:
         """
         Sends one event payload to a subset of currently connected UI clients.
@@ -201,38 +303,37 @@ class IpcServer:
         Args:
             event (IpcEvent): The DTO event to broadcast.
             recipients (Optional[Iterable[socket.socket]]): Optional recipient subset.
+            exclude (Optional[Iterable[socket.socket]]): Clients omitted atomically
+                from the publication snapshot.
 
         Returns:
             None
         """
-        stamp_request_id(event)
-        msg: bytes = (event.to_json() + '\n').encode('utf-8')
-        dead_clients: List[socket.socket] = []
-
-        with self._lock:
-            clients: List[socket.socket] = list(self._clients)
-
-        if recipients is not None:
-            allowed_clients: set[socket.socket] = set(recipients)
-            clients = [client for client in clients if client in allowed_clients]
-
-        for client in clients:
-            try:
-                client.sendall(msg)
-            except Exception:
-                dead_clients.append(client)
-
-        if dead_clients:
+        with self._publication_lock:
+            if (
+                getattr(event, 'event_type', None)
+                is not EventType.RUNTIME_STATE_CHANGED
+            ):
+                stamp_request_id(event)
+            self._stamp_revision(event)
+            msg: bytes = (event.to_json() + '\n').encode('utf-8')
             with self._lock:
-                for dead_client in dead_clients:
-                    if dead_client in self._clients:
-                        self._clients.remove(dead_client)
+                clients: List[socket.socket] = list(self._clients)
 
-            for dead_client in dead_clients:
+            if recipients is not None:
+                allowed_clients: set[socket.socket] = set(recipients)
+                clients = [client for client in clients if client in allowed_clients]
+            if exclude is not None:
+                excluded_clients = set(exclude)
+                clients = [
+                    client for client in clients if client not in excluded_clients
+                ]
+
+            for client in clients:
                 try:
-                    dead_client.close()
-                except Exception:
-                    pass
+                    self._enqueue_client_frame(client, msg)
+                except (ConnectionError, FrameQueueFull):
+                    self._drop_client(client)
 
     def send_to(self, conn: socket.socket, event: IpcEvent) -> None:
         """
@@ -245,12 +346,150 @@ class IpcServer:
         Returns:
             None
         """
-        try:
-            stamp_request_id(event)
+        with self._publication_lock:
+            if (
+                getattr(event, 'event_type', None)
+                is not EventType.RUNTIME_STATE_CHANGED
+            ):
+                stamp_request_id(event)
+            self._stamp_revision(event)
             msg: bytes = (event.to_json() + '\n').encode('utf-8')
-            conn.sendall(msg)
-        except Exception:
-            pass
+            try:
+                self._enqueue_client_frame(conn, msg)
+            except (ConnectionError, FrameQueueFull):
+                self._drop_client(conn)
+
+    def flush(
+        self,
+        timeout: float,
+        recipients: Optional[Iterable[socket.socket]] = None,
+    ) -> bool:
+        """Waits a bounded time for published client control frames.
+
+        Args:
+            timeout (float): Total maximum wait in seconds.
+            recipients (Optional[Iterable[socket.socket]]): Optional client scope.
+
+        Returns:
+            bool: True when each scoped writer drained.
+        """
+        deadline = time.monotonic() + max(0.0, timeout)
+        allowed = set(recipients) if recipients is not None else None
+        with self._lock:
+            writers = [
+                writer
+                for conn, writer in self._client_writers.items()
+                if allowed is None or conn in allowed
+            ]
+        for writer in writers:
+            if not writer.flush(max(0.0, deadline - time.monotonic())):
+                return False
+        return True
+
+    def _enqueue_client_frame(self, conn: socket.socket, msg: bytes) -> None:
+        """Queues one client frame without holding daemon state across I/O.
+
+        Args:
+            conn (socket.socket): The conn input.
+            msg (bytes): The msg input.
+
+        Returns:
+            None
+        """
+        if not isinstance(conn, socket.socket):
+            with self._lock:
+                write_lock = self._client_write_locks.setdefault(conn, threading.Lock())
+            with write_lock:
+                conn.sendall(msg)
+            return
+        with self._lock:
+            writer = self._client_writers.get(conn)
+            if writer is None:
+                writer = BoundedSocketWriter(
+                    conn,
+                    capacity=Constants.IPC_WRITER_QUEUE_FRAMES,
+                    byte_capacity=Constants.IPC_WRITER_QUEUE_BYTES,
+                    max_frame_bytes=Constants.MAX_IPC_BYTES,
+                    on_failure=lambda failed, _exc: self._drop_client(failed),
+                    on_exit=lambda exited: self._writer_exited(conn, exited),
+                )
+                self._client_writers[conn] = writer
+        writer.enqueue(msg)
+
+    def _writer_exited(self, conn: socket.socket, writer: BoundedSocketWriter) -> None:
+        """Releases an idle IPC writer from the bounded inventory.
+
+        Args:
+            conn (socket.socket): The conn input.
+            writer (BoundedSocketWriter): The writer input.
+
+        Returns:
+            None
+        """
+        with self._lock:
+            if self._client_writers.get(conn) is writer:
+                self._client_writers.pop(conn, None)
+
+    def _drop_client(self, conn: socket.socket) -> None:
+        """Disconnects one failed or saturated client and releases its writer.
+
+        Args:
+            conn (socket.socket): The conn input.
+
+        Returns:
+            None
+        """
+        with self._lock:
+            if conn in self._clients:
+                self._clients.remove(conn)
+            self._client_write_locks.pop(conn, None)
+            writer = self._client_writers.pop(conn, None)
+        if writer is not None:
+            writer.close()
+        else:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+    def _stamp_revision(self, event: IpcEvent) -> None:
+        """Assigns one monotonic daemon event revision exactly once.
+
+        Args:
+            event (IpcEvent): Event entering the IPC stream.
+
+        Returns:
+            None
+        """
+        with self._revision_lock:
+            if getattr(event, 'revision', None) is None:
+                self._state_revision += 1
+                event.revision = self._state_revision
+            if getattr(event, 'epoch', None) is None and hasattr(event, 'epoch'):
+                event.epoch = self._epoch
+
+    def current_epoch(self) -> str:
+        """Returns the unguessable sequence epoch for this daemon process.
+
+        Args:
+            None
+
+        Returns:
+            str: Stable epoch for the current IPC server lifetime.
+        """
+        return self._epoch
+
+    def current_revision(self) -> int:
+        """Returns the latest assigned daemon event revision.
+
+        Args:
+            None
+
+        Returns:
+            int: Monotonic event revision.
+        """
+        with self._revision_lock:
+            return self._state_revision
 
     def _reject_client_limit(self, conn: socket.socket, max_clients: int) -> None:
         """
@@ -263,11 +502,18 @@ class IpcServer:
         Returns:
             None
         """
-        self.send_to(conn, self._build_client_limit_event(max_clients))
+        event = self._build_client_limit_event(max_clients)
+        stamp_request_id(event)
+        self._stamp_revision(event)
         try:
-            conn.close()
+            conn.sendall((event.to_json() + '\n').encode('utf-8'))
         except Exception:
             pass
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
     def _acceptor(self) -> None:
         """
@@ -307,7 +553,7 @@ class IpcServer:
                 try:
                     handler_thread: threading.Thread = threading.Thread(
                         target=self._handler,
-                        args=(conn,),
+                        args=(conn, time.monotonic()),
                         daemon=True,
                     )
                     with self._lock:
@@ -317,6 +563,10 @@ class IpcServer:
                     with self._lock:
                         if conn in self._clients:
                             self._clients.remove(conn)
+                        self._client_write_locks.pop(conn, None)
+                        writer = self._client_writers.pop(conn, None)
+                    if writer is not None:
+                        writer.close()
                     try:
                         conn.close()
                     except Exception:
@@ -340,7 +590,7 @@ class IpcServer:
                 )
                 continue
 
-    def _handler(self, conn: socket.socket) -> None:
+    def _handler(self, conn: socket.socket, accepted_at: float | None = None) -> None:
         """
         Target loop for receiving and parsing commands from a specific UI.
         Enforces read timeouts to prevent hanging threads if the UI crashes abruptly.
@@ -348,29 +598,43 @@ class IpcServer:
 
         Args:
             conn (socket.socket): The established client socket connection.
+            accepted_at: Monotonic accept time, before the handler was scheduled.
 
         Returns:
             None
         """
         daemon_ipc_timeout = self._pm.config.get_float(SettingKey.DAEMON_IPC_TIMEOUT)
         conn.settimeout(daemon_ipc_timeout)
+        started = time.monotonic() if accepted_at is None else accepted_at
+        admission_deadline: float | None = started + daemon_ipc_timeout
+        prompted = False
         buffer: bytearray = bytearray()
         try:
             while not self._stop_flag.is_set():
                 try:
-                    data: bytes = conn.recv(Constants.TCP_BUFFER_SIZE)
+                    # Keep writer/stop polling bounded even during credential entry.
+                    read_deadline = (
+                        min(admission_deadline, time.monotonic() + daemon_ipc_timeout)
+                        if admission_deadline is not None
+                        else None
+                    )
+                    data = recv_before(conn, Constants.TCP_BUFFER_SIZE, read_deadline)
                     if not data:
                         break
 
                     buffer.extend(data)
 
-                    if len(buffer) > Constants.MAX_IPC_BYTES:
-                        self.send_to(conn, create_event(EventType.UNKNOWN_COMMAND))
-                        break
-
                     while b'\n' in buffer:
+                        if (
+                            admission_deadline is not None
+                            and time.monotonic() >= admission_deadline
+                        ):
+                            return
                         line_bytes, _, rest = buffer.partition(b'\n')
                         buffer = bytearray(rest)
+                        if len(line_bytes) + 1 > Constants.MAX_IPC_BYTES:
+                            self.send_to(conn, create_event(EventType.UNKNOWN_COMMAND))
+                            return
                         request_id: Optional[str] = None
 
                         try:
@@ -399,7 +663,18 @@ class IpcServer:
 
                         try:
                             with request_context(cmd.request_id):
-                                self._command_callback(cmd, conn)
+                                admitted = self._command_callback(cmd, conn)
+                            if admitted is True:
+                                admission_deadline = None
+                            elif admission_deadline is not None and not prompted:
+                                # Only the first complete typed exchange opens a
+                                # fixed window for the user to supply credentials.
+                                prompted = True
+                                admission_deadline = max(
+                                    admission_deadline,
+                                    started
+                                    + Constants.IPC_CREDENTIAL_PROMPT_TIMEOUT_SEC,
+                                )
                         except Exception:
                             self.send_to(
                                 conn,
@@ -410,7 +685,15 @@ class IpcServer:
                                     else None,
                                 ),
                             )
+                    if len(buffer) > Constants.MAX_IPC_BYTES:
+                        self.send_to(conn, create_event(EventType.UNKNOWN_COMMAND))
+                        break
                 except socket.timeout:
+                    if (
+                        admission_deadline is not None
+                        and time.monotonic() >= admission_deadline
+                    ):
+                        break
                     continue
         except Exception:
             pass
@@ -418,9 +701,14 @@ class IpcServer:
             with self._lock:
                 if conn in self._clients:
                     self._clients.remove(conn)
-            try:
-                conn.close()
-            except Exception:
-                pass
+                self._client_write_locks.pop(conn, None)
+                writer = self._client_writers.pop(conn, None)
+            if writer is not None:
+                writer.close()
+            else:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
             if self._disconnect_callback:
                 self._disconnect_callback(conn)

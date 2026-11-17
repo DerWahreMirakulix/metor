@@ -37,6 +37,7 @@ class RemoveContactCommand(IpcCommand):
     """Removes a saved contact or discovered peer."""
 
     alias: str
+    onion: Optional[str] = None
     command_type: CommandType = field(
         default=CommandType.REMOVE_CONTACT,
         init=False,
@@ -50,6 +51,7 @@ class RenameContactCommand(IpcCommand):
 
     old_alias: str
     new_alias: str
+    onion: Optional[str] = None
     command_type: CommandType = field(
         default=CommandType.RENAME_CONTACT,
         init=False,

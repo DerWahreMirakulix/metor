@@ -37,6 +37,7 @@ CONTACT_EVENT_TYPES: dict[ContactOperationType, EventType] = {
         EventType.DISCOVERED_PEER_NOT_FOUND
     ),
     ContactOperationType.INVALID_ONION: EventType.INVALID_TARGET,
+    ContactOperationType.INVALID_ALIAS: EventType.INVALID_TARGET,
     ContactOperationType.ONION_IN_USE: EventType.ONION_IN_USE,
     ContactOperationType.PEER_ANONYMIZED: EventType.PEER_ANONYMIZED,
     ContactOperationType.PEER_CANT_DELETE_ACTIVE: EventType.PEER_CANT_DELETE_ACTIVE,
@@ -117,6 +118,7 @@ class DatabaseCommandContactsMixin(DatabaseCommandHandlerSupportMixin):
         result: ContactOperationResult = self._cm.remove_contact(
             cmd.alias,
             active_onions,
+            expected_onion=cmd.onion,
         )
         if result.success:
             self._emit_contact_side_effects(result.renames, result.removals)
@@ -137,14 +139,15 @@ class DatabaseCommandContactsMixin(DatabaseCommandHandlerSupportMixin):
         result: ContactOperationResult = self._cm.rename_contact(
             cmd.old_alias,
             cmd.new_alias,
+            expected_onion=cmd.onion,
         )
         if result.success:
-            self._broadcast(
+            self._broadcast_contact_event(
                 create_event(
                     EventType.RENAME_SUCCESS,
                     {
-                        'old_alias': cmd.old_alias,
-                        'new_alias': cmd.new_alias,
+                        'old_alias': str(result.params['old_alias']),
+                        'new_alias': str(result.params['new_alias']),
                         'onion': str(result.params.get('onion') or '') or None,
                     },
                 )

@@ -6,7 +6,14 @@ for sensitive cryptographic and Tor data.
 
 from pathlib import Path
 
-from metor.utils import Constants
+from metor.utils import Constants, create_private_directory_tree
+
+# Local Package Imports
+from metor.data.profile.support import (
+    profile_lock_identity,
+    require_profile_name,
+    validate_profile_directory,
+)
 
 
 class Paths:
@@ -22,8 +29,39 @@ class Paths:
         Returns:
             None
         """
-        self.profile_name: str = profile_name
+        self.profile_name = require_profile_name(profile_name)
         self.base_dir: Path = Constants.DATA / self.profile_name
+        validate_profile_directory(self.base_dir)
+
+    @classmethod
+    def for_migration_staging(
+        cls,
+        source_profile_name: str,
+        staged_path: Path,
+    ) -> 'Paths':
+        """Builds paths for the one exact internal security-migration generation.
+
+        Args:
+            source_profile_name (str): Valid public source profile identity.
+            staged_path (Path): Expected transaction staging directory.
+
+        Returns:
+            Paths: Resolver bound to the verified internal directory.
+
+        Raises:
+            ValueError: If the staging path is not the source's exact transaction
+                child under the configured data root.
+        """
+        safe_name = require_profile_name(source_profile_name)
+        expected = Constants.DATA / f'.{safe_name}.security-migration.staged'
+        if staged_path != expected:
+            raise ValueError('Invalid profile migration staging path.')
+        validate_profile_directory(staged_path)
+
+        instance = cls.__new__(cls)
+        instance.profile_name = staged_path.name
+        instance.base_dir = staged_path
+        return instance
 
     def exists(self) -> bool:
         """
@@ -47,16 +85,28 @@ class Paths:
         Returns:
             None
         """
-        self.base_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-        self.base_dir.chmod(0o700)
-
-        hs_dir: Path = self.base_dir / Constants.HIDDEN_SERVICE_DIR
-        hs_dir.mkdir(mode=0o700, exist_ok=True)
-        hs_dir.chmod(0o700)
-
-        data_dir: Path = self.base_dir / Constants.TOR_DATA_DIR
-        data_dir.mkdir(mode=0o700, exist_ok=True)
-        data_dir.chmod(0o700)
+        profile_component: str = self.base_dir.name
+        blob_component: str = Constants.BLOBS_DIR
+        create_private_directory_tree(
+            Constants.DATA,
+            (
+                (profile_component,),
+                (profile_component, Constants.HIDDEN_SERVICE_DIR),
+                (profile_component, Constants.TOR_DATA_DIR),
+                (profile_component, Constants.PROTECTED_KEY_DIR),
+                (profile_component, blob_component),
+                (
+                    profile_component,
+                    blob_component,
+                    Constants.PERSISTENT_BLOBS_DIR,
+                ),
+                (
+                    profile_component,
+                    blob_component,
+                    Constants.TEMPORARY_BLOBS_DIR,
+                ),
+            ),
+        )
 
     def get_config_dir(self) -> Path:
         """
@@ -106,6 +156,35 @@ class Paths:
         """
         return self.get_config_dir() / Constants.DAEMON_PID_FILE
 
+    def get_daemon_start_lock_file(self) -> Path:
+        """Returns the stable startup/lifecycle lock target outside the profile.
+
+        Migration replaces the profile directory and rename moves it. Keeping
+        startup ownership in the data root prevents either operation from
+        replacing the held lock object or invalidating Windows file handles.
+        ``FileLock`` appends the lock suffix to this target.
+
+        Returns:
+            Path: Profile-qualified lock target in the shared data root.
+        """
+        return (
+            Constants.DATA / f'.daemon-start.{profile_lock_identity(self.profile_name)}'
+        )
+
+    def get_daemon_instance_lock_file(self) -> Path:
+        """Returns the external lock held throughout one managed daemon lifetime.
+
+        The child owns this gate even when its spawning parent disappears before
+        IPC publication. Profile lifecycle mutations must acquire the same gate
+        before replacing storage; PID and port files alone cannot prove idleness.
+
+        Returns:
+            Path: Stable profile-qualified daemon-lifetime lock target.
+        """
+        return Constants.DATA / (
+            f'.daemon-instance.{profile_lock_identity(self.profile_name)}'
+        )
+
     def get_hidden_service_dir(self) -> Path:
         """
         Retrieves the Tor hidden service directory path without auto-creating it.
@@ -141,3 +220,69 @@ class Paths:
             Path: The database file path.
         """
         return self.get_config_dir() / Constants.DB_FILE
+
+    def get_protected_key_dir(self) -> Path:
+        """Returns the directory containing protector-owned PMK metadata.
+
+        Args:
+            None
+
+        Returns:
+            Path: Protected key-material directory.
+        """
+        return self.get_config_dir() / Constants.PROTECTED_KEY_DIR
+
+    def get_keyslot_file(self) -> Path:
+        """Returns the default password-protector keyslot path.
+
+        Args:
+            None
+
+        Returns:
+            Path: Versioned keyslot file.
+        """
+        return self.get_protected_key_dir() / Constants.PROFILE_KEYSLOT_FILE
+
+    def get_quick_unlock_file(self) -> Path:
+        """Returns the PIN quick-unlock verifier metadata path.
+
+        Args:
+            None
+
+        Returns:
+            Path: Protected quick-unlock metadata file.
+        """
+        return self.get_protected_key_dir() / Constants.QUICK_UNLOCK_FILE
+
+    def get_blob_dir(self) -> Path:
+        """Returns the mode-appropriate external-object root directory.
+
+        Args:
+            None
+
+        Returns:
+            Path: Blob storage root.
+        """
+        return self.get_config_dir() / Constants.BLOBS_DIR
+
+    def get_persistent_blob_dir(self) -> Path:
+        """Returns the persistent external blob directory.
+
+        Args:
+            None
+
+        Returns:
+            Path: Persistent blob directory.
+        """
+        return self.get_blob_dir() / Constants.PERSISTENT_BLOBS_DIR
+
+    def get_temporary_blob_dir(self) -> Path:
+        """Returns the ephemeral external blob spool directory.
+
+        Args:
+            None
+
+        Returns:
+            Path: Temporary blob directory.
+        """
+        return self.get_blob_dir() / Constants.TEMPORARY_BLOBS_DIR

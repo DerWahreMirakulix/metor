@@ -5,8 +5,33 @@ from typing import Optional
 
 # Local Package Imports
 from metor.core.api.base import IpcEvent
-from metor.core.api.codes import EventType
+from metor.core.api.codes import (
+    ClientUnlockMethod,
+    EventType,
+    NotificationPrivacy,
+)
 from metor.core.api.registry import register_event
+
+
+@register_event(EventType.FRONTEND_LEASE)
+@dataclass
+class FrontendLeaseEvent(IpcEvent):
+    """Report one lifetime join or release without granting content access."""
+
+    state: str = field(metadata={'example': 'joined'})
+    event_type: EventType = field(default=EventType.FRONTEND_LEASE, init=False)
+
+    def __post_init__(self) -> None:
+        """Limit responses to defined, presentation-safe states."""
+        if self.state not in (
+            'joined',
+            'released',
+            'denied',
+            'stopping',
+            'independent',
+            'full',
+        ):
+            raise ValueError('Invalid frontend lease state')
 
 
 @register_event(EventType.AUTH_REQUIRED)
@@ -68,13 +93,217 @@ class SessionAuthenticatedEvent(IpcEvent):
     )
 
 
+@register_event(EventType.CLIENT_RESTRICTED)
+@dataclass
+class ClientRestrictedEvent(IpcEvent):
+    """Confirms per-session restriction and supplies a one-use unlock challenge."""
+
+    unlock_method: ClientUnlockMethod
+    challenge: Optional[str] = None
+    salt: Optional[str] = None
+    device_lifecycle: bool = False
+    accept_calls_locked: bool = False
+    event_type: EventType = field(default=EventType.CLIENT_RESTRICTED, init=False)
+
+
+@register_event(EventType.RESTRICTED_CLIENT_STATE)
+@dataclass
+class RestrictedClientStateEvent(IpcEvent):
+    """Projects only the requesting client's immutable restriction policy."""
+
+    restricted: bool = False
+    notification_privacy: NotificationPrivacy = NotificationPrivacy.OFF
+    accept_calls_locked: bool = False
+    event_type: EventType = field(default=EventType.RESTRICTED_CLIENT_STATE, init=False)
+
+
+@register_event(EventType.CLIENT_REAUTHORIZED)
+@dataclass
+class ClientReauthorizedEvent(IpcEvent):
+    """Confirms that only the requesting restricted client was reauthorized."""
+
+    event_type: EventType = field(default=EventType.CLIENT_REAUTHORIZED, init=False)
+
+
+@register_event(EventType.CLIENT_ACCESS_RESTRICTED)
+@dataclass
+class ClientAccessRestrictedEvent(IpcEvent):
+    """Rejects an operation outside the locked-session policy."""
+
+    command: str
+    event_type: EventType = field(
+        default=EventType.CLIENT_ACCESS_RESTRICTED,
+        init=False,
+    )
+
+
+@register_event(EventType.QUICK_UNLOCK_CONFIGURED)
+@dataclass
+class QuickUnlockConfiguredEvent(IpcEvent):
+    """Confirms installation or removal of the PIN verifier."""
+
+    enabled: bool
+    event_type: EventType = field(
+        default=EventType.QUICK_UNLOCK_CONFIGURED,
+        init=False,
+    )
+
+
+@register_event(EventType.QUICK_UNLOCK_FAILED)
+@dataclass
+class QuickUnlockFailedEvent(IpcEvent):
+    """Rejects invalid quick-unlock verifier configuration or proof."""
+
+    password_required: bool = False
+    challenge: Optional[str] = None
+    salt: Optional[str] = None
+    event_type: EventType = field(default=EventType.QUICK_UNLOCK_FAILED, init=False)
+
+
 @register_event(EventType.SELF_DESTRUCT_INITIATED)
 @dataclass
 class SelfDestructInitiatedEvent(IpcEvent):
     """Signals that daemon self-destruction has started."""
 
+    profile: Optional[str] = None
+    operation_id: Optional[str] = None
     event_type: EventType = field(
         default=EventType.SELF_DESTRUCT_INITIATED,
+        init=False,
+    )
+
+
+@register_event(EventType.SELF_DESTRUCT_COMPLETED)
+@dataclass
+class SelfDestructCompletedEvent(IpcEvent):
+    """Signals that protected key access was destroyed before cleanup completion."""
+
+    profile: Optional[str] = None
+    operation_id: Optional[str] = None
+    event_type: EventType = field(
+        default=EventType.SELF_DESTRUCT_COMPLETED,
+        init=False,
+    )
+
+
+@register_event(EventType.SELF_DESTRUCT_KEY_DESTROYED)
+@dataclass
+class SelfDestructKeyDestroyedEvent(IpcEvent):
+    """Confirms irreversible destruction of protected profile-key access."""
+
+    profile: str
+    operation_id: Optional[str] = None
+    event_type: EventType = field(
+        default=EventType.SELF_DESTRUCT_KEY_DESTROYED,
+        init=False,
+    )
+
+
+@register_event(EventType.SELF_DESTRUCT_CLEANUP_FAILED)
+@dataclass
+class SelfDestructCleanupFailedEvent(IpcEvent):
+    """Reports the exact failed destruction phase and irreversible state."""
+
+    profile: str
+    phase: str = 'cleanup'
+    key_destroyed: bool = True
+    operation_id: Optional[str] = None
+    event_type: EventType = field(
+        default=EventType.SELF_DESTRUCT_CLEANUP_FAILED,
+        init=False,
+    )
+
+
+@register_event(EventType.SELF_DESTRUCT_RUNTIME_RELEASED)
+@dataclass
+class SelfDestructRuntimeReleasedEvent(IpcEvent):
+    """Confirms fenced runtime shutdown, database close and runtime-key release for one purge."""
+
+    profile: str = ''
+    operation_id: str = ''
+    event_type: EventType = field(
+        default=EventType.SELF_DESTRUCT_RUNTIME_RELEASED, init=False
+    )
+
+
+@register_event(EventType.SELF_DESTRUCT_SAFE)
+@dataclass
+class SelfDestructSafeEvent(IpcEvent):
+    """Confirms combined encrypted-profile access destruction and local power-off safety.
+
+    The exact operation has released all runtime access, closed the database,
+    cleared runtime keys and destroyed persistent key protection. File cleanup
+    may still be running. This says nothing about unrelated host runtimes and
+    does not itself grant a caller permission to shut down the host.
+    """
+
+    profile: str = ''
+    operation_id: str = ''
+    event_type: EventType = field(default=EventType.SELF_DESTRUCT_SAFE, init=False)
+
+
+@register_event(EventType.PROFILE_EXIT_PREPARED)
+@dataclass
+class ProfileExitPreparedEvent(IpcEvent):
+    """Confirms this client's local resources were released for profile exit."""
+
+    profile: str
+    event_type: EventType = field(
+        default=EventType.PROFILE_EXIT_PREPARED,
+        init=False,
+    )
+
+
+@register_event(EventType.RUNTIME_STATE_CHANGED)
+@dataclass
+class RuntimeStateChangedEvent(IpcEvent):
+    """Invalidates one content-free canonical runtime projection scope."""
+
+    scope: str
+    onion: Optional[str] = None
+    event_type: EventType = field(
+        default=EventType.RUNTIME_STATE_CHANGED,
+        init=False,
+    )
+
+
+@register_event(EventType.PASSWORD_CHANGED)
+@dataclass
+class PasswordChangedEvent(IpcEvent):
+    """Signals that the current profile PMK was rewrapped successfully."""
+
+    event_type: EventType = field(default=EventType.PASSWORD_CHANGED, init=False)
+
+
+@register_event(EventType.PASSWORD_CHANGE_UNSUPPORTED)
+@dataclass
+class PasswordChangeUnsupportedEvent(IpcEvent):
+    """Signals that password change is unavailable for plaintext storage."""
+
+    event_type: EventType = field(
+        default=EventType.PASSWORD_CHANGE_UNSUPPORTED,
+        init=False,
+    )
+
+
+@register_event(EventType.INVALID_NEW_PASSWORD)
+@dataclass
+class InvalidNewPasswordEvent(IpcEvent):
+    """Signals that a replacement password fails validation."""
+
+    event_type: EventType = field(
+        default=EventType.INVALID_NEW_PASSWORD,
+        init=False,
+    )
+
+
+@register_event(EventType.PASSWORD_CHANGE_FAILED)
+@dataclass
+class PasswordChangeFailedEvent(IpcEvent):
+    """Signals that password-keyslot replacement could not be committed."""
+
+    event_type: EventType = field(
+        default=EventType.PASSWORD_CHANGE_FAILED,
         init=False,
     )
 
@@ -126,11 +355,12 @@ class UnknownCommandEvent(IpcEvent):
 @register_event(EventType.PROTOCOL_MISMATCH)
 @dataclass
 class ProtocolMismatchEvent(IpcEvent):
-    """Signals that the client IPC protocol version is too old."""
+    """Signals that the client and daemon IPC ranges do not overlap."""
 
-    daemon_version: int
-    min_supported: int
-    client_version: Optional[int] = None
+    daemon_current_version: int
+    daemon_min_supported: int
+    client_current_version: int
+    client_min_supported: int
     event_type: EventType = field(
         default=EventType.PROTOCOL_MISMATCH,
         init=False,

@@ -4,15 +4,22 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from metor.utils import Constants
+from metor.core.api import ContentType, Delivery
 
 from metor.data.message.models import (
     MessageClearOperationType,
     MessageClearResult,
     MessageDirection,
+    MessageDeleteOutcome,
     MessageStatus,
-    MessageType,
     QueuedMessageResult,
     StoredMessageRecord,
+    PendingLiveRecord,
+    InboundVoiceRecord,
+    InboundDropOutcome,
+    PendingLiveAdmission,
+    VoicePayloadRecord,
+    RetainedMessagePage,
     UnreadInboxSummaryRecord,
 )
 from metor.data.profile import ProfileManager
@@ -23,31 +30,35 @@ from metor.data.sql import MessageRepository, SqlManager
 class MessageManager:
     """Manages the persistence of asynchronous messages (inbox and outbox)."""
 
-    def __init__(self, pm: ProfileManager, password: Optional[str] = None) -> None:
+    def __init__(
+        self, pm: ProfileManager, database_key: Optional[bytes] = None
+    ) -> None:
         """
         Initializes the message manager and its centralized persistence repository.
 
         Args:
             pm (ProfileManager): The profile manager instance for context.
-            password (Optional[str]): The master password for SQLCipher encryption.
+            database_key (Optional[bytes]): PMK-derived SQLCipher key.
 
         Returns:
             None
         """
         self._pm: ProfileManager = pm
         self._db_path: Path = self._pm.paths.get_db_file()
-        self._sql: SqlManager = SqlManager(self._db_path, self._pm.config, password)
+        self._sql: SqlManager = SqlManager(self._db_path, self._pm.config, database_key)
         self._messages: MessageRepository = self._sql.messages
 
     def queue_message(
         self,
         contact_onion: str,
         direction: MessageDirection,
-        msg_type: MessageType,
+        delivery: Delivery,
+        content_type: ContentType,
         payload: str,
         status: MessageStatus,
         msg_id: Optional[str] = None,
         timestamp: Optional[str] = None,
+        retained_bytes: int = 0,
     ) -> QueuedMessageResult:
         """
         Inserts one logical message into durable storage.
@@ -55,11 +66,13 @@ class MessageManager:
         Args:
             contact_onion (str): The onion address of the remote peer.
             direction (MessageDirection): Whether the message is inbound or outbound.
-            msg_type (MessageType): The type of payload.
+            delivery (Delivery): Live or persistent delivery semantics.
+            content_type (ContentType): The typed payload discriminator.
             payload (str): The actual message content.
             status (MessageStatus): The initial persisted status.
             msg_id (Optional[str]): Stable logical message id.
             timestamp (Optional[str]): Stable authored ISO timestamp.
+            retained_bytes (int): External binary bytes retained for this item.
 
         Returns:
             QueuedMessageResult: The inserted receipt id and duplicate flag.
@@ -67,11 +80,71 @@ class MessageManager:
         return self._messages.queue_message(
             contact_onion=contact_onion,
             direction=direction,
-            msg_type=msg_type,
+            delivery=delivery,
+            content_type=content_type,
             payload=payload,
             status=status,
             msg_id=msg_id,
             timestamp=timestamp,
+            retained_bytes=retained_bytes,
+        )
+
+    def update_retained_bytes(
+        self, contact_onion: str, msg_id: str, retained_bytes: int, payload: str
+    ) -> bool:
+        """Updates external-payload accounting and serialized content metadata.
+
+        Args:
+            contact_onion (str): Peer onion identity.
+            msg_id (str): Stable logical message identifier.
+            retained_bytes (int): Current retained bytes.
+            payload (str): Updated compact metadata.
+
+        Returns:
+            bool: True when a pending outbound receipt matched.
+        """
+        return self._messages.update_retained_bytes(
+            contact_onion, msg_id, retained_bytes, payload
+        )
+
+    def update_inbound_voice_metadata(
+        self, contact_onion: str, msg_id: str, retained_bytes: int, payload: str
+    ) -> bool:
+        """Updates one inbound Voice receipt and spool metadata.
+
+        Args:
+            contact_onion (str): Peer onion identity.
+            msg_id (str): Stable logical Voice identity.
+            retained_bytes (int): Retained bytes.
+            payload (str): Final content metadata.
+
+        Returns:
+            bool: True when the receipt matched.
+        """
+        return self._messages.update_inbound_voice_metadata(
+            contact_onion, msg_id, retained_bytes, payload
+        )
+
+    def promote_inbound_voice_to_drop(
+        self,
+        contact_onion: str,
+        msg_id: str,
+        payload: str,
+        retained_bytes: int,
+    ) -> bool:
+        """Strengthens one inbound Voice identity to DROP semantics.
+
+        Args:
+            contact_onion (str): The contact onion input.
+            msg_id (str): The msg id input.
+            payload (str): The payload input.
+            retained_bytes (int): The retained bytes input.
+
+        Returns:
+            bool: Whether the documented condition holds.
+        """
+        return self._messages.promote_inbound_voice_to_drop(
+            contact_onion, msg_id, payload, retained_bytes
         )
 
     def has_inbound_message(self, contact_onion: str, msg_id: str) -> bool:
@@ -87,6 +160,190 @@ class MessageManager:
         """
         return self._messages.has_inbound_message(contact_onion, msg_id)
 
+    def has_inbound_text_receipt(self, contact_onion: str, msg_id: str) -> bool:
+        """Reports whether an inbound logical identity is typed as text.
+
+        Args:
+            contact_onion (str): Authenticated peer identity.
+            msg_id (str): Stable logical identity.
+
+        Returns:
+            bool: True only for an existing inbound text receipt.
+        """
+        return self._messages.has_inbound_text_receipt(contact_onion, msg_id)
+
+    def store_inbound_drop_text(
+        self,
+        contact_onion: str,
+        msg_id: str,
+        payload: str,
+        timestamp: Optional[str],
+        max_unread: int,
+    ) -> InboundDropOutcome:
+        """Creates or upgrades one inbound text identity to DROP semantics.
+
+        Args:
+            contact_onion (str): Authenticated peer identity.
+            msg_id (str): Stable logical identity.
+            payload (str): Received text payload.
+            timestamp (Optional[str]): Authored timestamp.
+            max_unread (int): Configured inbound DROP backlog ceiling.
+
+        Returns:
+            InboundDropOutcome: Durable transition result.
+        """
+        return self._messages.store_inbound_drop_text(
+            contact_onion, msg_id, payload, timestamp, max_unread
+        )
+
+    def get_inbound_voice(
+        self, contact_onion: str, msg_id: str
+    ) -> Optional[InboundVoiceRecord]:
+        """Returns retained inbound Voice metadata needed for exact resume.
+
+        Args:
+            contact_onion (str): The contact onion input.
+            msg_id (str): The msg id input.
+
+        Returns:
+            Optional[InboundVoiceRecord]: The resulting value.
+        """
+        return self._messages.get_inbound_voice(contact_onion, msg_id)
+
+    def has_inbound_voice_receipt(self, contact_onion: str, msg_id: str) -> bool:
+        """Reports whether an inbound identity is typed as Voice.
+
+        Args:
+            contact_onion (str): The contact onion input.
+            msg_id (str): The msg id input.
+
+        Returns:
+            bool: Whether the documented condition holds.
+        """
+        return self._messages.has_inbound_voice_receipt(contact_onion, msg_id)
+
+    def get_voice_payload(
+        self,
+        contact_onion: str,
+        msg_id: str,
+        direction: MessageDirection,
+    ) -> Optional[VoicePayloadRecord]:
+        """Returns one exact-direction retained Voice metadata record.
+
+        Args:
+            contact_onion (str): The contact onion input.
+            msg_id (str): The msg id input.
+            direction (MessageDirection): The direction input.
+
+        Returns:
+            Optional[VoicePayloadRecord]: The resulting value.
+        """
+        return self._messages.get_voice_payload(contact_onion, msg_id, direction)
+
+    def has_outbound_identity(self, msg_id: str) -> bool:
+        """Guards a new Voice recording from reusing any retained outbound identity."""
+        return self._messages.has_outbound_identity(msg_id)
+
+    def message_outcome(
+        self, onion: str, msg_id: str, direction: MessageDirection
+    ) -> tuple[Delivery, MessageStatus] | None:
+        """Exposes content-free durable receipt facts for exact-ID reconciliation.
+
+        Args:
+            onion: Canonical peer identity, never a mutable alias.
+            msg_id: Exact logical message ID.
+            direction: Qualified local message direction.
+        Returns:
+            tuple[Delivery, MessageStatus] | None: Retained receipt facts, if any.
+        """
+        return self._messages.message_outcome(onion, msg_id, direction)
+
+    def message_state(
+        self, onion: str, msg_id: str, direction: MessageDirection
+    ) -> tuple[Delivery, MessageStatus, bool] | None:
+        """Exposes atomic receipt/archive metadata through the existing storage owner.
+
+        Args:
+            onion: Canonical peer identity.
+            msg_id: Exact message identity.
+            direction: Explicit local direction.
+        Returns:
+            tuple[Delivery, MessageStatus, bool] | None: Receipt facts and local archive availability.
+        """
+        return self._messages.message_state(onion, msg_id, direction)
+
+    def drop_delivery_pending(self, receipt_id: int, onion: str, msg_id: str) -> bool:
+        """Checks exact durable DROP emission authority under the caller's Core barrier."""
+        return self._messages.drop_delivery_pending(receipt_id, onion, msg_id)
+
+    def list_retained_messages(
+        self,
+        contact_onion: Optional[str] = None,
+        delivery: Optional[Delivery] = None,
+        direction: Optional[MessageDirection] = None,
+        cursor: Optional[str] = None,
+        limit: int = Constants.DEFAULT_RETAINED_PAGE_SIZE,
+        owner_token: Optional[str] = None,
+        msg_id: Optional[str] = None,
+    ) -> RetainedMessagePage:
+        """Returns a non-consuming page of retained logical identities.
+
+        Args:
+            contact_onion (Optional[str]): The contact onion input.
+            delivery (Optional[Delivery]): The delivery input.
+            direction (Optional[MessageDirection]): The direction input.
+            cursor (Optional[str]): The cursor input.
+            limit (int): The limit input.
+            owner_token (Optional[str]): The owner token input.
+            msg_id (Optional[str]): The msg id input.
+
+        Returns:
+            RetainedMessagePage: The resulting value.
+        """
+        return self._messages.list_retained_messages(
+            contact_onion, delivery, direction, cursor, limit, owner_token, msg_id
+        )
+
+    def release_inbound_voice(
+        self, contact_onion: str, msg_id: str
+    ) -> Optional[tuple[str, Delivery]]:
+        """Consumes one finalized inbound Voice after explicit client release.
+
+        Args:
+            contact_onion (str): The contact onion input.
+            msg_id (str): The msg id input.
+
+        Returns:
+            Optional[tuple[str, Delivery]]: The resulting value.
+        """
+        return self._messages.release_inbound_voice(
+            contact_onion,
+            msg_id,
+            self._pm.config.get_bool(SettingKey.EPHEMERAL_MESSAGES),
+        )
+
+    def get_unread_inbound_live_voices(self) -> List[InboundVoiceRecord]:
+        """Returns crash-safe inbound LIVE Voice items awaiting consume.
+
+        Args:
+            None
+
+        Returns:
+            List[InboundVoiceRecord]: The resulting value.
+        """
+        return self._messages.get_unread_inbound_live_voices()
+
+    def get_unread_inbound_voices(self) -> List[InboundVoiceRecord]:
+        """Returns all crash-safe inbound Voice items awaiting consume.
+
+        Args:
+            None
+
+        Returns:
+            List[InboundVoiceRecord]: The resulting value.
+        """
+        return self._messages.get_unread_inbound_voices()
+
     def get_unread_live_count(self, contact_onion: str) -> int:
         """
         Counts crash-safe inbound live messages awaiting explicit consume.
@@ -97,7 +354,7 @@ class MessageManager:
         Returns:
             int: The unread inbound live-message backlog for the peer.
         """
-        return self._messages.count_unread_by_type(contact_onion, MessageType.LIVE_TEXT)
+        return self._messages.count_unread_by_delivery(contact_onion, Delivery.LIVE)
 
     def get_unread_drop_count(self, contact_onion: str) -> int:
         """
@@ -109,7 +366,7 @@ class MessageManager:
         Returns:
             int: The unread inbound drop-message backlog for the peer.
         """
-        return self._messages.count_unread_by_type(contact_onion, MessageType.DROP_TEXT)
+        return self._messages.count_unread_by_delivery(contact_onion, Delivery.DROP)
 
     def get_pending_outbox(self) -> List[Tuple[int, str, str, str, str, str]]:
         """
@@ -123,10 +380,25 @@ class MessageManager:
         """
         return self._messages.get_pending_outbox()
 
+    def get_voice_drafts(self) -> List[PendingLiveRecord]:
+        """Lists local uncommitted Voice draft records for Core recovery."""
+        return self._messages.get_voice_drafts()
+
+    def get_voice_draft_payloads(self) -> List[str]:
+        """Returns local Voice draft metadata for ownership reconciliation.
+
+        Args:
+            None
+
+        Returns:
+            List[str]: The resulting value.
+        """
+        return self._messages.get_voice_draft_payloads()
+
     def get_pending_live_outbox(
         self,
         contact_onion: Optional[str] = None,
-    ) -> List[Tuple[int, str, str, str, str]]:
+    ) -> List[PendingLiveRecord]:
         """
         Retrieves all durable outbound live messages waiting for recovery or ACK.
 
@@ -134,9 +406,174 @@ class MessageManager:
             contact_onion (Optional[str]): Optional peer onion filter.
 
         Returns:
-            List[Tuple[int, str, str, str, str]]: Pending live rows.
+            List[PendingLiveRecord]: Pending live rows.
         """
         return self._messages.get_pending_live_outbox(contact_onion)
+
+    def get_pending_live_usage(self) -> Tuple[int, int]:
+        """Returns retained outbound LIVE logical-message and UTF-8 byte totals.
+
+        Args:
+            None
+
+        Returns:
+            Tuple[int, int]: Pending message count and retained payload bytes.
+        """
+        return self._messages.get_pending_live_usage()
+
+    def queue_pending_live_if_capacity(
+        self,
+        contact_onion: str,
+        content_type: ContentType,
+        payload: str,
+        msg_id: str,
+        timestamp: str,
+        retained_bytes: int,
+        count_limit: int,
+        byte_limit: int,
+    ) -> PendingLiveAdmission:
+        """Atomically queues one pending LIVE item within shared quotas.
+
+        Args:
+            contact_onion (str): The contact onion input.
+            content_type (ContentType): The content type input.
+            payload (str): The payload input.
+            msg_id (str): The msg id input.
+            timestamp (str): The timestamp input.
+            retained_bytes (int): The retained bytes input.
+            count_limit (int): The count limit input.
+            byte_limit (int): The byte limit input.
+
+        Returns:
+            PendingLiveAdmission: The resulting value.
+        """
+        return self._messages.queue_pending_live_if_capacity(
+            contact_onion,
+            content_type,
+            payload,
+            msg_id,
+            timestamp,
+            retained_bytes,
+            count_limit,
+            byte_limit,
+        )
+
+    def grow_pending_live_voice_if_capacity(
+        self,
+        contact_onion: str,
+        msg_id: str,
+        expected_bytes: int,
+        retained_bytes: int,
+        payload: str,
+        byte_limit: int,
+    ) -> PendingLiveAdmission:
+        """Atomically grows one Voice item within shared LIVE byte quota.
+
+        Args:
+            contact_onion (str): The contact onion input.
+            msg_id (str): The msg id input.
+            expected_bytes (int): The expected bytes input.
+            retained_bytes (int): The retained bytes input.
+            payload (str): The payload input.
+            byte_limit (int): The byte limit input.
+
+        Returns:
+            PendingLiveAdmission: The resulting value.
+        """
+        return self._messages.grow_pending_live_voice_if_capacity(
+            contact_onion,
+            msg_id,
+            expected_bytes,
+            retained_bytes,
+            payload,
+            byte_limit,
+        )
+
+    def commit_voice_draft(
+        self,
+        contact_onion: str,
+        msg_id: str,
+        delivery: Delivery | None = None,
+        max_count: int = -1,
+        max_bytes: int = -1,
+    ) -> bool:
+        """Publishes one finalized local Voice draft through the canonical outbox.
+
+        Args:
+            contact_onion (str): The contact onion input.
+            msg_id (str): The msg id input.
+
+        Returns:
+            bool: Whether the documented condition holds.
+        """
+        return self._messages.commit_voice_draft(
+            contact_onion, msg_id, delivery, max_count, max_bytes
+        )
+
+    def cancel_voice_draft(self, contact_onion: str, msg_id: str) -> Optional[str]:
+        """Deletes one unsent local Voice draft and returns its metadata.
+
+        Args:
+            contact_onion (str): The contact onion input.
+            msg_id (str): The msg id input.
+
+        Returns:
+            Optional[str]: The resulting value.
+        """
+        return self._messages.cancel_voice_draft(contact_onion, msg_id)
+
+    def promote_pending_live_to_drop(
+        self, contact_onion: str, msg_ids: Optional[List[str]] = None
+    ) -> Optional[List[PendingLiveRecord]]:
+        """Atomically validates and promotes selected pending LIVE messages.
+
+        Args:
+            contact_onion (str): The peer onion identity.
+            msg_ids (Optional[List[str]]): Selected IDs, or all peer-pending IDs.
+
+        Returns:
+            Optional[List[PendingLiveRecord]]: Promoted records, or None on invalid selection.
+        """
+        return self._messages.promote_pending_live_to_drop(contact_onion, msg_ids)
+
+    def delete_drop_message(
+        self,
+        contact_onion: str,
+        msg_id: str,
+        direction: Optional[MessageDirection] = None,
+        cancel_pending: bool = False,
+    ) -> MessageDeleteOutcome:
+        """Deletes one eligible local DROP payload without removing its receipt.
+
+        Args:
+            contact_onion (str): The peer onion identity.
+            msg_id (str): Stable logical message identifier.
+            direction (Optional[MessageDirection]): Exact local row direction.
+            cancel_pending: Whether queued outbound delivery is explicitly cancelled.
+
+        Returns:
+            MessageDeleteOutcome: Typed domain result.
+        """
+        return self._messages.delete_drop_message(
+            contact_onion, msg_id, direction, cancel_pending
+        )
+
+    def dismiss_inbound_live(self, contact_onion: str) -> int:
+        """Shreds inbound LIVE payload state retained for one peer.
+
+        Args:
+            contact_onion (str): The peer onion identity.
+
+        Returns:
+            int: Number of receipts whose payload state was dismissed.
+        """
+        return self._messages.dismiss_inbound_live(contact_onion)
+
+    def discard_pending_live(
+        self, contact_onion: str, msg_ids: list[str]
+    ) -> list[PendingLiveRecord] | None:
+        """Stops an exact pending LIVE selection under the caller's Core operation barrier."""
+        return self._messages.discard_pending_live(contact_onion, msg_ids)
 
     def update_message_status(self, msg_id: int, new_status: MessageStatus) -> None:
         """
@@ -173,6 +610,22 @@ class MessageManager:
                 row was marked delivered, or None if no pending drop row matched.
         """
         return self._messages.mark_drop_delivered(contact_onion, msg_id)
+
+    def mark_live_text_delivered(
+        self,
+        contact_onion: str,
+        msg_id: str,
+    ) -> Optional[str]:
+        """Marks an eligible pending LIVE text receipt delivered.
+
+        Args:
+            contact_onion (str): Peer onion identity.
+            msg_id (str): Stable logical message identity.
+
+        Returns:
+            Optional[str]: Authored timestamp when the transition committed.
+        """
+        return self._messages.mark_live_text_delivered(contact_onion, msg_id)
 
     def update_outbound_message_status(
         self,
@@ -221,21 +674,52 @@ class MessageManager:
         """
         return self._messages.get_unread_inbox_summaries()
 
+    def get_drop_conversation_summaries(self) -> List[Tuple[str, int, int]]:
+        """Returns DROP conversation identities and unread counts without content.
+
+        Args:
+            None
+
+        Returns:
+            List[Tuple[str, int, int]]: Peer onion, unread and pending outbound DROP counts.
+        """
+        return self._messages.get_drop_conversation_summaries()
+
+    def get_live_activity(self) -> Dict[str, str]:
+        """Projects unresolved LIVE recency through the canonical receipt owner.
+
+        Args:
+            None
+        Returns:
+            Dict[str, str]: Content-free peer receipt timestamps.
+        """
+        return self._messages.get_live_activity()
+
     def get_and_read_inbox(
-        self, contact_onion: str
-    ) -> List[Tuple[int, str, str, str, Optional[str]]]:
+        self,
+        contact_onion: str,
+        delivery: Optional[Delivery] = None,
+        max_messages: Optional[int] = None,
+        max_payload_bytes: Optional[int] = None,
+    ) -> List[Tuple[int, str, str, str, Optional[str], str]]:
         """
         Retrieves unread inbox rows for one contact and executes the consume policy.
 
         Args:
             contact_onion (str): The target onion address.
+            delivery (Optional[Delivery]): Optional delivery filter.
+            max_messages: Optional foreground row ceiling.
+            max_payload_bytes: Optional serialized content ceiling.
 
         Returns:
-            List[Tuple[int, str, str, str, Optional[str]]]: Message rows as receipt id, type, payload, timestamp, msg id.
+            List[Tuple[int, str, str, str, Optional[str], str]]: Message rows including content type.
         """
         return self._messages.get_and_read_inbox(
             contact_onion,
             self._pm.config.get_bool(SettingKey.EPHEMERAL_MESSAGES),
+            delivery,
+            max_messages,
+            max_payload_bytes,
         )
 
     def get_chat_history(
@@ -258,10 +742,74 @@ class MessageManager:
         )
         return self._messages.get_chat_history(contact_onion, actual_limit)
 
+    def get_chat_page(
+        self,
+        contact_onion: str,
+        limit: int,
+        max_payload_bytes: int,
+        before_msg_id: Optional[str] = None,
+        before_direction: Optional[MessageDirection] = None,
+    ) -> tuple[List[StoredMessageRecord], bool, bool]:
+        """Delegates non-consuming bounded archive access to its persistence owner.
+
+        Args:
+            contact_onion: Resolved peer identity.
+            limit: Validated maximum rows.
+            max_payload_bytes: Serialized row budget.
+            before_msg_id: Optional exclusive boundary identity.
+            before_direction: Exact boundary direction.
+        Returns:
+            tuple[List[StoredMessageRecord], bool, bool]: Rows, older state and availability.
+        """
+        return self._messages.get_chat_page(
+            contact_onion, limit, max_payload_bytes, before_msg_id, before_direction
+        )
+
+    def get_drop_voice_payloads(
+        self,
+        onion: Optional[str] = None,
+        non_contacts_only: bool = False,
+        msg_id: Optional[str] = None,
+        direction: Optional[MessageDirection] = None,
+        include_pending: bool = False,
+    ) -> List[str]:
+        """Returns metadata for persistent Voice blobs eligible for local removal.
+
+        Args:
+            onion (Optional[str]): The onion input.
+            non_contacts_only (bool): The non contacts only input.
+            msg_id (Optional[str]): The msg id input.
+            direction (Optional[MessageDirection]): The direction input.
+            include_pending: Includes queued payloads only for confirmed cancellation.
+
+        Returns:
+            List[str]: The resulting value.
+        """
+        return self._messages.get_drop_voice_payloads(
+            onion=onion,
+            non_contacts_only=non_contacts_only,
+            msg_id=msg_id,
+            direction=direction,
+            include_pending=include_pending,
+        )
+
+    def has_drop_payload(self, contact_onion: str, msg_id: str) -> bool:
+        """Reports whether a DROP receipt still owns local archive payload.
+
+        Args:
+            contact_onion (str): The contact onion input.
+            msg_id (str): The msg id input.
+
+        Returns:
+            bool: Whether the documented condition holds.
+        """
+        return self._messages.has_drop_payload(contact_onion, msg_id)
+
     def clear_messages(
         self,
         onion: Optional[str] = None,
         non_contacts_only: bool = False,
+        cancel_pending: bool = False,
     ) -> MessageClearResult:
         """
         Clears persisted message state globally or for one peer.
@@ -269,23 +817,28 @@ class MessageManager:
         Args:
             onion (Optional[str]): The target onion identity.
             non_contacts_only (bool): If True, only deletes messages from unsaved peers.
+            cancel_pending: Whether queued DROP delivery is explicitly cancelled.
 
         Returns:
             MessageClearResult: The typed clear-messages result.
         """
         try:
-            self._messages.clear_messages(onion, non_contacts_only)
+            cancelled = self._messages.clear_messages(
+                onion, non_contacts_only, cancel_pending
+            )
             if non_contacts_only:
                 if onion:
                     return MessageClearResult(
                         True,
                         MessageClearOperationType.NON_CONTACTS_TARGET_CLEARED,
                         target_onion=onion,
+                        cancelled_drop_ids=cancelled,
                     )
                 return MessageClearResult(
                     True,
                     MessageClearOperationType.NON_CONTACTS_ALL_CLEARED,
                     profile=self._pm.profile_name,
+                    cancelled_drop_ids=cancelled,
                 )
 
             if onion:
@@ -293,12 +846,14 @@ class MessageManager:
                     True,
                     MessageClearOperationType.TARGET_CLEARED,
                     target_onion=onion,
+                    cancelled_drop_ids=cancelled,
                 )
 
             return MessageClearResult(
                 True,
                 MessageClearOperationType.ALL_CLEARED,
                 profile=self._pm.profile_name,
+                cancelled_drop_ids=cancelled,
             )
         except Exception:
             return MessageClearResult(

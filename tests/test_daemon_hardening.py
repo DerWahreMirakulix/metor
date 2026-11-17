@@ -3,14 +3,17 @@
 # ruff: noqa: E402
 
 import base64
+from contextlib import nullcontext
 import hashlib
 import json
 import socket
 import sys
+import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import Any, Iterable, Optional, cast
 from unittest.mock import Mock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
@@ -19,28 +22,42 @@ import nacl.bindings
 
 from metor.core.api import (
     AckEvent,
+    AuthenticateSessionCommand,
+    AuthRequiredEvent,
     AutoFallbackQueuedEvent,
     AutoReconnectScheduledEvent,
     ConnectionActor,
-    ConnectionConnectingEvent,
     ConnectionOrigin,
     ConnectionReasonCode,
+    ContentType,
     ConnectedEvent,
     EventType,
     FallbackSuccessEvent,
+    FrontendLeaseCommand,
+    FrontendLeaseEvent,
     GetChatStartupStateCommand,
+    GetRuntimeSnapshotCommand,
     InitCommand,
+    PrepareProfileExitCommand,
     IpcEvent,
     RuntimeErrorCode,
-    SendDropCommand,
+    Delivery,
+    SendMessageCommand,
+    ChangePasswordCommand,
+    TextContent,
     SelfDestructCommand,
     UnlockCommand,
     create_event,
     request_context,
 )
 from metor.core.key import KeyManager
+from metor.core.profile_keys import InvalidCredentialError
 from metor.core.tor import TorManager
 from metor.core.daemon.managed.engine import Daemon
+from metor.core.daemon.managed.frontend_lifetime import (
+    FrontendLifetime,
+    read_frontend_lifetime_token,
+)
 from metor.core.daemon.managed.factory import (
     PlaintextLockedDaemonError,
     create_managed_daemon,
@@ -50,6 +67,7 @@ from metor.core.daemon.managed.local_auth import create_session_auth_context
 from metor.core.daemon.managed.status import DaemonStatus
 from metor.core.daemon.managed.crypto import Crypto
 from metor.core.daemon.managed.ipc import IpcServer
+from metor.core.daemon.managed.writer import BoundedSocketWriter
 from metor.core.daemon.managed.network.controller.retunnel import (
     ConnectionControllerRetunnelMixin,
 )
@@ -76,6 +94,7 @@ from metor.core.daemon.managed.network.state import (
     StateTracker,
 )
 from metor.core.daemon.managed.outbox import OutboxWorker
+from metor.core.daemon.managed.outbox.delivery import DropDelivery, is_expected_ack_line
 from metor.core.daemon.managed.network.stream import TcpStreamReader
 from metor.data import (
     ContactManager,
@@ -84,15 +103,27 @@ from metor.data import (
     MessageManager,
     MessageDirection,
     MessageStatus,
-    MessageType,
+    InboundDropOutcome,
+    PendingLiveAdmission,
+    PendingLiveRecord,
     SettingKey,
 )
-from metor.client import IpcClient
+from metor.client import (
+    BufferedIpcEventReader,
+    IpcClient,
+    build_session_auth_proof_from_key,
+)
 from metor.data.profile import ProfileManager
 from metor.data.profile.config import Config
-from metor.ui.cli.handlers import CommandHandlers
-from metor.ui.theme import Theme
+from metor.cli.handlers import CommandHandlers
+from metor.ui.terminal.theme import Theme
 from metor.utils import Constants
+from metor.versioning import (
+    IPC_PROTOCOL_MIN_SUPPORTED,
+    IPC_PROTOCOL_VERSION,
+    PEER_PROTOCOL_MIN_SUPPORTED,
+    PEER_PROTOCOL_VERSION,
+)
 
 
 class _DummyConfig:
@@ -124,6 +155,11 @@ class _DummyConfig:
             int: The computed return value.
         """
 
+        if _key in {
+            SettingKey.MAX_PENDING_LIVE_MSGS,
+            SettingKey.MAX_PENDING_LIVE_BYTES,
+        }:
+            return -1
         return 1
 
     def get_float(self, _key: Any) -> float:
@@ -192,6 +228,10 @@ class _DummyProfileManager:
 
         self.config: _DummyConfig = _DummyConfig()
         self.initialized: bool = False
+        self.profile_name = 'test'
+        self.paths = Mock()
+        self.paths.get_config_dir.return_value = Path('.')
+        self.paths.get_quick_unlock_file.return_value = Path('quick-unlock-test')
 
     def initialize(self) -> None:
         """
@@ -460,7 +500,7 @@ class _DummyMessageManager:
         """
 
         self.queued: list[dict[str, Any]] = []
-        self.pending_live_outbox: list[tuple[int, str, str, str, str]] = []
+        self.pending_live_outbox: list[PendingLiveRecord] = []
         self.unread_drop_count: int = 0
         self.updated_outbound_statuses: list[tuple[str, str, MessageStatus]] = []
 
@@ -478,30 +518,94 @@ class _DummyMessageManager:
         self.queued.append(kwargs)
         contact_onion: str = str(kwargs['contact_onion'])
         direction = kwargs['direction']
-        msg_type = kwargs['msg_type']
+        delivery = kwargs['delivery']
         status = kwargs['status']
         msg_id: str = str(kwargs['msg_id'])
         timestamp: str = str(kwargs.get('timestamp') or '1970-01-01T00:00:00+00:00')
         payload: str = str(kwargs['payload'])
 
         self.pending_live_outbox = [
-            row for row in self.pending_live_outbox if row[3] != msg_id
+            row for row in self.pending_live_outbox if row.msg_id != msg_id
         ]
         if (
             direction is MessageDirection.OUT
             and status is MessageStatus.PENDING
-            and msg_type is MessageType.LIVE_TEXT
+            and delivery is Delivery.LIVE
         ):
             self.pending_live_outbox.append(
-                (
-                    len(self.pending_live_outbox) + 1,
-                    contact_onion,
-                    payload,
-                    msg_id,
-                    timestamp,
+                PendingLiveRecord(
+                    receipt_id=len(self.pending_live_outbox) + 1,
+                    peer_onion=contact_onion,
+                    content_type='text',
+                    payload=payload,
+                    msg_id=msg_id,
+                    timestamp=timestamp,
                 )
             )
         return _QueueResult()
+
+    def queue_pending_live_if_capacity(
+        self,
+        contact_onion: str,
+        content_type: ContentType,
+        payload: str,
+        msg_id: str,
+        timestamp: str,
+        retained_bytes: int,
+        _count_limit: int,
+        _byte_limit: int,
+    ) -> PendingLiveAdmission:
+        """Admits one test LIVE row through the production-shaped boundary."""
+        self.queue_message(
+            contact_onion=contact_onion,
+            direction=MessageDirection.OUT,
+            delivery=Delivery.LIVE,
+            content_type=content_type,
+            payload=payload,
+            status=MessageStatus.PENDING,
+            msg_id=msg_id,
+            timestamp=timestamp,
+            retained_bytes=retained_bytes,
+        )
+        return PendingLiveAdmission.ACCEPTED
+
+    def store_inbound_drop_text(
+        self,
+        contact_onion: str,
+        msg_id: str,
+        payload: str,
+        timestamp: Optional[str],
+        max_unread: int,
+    ) -> InboundDropOutcome:
+        """Stores one test DROP row while preserving the quota behavior."""
+        if max_unread >= 0 and self.unread_drop_count >= max_unread:
+            return InboundDropOutcome.LIMIT
+        self.queue_message(
+            contact_onion=contact_onion,
+            direction=MessageDirection.IN,
+            delivery=Delivery.DROP,
+            content_type=ContentType.TEXT,
+            payload=payload,
+            status=MessageStatus.UNREAD,
+            msg_id=msg_id,
+            timestamp=timestamp,
+        )
+        return InboundDropOutcome.CREATED
+
+    def has_inbound_text_receipt(self, _onion: str, _msg_id: str) -> bool:
+        """Reports no duplicate inbound text receipt in this test double."""
+        return False
+
+    def mark_live_text_delivered(
+        self, contact_onion: str, msg_id: str
+    ) -> Optional[str]:
+        """Records an exact LIVE text terminal acknowledgement."""
+        if not any(row.msg_id == msg_id for row in self.pending_live_outbox):
+            return None
+        self.update_outbound_message_status(
+            contact_onion, msg_id, MessageStatus.DELIVERED
+        )
+        return '1970-01-01T00:00:00+00:00'
 
     def mark_drop_delivered(
         self,
@@ -564,7 +668,7 @@ class _DummyMessageManager:
     def get_pending_live_outbox(
         self,
         contact_onion: Optional[str] = None,
-    ) -> list[tuple[int, str, str, str, str]]:
+    ) -> list[PendingLiveRecord]:
         """
         Returns pending durable live rows for the test scenario.
 
@@ -577,7 +681,41 @@ class _DummyMessageManager:
 
         if contact_onion is None:
             return list(self.pending_live_outbox)
-        return [row for row in self.pending_live_outbox if row[1] == contact_onion]
+        return [
+            row for row in self.pending_live_outbox if row.peer_onion == contact_onion
+        ]
+
+    def get_pending_live_usage(self) -> tuple[int, int]:
+        """Returns current pending message count and retained text bytes."""
+        return len(self.pending_live_outbox), sum(
+            len(row.payload.encode('utf-8')) for row in self.pending_live_outbox
+        )
+
+    def promote_pending_live_to_drop(
+        self, onion: str, msg_ids: Optional[list[str]] = None
+    ) -> Optional[list[PendingLiveRecord]]:
+        """Atomically promotes the selected canonical pending records."""
+        selected = [
+            row
+            for row in self.pending_live_outbox
+            if row.peer_onion == onion and (msg_ids is None or row.msg_id in msg_ids)
+        ]
+        if msg_ids is not None and {row.msg_id for row in selected} != set(msg_ids):
+            return None
+        selected_ids = {row.msg_id for row in selected}
+        self.pending_live_outbox = [
+            row for row in self.pending_live_outbox if row.msg_id not in selected_ids
+        ]
+        for row in selected:
+            self.queued.append(
+                {
+                    'contact_onion': row.peer_onion,
+                    'delivery': Delivery.DROP,
+                    'payload': row.payload,
+                    'msg_id': row.msg_id,
+                }
+            )
+        return selected
 
     def update_outbound_message_status(
         self,
@@ -600,7 +738,7 @@ class _DummyMessageManager:
         self.updated_outbound_statuses.append((contact_onion, msg_id, new_status))
         if new_status is not MessageStatus.PENDING:
             self.pending_live_outbox = [
-                row for row in self.pending_live_outbox if row[3] != msg_id
+                row for row in self.pending_live_outbox if row.msg_id != msg_id
             ]
         return True
 
@@ -684,6 +822,18 @@ class _NetworkSocket:
         self.closed: bool = False
         self.sent: list[bytes] = []
         self.timeouts: list[float] = []
+        self.shutdown_modes: list[int] = []
+
+    def shutdown(self, how: int) -> None:
+        """Records the socket owner's directional shutdown.
+
+        Args:
+            how (int): Native socket shutdown mode.
+
+        Returns:
+            None
+        """
+        self.shutdown_modes.append(how)
 
     def settimeout(self, timeout: float) -> None:
         """
@@ -1280,6 +1430,70 @@ class _DummyState:
     Provides a dummy state test double.
     """
 
+    def retire_connection(
+        self, conn: socket.socket, *, preserve_final: bool = False
+    ) -> None:
+        """Retires the exact descriptor in tests without queued writers.
+
+        Args:
+            conn (socket.socket): Retiring receiver descriptor.
+            preserve_final (bool): No asynchronous final queue exists in this double.
+
+        Returns:
+            None
+        """
+        conn.shutdown(socket.SHUT_RDWR)
+        conn.close()
+
+    def touch_session_activity(self, _onion: str) -> None:
+        """Records test-session activity without side effects.
+
+        Args:
+            _onion (str): The peer onion identity.
+
+        Returns:
+            None
+        """
+
+        return None
+
+    def consume_locally_terminated_socket(self, _conn: socket.socket) -> bool:
+        """Reports that the test socket was not terminated locally.
+
+        Args:
+            _conn (socket.socket): The receiver socket.
+
+        Returns:
+            bool: Always False for the base test state.
+        """
+
+        return False
+
+    def is_current_outbound_socket(self, _onion: str, _conn: socket.socket) -> bool:
+        """Reports that the base test socket remains the current attempt.
+
+        Args:
+            _onion (str): The peer onion identity.
+            _conn (socket.socket): The receiver socket.
+
+        Returns:
+            bool: Always True for the base test state.
+        """
+
+        return True
+
+    def is_connected_or_pending(self, _onion: str) -> bool:
+        """Reports no competing connection in the base test state.
+
+        Args:
+            _onion (str): The peer onion identity.
+
+        Returns:
+            bool: Always False for the base test state.
+        """
+
+        return False
+
     def consume_outbound_connected_origin(self, _onion: str) -> None:
         """
         Consumes outbound connected origin from the helper state.
@@ -1459,6 +1673,18 @@ class _DummyReceiverSocket:
         """
 
         self.timeouts: list[float] = []
+        self.shutdown_modes: list[int] = []
+
+    def shutdown(self, how: int) -> None:
+        """Records exact receiver descriptor shutdown.
+
+        Args:
+            how (int): Native socket shutdown mode.
+
+        Returns:
+            None
+        """
+        self.shutdown_modes.append(how)
 
     def settimeout(self, timeout: float) -> None:
         """
@@ -1898,6 +2124,8 @@ class _RetunnelControllerHarness(ConnectionControllerRetunnelMixin):
         )
         self._cm = cast(ContactManager, self.contact_manager_mock)
         self.state_mock = Mock()
+        self._operation_lock = threading.RLock()
+        self.state_mock.snapshot_barrier.side_effect = nullcontext
         self.state_mock.is_connected_or_pending.side_effect = [True, False]
         self.state_mock.is_retunneling.return_value = True
         self._state = cast(StateTracker, self.state_mock)
@@ -1967,6 +2195,7 @@ class _DisconnectControllerHarness(ConnectionControllerSessionMixin):
         contact_manager_mock.resolve_target.return_value = ('peer', 'peer-onion')
         contact_manager_mock.cleanup_orphans.return_value = []
         self._cm = cast(ContactManager, contact_manager_mock)
+        self._operation_lock = threading.RLock()
         self._state = state
         self._config = config
         self._broadcast = cast(Any, Mock())
@@ -2055,8 +2284,8 @@ class DaemonHardeningTests(unittest.TestCase):
         """
 
         with (
-            patch('metor.core.daemon.managed.engine.atexit.register'),
-            patch('metor.core.daemon.managed.engine.signal.signal'),
+            patch('metor.core.daemon.managed.engine.daemon.atexit.register'),
+            patch('metor.core.daemon.managed.engine.daemon.signal.signal'),
         ):
             return Daemon(
                 cast(ProfileManager, _DummyProfileManager()),
@@ -2177,6 +2406,32 @@ class DaemonHardeningTests(unittest.TestCase):
         self.assertEqual(client.payloads, [b'{"event_type": "test"}\n'])
         self.assertFalse(client.lock_was_held)
 
+    def test_delayed_ipc_writer_preserves_revision_order(self) -> None:
+        """R2-T23: publication order remains FIFO after asynchronous enqueue."""
+        server = IpcServer(
+            cast(ProfileManager, _DummyProfileManager()),
+            lambda _cmd, _conn: None,
+        )
+        daemon_side, client_side = socket.socketpair()
+        client_side.settimeout(1.0)
+        try:
+            first = create_event(EventType.INTERNAL_ERROR)
+            second = create_event(EventType.RUNTIME_STATE_CHANGED, {'scope': 'test'})
+            server.send_to(daemon_side, first)
+            server.send_to(daemon_side, second)
+            payload = b''
+            while payload.count(b'\n') < 2:
+                payload += client_side.recv(Constants.TCP_BUFFER_SIZE)
+            decoded = [
+                IpcEvent.from_dict(json.loads(line))
+                for line in payload.decode('utf-8').splitlines()
+            ]
+            self.assertEqual([event.revision for event in decoded], [1, 2])
+            self.assertEqual(decoded[0].epoch, decoded[1].epoch)
+        finally:
+            server.stop()
+            client_side.close()
+
     def test_daemon_broadcast_targets_only_authenticated_clients(self) -> None:
         """
         Verifies that daemon broadcast targets only authenticated clients.
@@ -2193,12 +2448,14 @@ class DaemonHardeningTests(unittest.TestCase):
         authenticated_conn, peer = socket.socketpair()
 
         try:
-            with daemon._client_state_lock:
-                daemon._authenticated_clients.add(authenticated_conn)
+            daemon._session_access.install_context(
+                create_session_auth_context('secret')
+            )
+            daemon._session_access.mark_authenticated(authenticated_conn)
 
             event = create_event(EventType.INTERNAL_ERROR)
-            with patch.object(Daemon, '_requires_session_auth', return_value=True):
-                daemon._broadcast_ipc_event(event)
+            daemon._session_access._require_auth = True
+            daemon._broadcast_ipc_event(event)
 
             daemon._ipc.broadcast_to.assert_called_once_with(
                 event,
@@ -2246,9 +2503,9 @@ class DaemonHardeningTests(unittest.TestCase):
         """
 
         daemon = self._build_daemon(require_session_auth=False)
-        daemon._local_auth.install_context(create_session_auth_context('secret'))
+        daemon._session_access.install_context(create_session_auth_context('secret'))
 
-        self.assertFalse(daemon._requires_session_auth())
+        self.assertFalse(daemon._session_access.requires_auth())
 
     def test_create_managed_daemon_rejects_plaintext_locked_mode(self) -> None:
         """
@@ -2318,7 +2575,8 @@ class DaemonHardeningTests(unittest.TestCase):
             config=cast(Config, _DummyConfig()),
         )
         socket_mock = Mock()
-        socket_mock.bind.side_effect = OSError('bind failed')
+        private_detail = 'private-listener-bind-path'
+        socket_mock.bind.side_effect = OSError(private_detail)
 
         with (
             patch(
@@ -2330,11 +2588,294 @@ class DaemonHardeningTests(unittest.TestCase):
                 return_value=socket_mock,
             ),
         ):
-            with self.assertRaisesRegex(RuntimeError, 'bind failed'):
+            with self.assertRaisesRegex(
+                RuntimeError, 'Inbound listener failed'
+            ) as raised:
                 listener.start_listener()
 
         history_manager_mock.log_event.assert_called_once()
         broadcast_mock.assert_called_once()
+        self.assertEqual(
+            history_manager_mock.log_event.call_args.kwargs['detail_text'],
+            'Inbound listener failed.',
+        )
+        self.assertNotIn(private_detail, str(raised.exception))
+
+    def test_inbound_listener_accept_error_keeps_os_detail_out_of_history(
+        self,
+    ) -> None:
+        """An accept failure records a fixed diagnostic and keeps listening bounded.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        stop_flag = threading.Event()
+        history_manager = Mock()
+        history_manager.log_event.side_effect = lambda *_args, **_kwargs: (
+            stop_flag.set()
+        )
+        listener = InboundListener(
+            tm=cast(TorManager, Mock(incoming_port=43123)),
+            cm=cast(ContactManager, Mock()),
+            hm=cast(HistoryManager, history_manager),
+            crypto=cast(Crypto, Mock()),
+            state=StateTracker(),
+            router=cast(MessageRouter, Mock()),
+            receiver=cast(StreamReceiver, Mock()),
+            broadcast_callback=Mock(),
+            has_live_consumers_callback=lambda: False,
+            has_clients_callback=lambda: False,
+            notify_callback=lambda _payload: None,
+            enqueue_live_reconnect_callback=lambda _onion: True,
+            stop_flag=stop_flag,
+            config=cast(Config, _DummyConfig()),
+        )
+        socket_mock = Mock()
+        private_detail = 'private-listener-accept-path'
+        socket_mock.accept.side_effect = OSError(private_detail)
+
+        with patch(
+            'metor.core.daemon.managed.network.listener.socket.socket',
+            return_value=socket_mock,
+        ):
+            listener._listener_target()
+
+        history_manager.log_event.assert_called_once()
+        self.assertEqual(
+            history_manager.log_event.call_args.kwargs['detail_text'],
+            'Inbound listener accept failed.',
+        )
+        self.assertNotIn(private_detail, repr(history_manager.log_event.call_args))
+
+    def test_inbound_listener_thread_start_error_is_sanitized(self) -> None:
+        """A failed worker start never includes its exception text in startup errors.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        listener = InboundListener(
+            tm=cast(TorManager, Mock(incoming_port=43123)),
+            cm=cast(ContactManager, Mock()),
+            hm=cast(HistoryManager, Mock()),
+            crypto=cast(Crypto, Mock()),
+            state=StateTracker(),
+            router=cast(MessageRouter, Mock()),
+            receiver=cast(StreamReceiver, Mock()),
+            broadcast_callback=Mock(),
+            has_live_consumers_callback=lambda: False,
+            has_clients_callback=lambda: False,
+            notify_callback=lambda _payload: None,
+            enqueue_live_reconnect_callback=lambda _onion: True,
+            stop_flag=threading.Event(),
+            config=cast(Config, _DummyConfig()),
+        )
+        private_detail = 'private-listener-thread-path'
+        thread = Mock()
+        thread.start.side_effect = OSError(private_detail)
+        with (
+            patch(
+                'metor.core.daemon.managed.network.listener.threading.Thread',
+                return_value=thread,
+            ),
+            self.assertRaisesRegex(
+                RuntimeError, 'Inbound listener thread could not start'
+            ) as raised,
+        ):
+            listener.start_listener()
+
+        self.assertNotIn(private_detail, str(raised.exception))
+
+    def test_slow_unauthenticated_handshake_releases_its_slot(self) -> None:
+        """Successive fragments cannot renew an inbound peer's admission deadline."""
+        state = Mock()
+        listener, receiver = self._build_live_listener(cast(StateTracker, state))
+        conn, peer = socket.socketpair()
+        with (
+            conn,
+            peer,
+            patch.object(listener._config, 'get_float', return_value=1.0),
+            patch.object(Constants, 'TCP_BUFFER_SIZE', 1),
+            patch('time.monotonic', side_effect=[10.0, 10.2, 11.1]),
+        ):
+            peer.sendall(b'AAAA\n')
+            listener._handle_incoming(conn)
+            state.remove_unauthenticated_connection.assert_called_once_with(conn)
+            state.retire_connection.assert_called_once_with(conn)
+            self.assertFalse(receiver.mock_calls)
+            conn.settimeout(0.1)
+            self.assertEqual(conn.recv(4), b'AAA\n')
+
+    def test_managed_ipc_reclaims_untrusted_slots_and_preserves_authenticated_idle(
+        self,
+    ) -> None:
+        """One real localhost slot expires silent, malformed and repeated pending requests."""
+        daemon = self._build_daemon(require_session_auth=True)
+        context = create_session_auth_context('synthetic-admission-secret')
+        daemon._session_access.install_context(context)
+        with (
+            patch.object(daemon._pm.config, 'get_float', return_value=0.12),
+            patch.object(daemon._pm.config, 'get_int', return_value=1),
+            patch.object(Constants, 'IPC_CREDENTIAL_PROMPT_TIMEOUT_SEC', 0.6),
+        ):
+            daemon._ipc.start()
+            self.addCleanup(daemon._ipc.stop)
+            assert daemon._ipc.port is not None
+            address = (Constants.LOCALHOST, daemon._ipc.port)
+            for initial in (b'', b'{', b'{}\n'):
+                with (
+                    self.subTest(initial=initial),
+                    socket.create_connection(address, timeout=2) as client,
+                ):
+                    reader = BufferedIpcEventReader()
+                    if initial:
+                        client.sendall(initial)
+                    if initial == b'{}\n':
+                        event = reader.read_from_socket(client)
+                        assert event is not None
+                        self.assertIs(event.event_type, EventType.UNKNOWN_COMMAND)
+                    self.assertIsNone(reader.read_from_socket(client))
+
+            request = (PrepareProfileExitCommand().to_json() + '\n').encode()
+            with socket.create_connection(address, timeout=2) as untrusted:
+                reader = BufferedIpcEventReader()
+                end = time.monotonic() + 2
+                challenges = 0
+                while time.monotonic() < end:
+                    try:
+                        untrusted.sendall(request)
+                        event = reader.read_from_socket(untrusted)
+                    except (
+                        BrokenPipeError,
+                        ConnectionResetError,
+                        ConnectionAbortedError,
+                    ):
+                        break
+                    if event is None:
+                        break
+                    self.assertIs(event.event_type, EventType.AUTH_REQUIRED)
+                    challenges += 1
+                    time.sleep(0.07)
+                else:
+                    self.fail(
+                        'Repeated valid requests renewed admission without proof.'
+                    )
+                self.assertGreater(challenges, 1)
+
+            with socket.create_connection(address, timeout=2) as admitted:
+                reader = BufferedIpcEventReader()
+                admitted.sendall(request)
+                challenge = reader.read_from_socket(admitted)
+                assert isinstance(challenge, AuthRequiredEvent) and challenge.challenge
+                time.sleep(
+                    0.18
+                )  # Credential entry may outlive the first-frame timeout.
+                proof = build_session_auth_proof_from_key(
+                    context.proof_key, challenge.challenge
+                )
+                admitted.sendall(
+                    (AuthenticateSessionCommand(proof).to_json() + '\n').encode()
+                )
+                confirmation = reader.read_from_socket(admitted)
+                assert confirmation is not None
+                self.assertIs(confirmation.event_type, EventType.SESSION_AUTHENTICATED)
+                time.sleep(
+                    0.7
+                )  # An admitted frontend may idle beyond the entire prompt window.
+                admitted.sendall(request)
+                result = reader.read_from_socket(admitted)
+                assert result is not None
+                self.assertIs(result.event_type, EventType.PROFILE_EXIT_PREPARED)
+
+    def test_locked_ipc_admits_only_proven_lifetime_without_profile_access(
+        self,
+    ) -> None:
+        """A real lease can idle during unlock but cannot bypass a locked profile."""
+        daemon = self._build_daemon(start_locked=True, require_session_auth=True)
+        with (
+            tempfile.TemporaryDirectory() as folder,
+            patch.object(daemon._pm.config, 'get_float', return_value=0.1),
+            patch.object(daemon._pm.config, 'get_int', return_value=1),
+            patch.object(Constants, 'IPC_CREDENTIAL_PROMPT_TIMEOUT_SEC', 0.24),
+        ):
+            lifetime = FrontendLifetime(Path(folder), automatic=True)
+            lifetime.publish()
+            token = read_frontend_lifetime_token(Path(folder))
+            self.assertIsNotNone(token)
+            daemon._frontend_lifetime = lifetime
+            daemon._ipc.start()
+            self.addCleanup(daemon._ipc.stop)
+            assert daemon._ipc.port is not None
+            address = (Constants.LOCALHOST, daemon._ipc.port)
+            init = (
+                InitCommand(IPC_PROTOCOL_VERSION, IPC_PROTOCOL_MIN_SUPPORTED).to_json()
+                + '\n'
+            ).encode()
+            for bearer, expected in ((None, 'denied'), (token, 'joined')):
+                with (
+                    self.subTest(state=expected),
+                    socket.create_connection(address, timeout=2) as client,
+                ):
+                    reader = BufferedIpcEventReader()
+                    lease = FrontendLeaseCommand(
+                        '1' * (2 * Constants.FRONTEND_LIFETIME_ID_BYTES), bearer
+                    )
+                    client.sendall((lease.to_json() + '\n').encode())
+                    confirmation = reader.read_from_socket(client)
+                    assert isinstance(confirmation, FrontendLeaseEvent)
+                    self.assertEqual(confirmation.state, expected)
+                    client.sendall(init)
+                    locked = reader.read_from_socket(client)
+                    assert locked is not None
+                    self.assertIs(locked.event_type, EventType.DAEMON_LOCKED)
+                    if expected == 'denied':
+                        self.assertIsNone(reader.read_from_socket(client))
+                    else:
+                        time.sleep(0.32)
+                        client.sendall(init)
+                        locked = reader.read_from_socket(client)
+                        assert locked is not None
+                        self.assertIs(locked.event_type, EventType.DAEMON_LOCKED)
+
+    def test_inbound_handshake_memory_error_keeps_detail_out_of_history(
+        self,
+    ) -> None:
+        """A failed handshake records only a fixed resource diagnostic."""
+        private_detail = 'private-handshake-path-and-secret'
+        history_manager = Mock()
+        state = Mock()
+        config = Mock()
+        config.get_float.side_effect = MemoryError(private_detail)
+        listener = InboundListener(
+            tm=cast(TorManager, Mock()),
+            cm=cast(ContactManager, Mock()),
+            hm=cast(HistoryManager, history_manager),
+            crypto=cast(Crypto, Mock()),
+            state=cast(StateTracker, state),
+            router=cast(MessageRouter, Mock()),
+            receiver=cast(StreamReceiver, Mock()),
+            broadcast_callback=Mock(),
+            has_live_consumers_callback=lambda: False,
+            has_clients_callback=lambda: False,
+            notify_callback=lambda _payload: None,
+            enqueue_live_reconnect_callback=lambda _onion: True,
+            stop_flag=threading.Event(),
+            config=cast(Config, config),
+        )
+
+        listener._handle_incoming(cast(socket.socket, Mock()))
+
+        history_manager.log_event.assert_called_once()
+        self.assertEqual(
+            history_manager.log_event.call_args.kwargs['detail_text'],
+            'Inbound handshake exceeded memory limit.',
+        )
+        self.assertNotIn(private_detail, repr(history_manager.log_event.call_args))
 
     def test_start_subsystems_aborts_when_listener_readiness_fails(self) -> None:
         """
@@ -2366,12 +2907,15 @@ class DaemonHardeningTests(unittest.TestCase):
 
         self.assertFalse(result)
         initialize_mock.assert_called_once()
-        stop_mock.assert_called_once()
+        stop_mock.assert_not_called()
         daemon._outbox.start.assert_not_called()
         status_cb.assert_called_once_with(
             DaemonStatus.RUNTIME_ERROR,
-            {'message': 'listener failed'},
+            {'message': 'Daemon startup failed [network_listener]: RuntimeError.'},
         )
+        self.assertIsNotNone(daemon._last_start_failure)
+        assert daemon._last_start_failure is not None
+        self.assertEqual(daemon._last_start_failure.phase, 'network_listener')
 
     def test_locked_daemon_rejects_self_destruct_command(self) -> None:
         """
@@ -2390,14 +2934,78 @@ class DaemonHardeningTests(unittest.TestCase):
 
         try:
             with patch(
-                'metor.core.daemon.managed.engine.threading.Thread'
+                'metor.core.daemon.managed.engine.daemon.threading.Thread'
             ) as thread_cls:
                 daemon._process_ui_command(SelfDestructCommand(), conn)
 
             thread_cls.assert_not_called()
             daemon._ipc.send_to.assert_called_once()
             sent_event = daemon._ipc.send_to.call_args.args[1]
-            self.assertIs(sent_event.event_type, EventType.DAEMON_LOCKED)
+            self.assertIs(sent_event.event_type, EventType.AUTH_REQUIRED)
+        finally:
+            conn.close()
+            peer.close()
+
+    def test_hard_locked_daemon_cannot_bypass_session_authorization(self) -> None:
+        """Verifies no anonymous hard-lock destruction bypass exists.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        daemon = self._build_daemon(start_locked=True)
+        daemon._ipc = Mock()
+        conn, peer = socket.socketpair()
+
+        try:
+            with patch(
+                'metor.core.daemon.managed.engine.daemon.threading.Thread'
+            ) as thread:
+                daemon._process_ui_command(SelfDestructCommand(), conn)
+
+            thread.assert_not_called()
+            sent_event = daemon._ipc.send_to.call_args.args[1]
+            self.assertIs(sent_event.event_type, EventType.AUTH_REQUIRED)
+        finally:
+            conn.close()
+            peer.close()
+
+    def test_change_password_command_requires_current_password_and_rewraps(
+        self,
+    ) -> None:
+        """Verifies password changes require explicit current-password verification.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        daemon = self._build_daemon()
+        daemon._ipc = Mock()
+        daemon._km = Mock()
+        conn, peer = socket.socketpair()
+
+        try:
+            command = ChangePasswordCommand(
+                current_password='current-password',
+                new_password='new-password',
+            )
+            daemon._process_ui_command(command, conn)
+            daemon._km.change_password.assert_called_once_with(
+                'current-password',
+                'new-password',
+            )
+            sent_event = daemon._ipc.send_to.call_args.args[1]
+            self.assertIs(sent_event.event_type, EventType.PASSWORD_CHANGED)
+
+            daemon._ipc.reset_mock()
+            daemon._km.change_password.side_effect = InvalidCredentialError('invalid')
+            daemon._process_ui_command(command, conn)
+            sent_event = daemon._ipc.send_to.call_args.args[1]
+            self.assertIs(sent_event.event_type, EventType.INVALID_PASSWORD)
         finally:
             conn.close()
             peer.close()
@@ -2413,37 +3021,225 @@ class DaemonHardeningTests(unittest.TestCase):
             None
         """
 
-        daemon = self._build_daemon()
+        daemon = self._build_daemon(require_session_auth=True)
         daemon._ipc = Mock()
+        daemon._session_access.install_context(create_session_auth_context('secret'))
         conn, peer = socket.socketpair()
 
         try:
-            with (
-                patch.object(Daemon, '_requires_session_auth', return_value=True),
-                patch.object(
-                    daemon._local_auth,
-                    'issue_session_challenge',
-                    return_value=object(),
-                ),
-                patch.object(
-                    daemon,
-                    '_build_session_auth_event',
-                    return_value=create_event(EventType.AUTH_REQUIRED),
-                ) as build_auth_event,
-                patch(
-                    'metor.core.daemon.managed.engine.threading.Thread'
-                ) as thread_cls,
-            ):
+            with patch(
+                'metor.core.daemon.managed.engine.daemon.threading.Thread'
+            ) as thread_cls:
                 daemon._process_ui_command(SelfDestructCommand(), conn)
 
             thread_cls.assert_not_called()
-            build_auth_event.assert_called_once()
             daemon._ipc.send_to.assert_called_once()
             sent_event = daemon._ipc.send_to.call_args.args[1]
             self.assertIs(sent_event.event_type, EventType.AUTH_REQUIRED)
         finally:
             conn.close()
             peer.close()
+
+    def test_self_destruct_dispatch_survives_abort_and_notification_failures(
+        self,
+    ) -> None:
+        """R2-T08/T09: accepted purge reaches key destruction exactly once."""
+        daemon = self._build_daemon()
+        daemon._ipc = Mock()
+        daemon._ipc.send_to.side_effect = OSError('notification failed')
+        daemon._ipc.broadcast.side_effect = OSError('broadcast failed')
+        daemon.stop = Mock()
+        network = Mock()
+        network.abort_all.side_effect = OSError('abort failed')
+        daemon._network = network
+        key_destruction = Mock()
+
+        def destroy(_pm: object, **kwargs: Any) -> None:
+            try:
+                kwargs['prepare_runtime']()
+            except Exception:
+                pass
+            key_destruction()
+            kwargs['key_destroyed_callback']()
+
+        conn, peer = socket.socketpair()
+        try:
+            daemon._session_access.mark_authenticated(conn)
+            with (
+                patch(
+                    'metor.core.daemon.managed.engine.lifecycle.destroy_profile_storage',
+                    side_effect=destroy,
+                ),
+                patch(
+                    'metor.core.daemon.managed.engine.daemon.threading.Thread',
+                    side_effect=lambda **kwargs: _ImmediateListenerThread(
+                        kwargs['target']
+                    ),
+                ) as thread_cls,
+            ):
+                daemon._process_ui_command(SelfDestructCommand(), conn)
+                daemon._process_ui_command(SelfDestructCommand(), conn)
+
+            self.assertTrue(daemon._purge_fence.is_set())
+            network.abort_all.assert_called_with()
+            key_destruction.assert_called_once_with()
+            thread_cls.assert_called_once_with(target=daemon._nuke_data, daemon=True)
+        finally:
+            conn.close()
+            peer.close()
+
+    def test_purge_initiation_covers_other_clients_without_operation_details(
+        self,
+    ) -> None:
+        """An accepted global purge reaches another GUI without its operation ID."""
+        daemon = self._build_daemon()
+        daemon._ipc = Mock()
+        initiating, initiating_peer = socket.socketpair()
+        other, other_peer = socket.socketpair()
+        try:
+            daemon._session_access.mark_authenticated(initiating)
+            with patch('metor.core.daemon.managed.engine.daemon.threading.Thread'):
+                daemon._process_ui_command(
+                    SelfDestructCommand(operation_id='a' * 32), initiating
+                )
+            direct = daemon._ipc.send_to.call_args.args[1]
+            self.assertIs(direct.event_type, EventType.SELF_DESTRUCT_INITIATED)
+            self.assertEqual(direct.operation_id, 'a' * 32)
+            redacted = daemon._ipc.broadcast_to.call_args.args[0]
+            self.assertIs(redacted.event_type, EventType.SELF_DESTRUCT_INITIATED)
+            self.assertIsNone(redacted.operation_id)
+            self.assertIsNone(redacted.profile)
+            self.assertEqual(
+                daemon._ipc.broadcast_to.call_args.kwargs,
+                {'exclude': {initiating}},
+            )
+        finally:
+            initiating.close()
+            initiating_peer.close()
+            other.close()
+            other_peer.close()
+
+    def test_profile_exit_respects_client_authorization_before_cleanup(self) -> None:
+        """A restricted socket cannot bypass its device lifecycle policy."""
+        daemon = self._build_daemon()
+        daemon._ipc = Mock()
+        conn, peer = socket.socketpair()
+        try:
+            with (
+                patch.object(daemon._session_access, 'authorize', return_value=False),
+                patch.object(
+                    daemon._command_dispatcher, 'disconnect_voice_producer'
+                ) as release_voice,
+                patch.object(
+                    daemon._command_dispatcher, 'clear_client_focus'
+                ) as clear_focus,
+            ):
+                daemon._process_ui_command(PrepareProfileExitCommand(), conn)
+            release_voice.assert_not_called()
+            clear_focus.assert_not_called()
+            daemon._ipc.send_to.assert_not_called()
+        finally:
+            conn.close()
+            peer.close()
+
+    def test_redacted_purge_event_uses_actual_ipc_recipient_exclusion(self) -> None:
+        """The redacted event reaches the other socket, never the initiator."""
+        server = IpcServer(Mock(), lambda _command, _connection: None)
+        initiating, initiating_peer = socket.socketpair()
+        other, other_peer = socket.socketpair()
+        server._clients.extend((initiating, other))
+        try:
+            server.broadcast_to(
+                create_event(EventType.SELF_DESTRUCT_INITIATED),
+                exclude={initiating},
+            )
+            self.assertTrue(server.flush(Constants.DEFAULT_IPC_TIMEOUT))
+            other_peer.settimeout(Constants.DEFAULT_IPC_TIMEOUT)
+            with other_peer.makefile('rb') as reader:
+                payload = json.loads(reader.readline())
+            self.assertEqual(
+                payload['event_type'], EventType.SELF_DESTRUCT_INITIATED.value
+            )
+            self.assertIsNone(payload.get('operation_id'))
+            initiating_peer.setblocking(False)
+            with self.assertRaises(BlockingIOError):
+                initiating_peer.recv(1)
+        finally:
+            server.stop()
+            initiating_peer.close()
+            other_peer.close()
+
+    def test_fast_purge_flushes_redacted_notice_before_other_socket_closes(
+        self,
+    ) -> None:
+        """Fast destruction drains the other GUI's queued notice before IPC stop."""
+        daemon = self._build_daemon()
+        server = IpcServer(Mock(), lambda _command, _connection: None)
+        daemon._ipc = server
+        initiating, initiating_peer = socket.socketpair()
+        other, other_peer = socket.socketpair()
+        server._clients.extend((initiating, other))
+        daemon._destruction_recipients = {initiating}
+        daemon._purge_operation_id = 'a' * 32
+        release_other = threading.Event()
+        flush_entered = threading.Event()
+        flushed_recipients: list[object] = []
+        original_run = BoundedSocketWriter._run
+        original_flush = server.flush
+
+        def held_other_writer(writer: BoundedSocketWriter) -> None:
+            if writer._conn is other:
+                release_other.wait(Constants.DEFAULT_IPC_TIMEOUT)
+            original_run(writer)
+
+        def observed_flush(
+            timeout: float, recipients: Optional[Iterable[socket.socket]] = None
+        ) -> bool:
+            flushed_recipients.append(recipients)
+            flush_entered.set()
+            return original_flush(timeout, recipients)
+
+        worker = threading.Thread(target=daemon._nuke_data)
+        try:
+            with (
+                patch.object(BoundedSocketWriter, '_run', held_other_writer),
+                patch(
+                    'metor.core.daemon.managed.engine.lifecycle.destroy_profile_storage'
+                ),
+                patch.object(server, 'flush', side_effect=observed_flush),
+                patch.object(daemon, 'stop', side_effect=server.stop),
+            ):
+                server.send_to(
+                    initiating,
+                    create_event(
+                        EventType.SELF_DESTRUCT_INITIATED,
+                        {'operation_id': daemon._purge_operation_id},
+                    ),
+                )
+                server.broadcast_to(
+                    create_event(EventType.SELF_DESTRUCT_INITIATED),
+                    exclude={initiating},
+                )
+                worker.start()
+                self.assertTrue(flush_entered.wait(Constants.DEFAULT_IPC_TIMEOUT))
+                self.assertEqual(flushed_recipients, [None])
+                release_other.set()
+                worker.join(Constants.DEFAULT_IPC_TIMEOUT)
+            self.assertFalse(worker.is_alive())
+            other_peer.settimeout(Constants.DEFAULT_IPC_TIMEOUT)
+            with other_peer.makefile('rb') as reader:
+                payload = json.loads(reader.readline())
+            self.assertEqual(
+                payload['event_type'], EventType.SELF_DESTRUCT_INITIATED.value
+            )
+            self.assertIsNone(payload.get('operation_id'))
+        finally:
+            release_other.set()
+            if worker.ident is not None:
+                worker.join(Constants.DEFAULT_IPC_TIMEOUT)
+            server.stop()
+            initiating_peer.close()
+            other_peer.close()
 
     def test_unauthenticated_init_requires_session_auth(self) -> None:
         """
@@ -2456,29 +3252,23 @@ class DaemonHardeningTests(unittest.TestCase):
             None
         """
 
-        daemon = self._build_daemon()
+        daemon = self._build_daemon(require_session_auth=True)
         daemon._ipc = Mock()
-        daemon._network_handler = Mock()
+        daemon._session_access.install_context(create_session_auth_context('secret'))
+        network_handler = Mock()
+        daemon._command_dispatcher._network_handler = network_handler
         conn, peer = socket.socketpair()
 
         try:
-            with (
-                patch.object(Daemon, '_requires_session_auth', return_value=True),
-                patch.object(
-                    daemon._local_auth,
-                    'issue_session_challenge',
-                    return_value=object(),
+            daemon._process_ui_command(
+                InitCommand(
+                    current_version=IPC_PROTOCOL_VERSION,
+                    min_supported=IPC_PROTOCOL_MIN_SUPPORTED,
                 ),
-                patch.object(
-                    daemon,
-                    '_build_session_auth_event',
-                    return_value=create_event(EventType.AUTH_REQUIRED),
-                ) as build_auth_event,
-            ):
-                daemon._process_ui_command(InitCommand(), conn)
+                conn,
+            )
 
-            build_auth_event.assert_called_once()
-            daemon._network_handler.handle.assert_not_called()
+            network_handler.handle.assert_not_called()
             daemon._ipc.send_to.assert_called_once()
             sent_event = daemon._ipc.send_to.call_args.args[1]
             self.assertIs(sent_event.event_type, EventType.AUTH_REQUIRED)
@@ -2499,27 +3289,14 @@ class DaemonHardeningTests(unittest.TestCase):
             None
         """
 
-        daemon = self._build_daemon()
+        daemon = self._build_daemon(require_session_auth=True)
         daemon._ipc = Mock()
+        daemon._session_access.install_context(create_session_auth_context('secret'))
         conn, peer = socket.socketpair()
 
         try:
-            with (
-                patch.object(Daemon, '_requires_session_auth', return_value=True),
-                patch.object(
-                    daemon._local_auth,
-                    'issue_session_challenge',
-                    return_value=object(),
-                ),
-                patch.object(
-                    daemon,
-                    '_build_session_auth_event',
-                    return_value=create_event(EventType.AUTH_REQUIRED),
-                ) as build_auth_event,
-            ):
-                daemon._process_ui_command(UnlockCommand(password='secret'), conn)
+            daemon._process_ui_command(UnlockCommand(password='secret'), conn)
 
-            build_auth_event.assert_called_once()
             daemon._ipc.send_to.assert_called_once()
             sent_event = daemon._ipc.send_to.call_args.args[1]
             self.assertIs(sent_event.event_type, EventType.AUTH_REQUIRED)
@@ -2617,11 +3394,17 @@ class DaemonHardeningTests(unittest.TestCase):
 
         try:
             with patch.object(
-                daemon._local_auth,
+                daemon._session_access._local_auth,
                 'get_retry_after_seconds',
                 return_value=12,
             ):
-                daemon._process_ui_command(InitCommand(), conn)
+                daemon._process_ui_command(
+                    InitCommand(
+                        current_version=IPC_PROTOCOL_VERSION,
+                        min_supported=IPC_PROTOCOL_MIN_SUPPORTED,
+                    ),
+                    conn,
+                )
 
             daemon._ipc.send_to.assert_called_once()
             sent_event = daemon._ipc.send_to.call_args.args[1]
@@ -2656,10 +3439,13 @@ class DaemonHardeningTests(unittest.TestCase):
             broadcast_callback=lambda _event: None,
             stop_flag=stop_flag,
             config=cast(Config, _DummyConfig()),
+            state=StateTracker(),
             error_callback=lambda message: errors.append(message),
         )
 
-        with patch('metor.core.daemon.managed.outbox.time.sleep', return_value=None):
+        with patch(
+            'metor.core.daemon.managed.outbox.worker.time.sleep', return_value=None
+        ):
             worker._loop()
 
         self.assertEqual(
@@ -2680,14 +3466,49 @@ class DaemonHardeningTests(unittest.TestCase):
             None
         """
 
-        self.assertTrue(OutboxWorker._is_expected_ack_line('msg-1', '/ack msg-1'))
-        self.assertFalse(
-            OutboxWorker._is_expected_ack_line('msg-1', '/ack msg-1 extra')
+        self.assertTrue(is_expected_ack_line('msg-1', '/drop_ack msg-1'))
+        self.assertFalse(is_expected_ack_line('msg-1', '/drop_ack msg-1 extra'))
+        self.assertFalse(is_expected_ack_line('msg-1', '/drop_ack other'))
+        self.assertFalse(is_expected_ack_line('msg-1', 'prefix /drop_ack msg-1'))
+
+    def test_drop_delivery_error_keeps_exception_detail_out_of_history(self) -> None:
+        """A failed direct tunnel records no transport exception payload.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        private_detail = 'private-drop-payload-and-path'
+        conn = Mock()
+        conn.settimeout.side_effect = OSError(private_detail)
+        tunnels = Mock()
+        tunnels.establish.return_value = (conn, Mock())
+        history_manager = Mock()
+        delivery = DropDelivery(
+            mm=cast(MessageManager, Mock()),
+            hm=cast(HistoryManager, history_manager),
+            state=StateTracker(),
+            tunnels=tunnels,
+            broadcast_callback=Mock(),
+            stop_flag=threading.Event(),
+            config=cast(Config, _DummyConfig()),
         )
-        self.assertFalse(OutboxWorker._is_expected_ack_line('msg-1', '/ack other'))
-        self.assertFalse(
-            OutboxWorker._is_expected_ack_line('msg-1', 'prefix /ack msg-1')
+
+        with patch.object(delivery, '_reuse_session', return_value=False):
+            delivery.send_single_drop(
+                'peer-onion',
+                (1, 'peer-onion', 'text', 'payload', 'msg-1', '2026-04-04'),
+            )
+
+        history_manager.log_event.assert_called_once()
+        self.assertEqual(
+            history_manager.log_event.call_args.kwargs['detail_text'],
+            'Drop delivery failed.',
         )
+        self.assertNotIn(private_detail, repr(history_manager.log_event.call_args))
+        conn.close.assert_called_once()
 
     def test_chat_ipc_client_applies_timeout_and_ignores_read_timeouts(self) -> None:
         """
@@ -2717,6 +3538,7 @@ class DaemonHardeningTests(unittest.TestCase):
 
         self.assertEqual(fake_socket.timeouts, [2.5])
         client._listener_thread_main()
+        client._event_thread_main()
         disconnect_mock.assert_called_once()
 
     def test_retunnel_disconnects_existing_live_connection_before_replacement(
@@ -2856,6 +3678,67 @@ class DaemonHardeningTests(unittest.TestCase):
             unauth_conn.close()
             unauth_peer.close()
 
+    def test_connect_limit_counts_authenticated_dedicated_peer_transport(self) -> None:
+        """Dedicated DROP/CALL writers retain admission capacity after AUTH."""
+        state = StateTracker()
+        dedicated_conn, dedicated_peer = socket.socketpair()
+        controller = _ConnectControllerHarness(
+            state, _ConnectTestConfig(max_connections=1)
+        )
+        try:
+            state.add_unauthenticated_connection(dedicated_conn)
+            state.send_frame(dedicated_conn, b'challenge\n')
+            self.assertEqual(state.get_tracked_live_socket_count(), 1)
+            state.remove_unauthenticated_connection(dedicated_conn)
+
+            connect_to_helper(
+                cast(ConnectControllerProtocol, controller),
+                'peer',
+                origin=ConnectionOrigin.MANUAL,
+            )
+
+            controller.tor_manager_mock.connect.assert_not_called()
+            event = controller.broadcast_mock.call_args.args[0]
+            self.assertIs(event.event_type, EventType.MAX_CONNECTIONS_REACHED)
+        finally:
+            state.abort_all_sockets()
+            dedicated_conn.close()
+            dedicated_peer.close()
+
+    def test_failed_connect_keeps_exception_detail_out_of_ipc_and_history(
+        self,
+    ) -> None:
+        """A socket failure emits only a stable reason and history detail.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        private_detail = 'private-connect-path-and-secret'
+        controller = _ConnectControllerHarness(
+            StateTracker(),
+            _ConnectTestConfig(max_connections=1, max_retries=0),
+            connect_side_effect=OSError(private_detail),
+        )
+
+        connect_to_helper(
+            cast(ConnectControllerProtocol, controller),
+            'peer',
+            origin=ConnectionOrigin.MANUAL,
+        )
+
+        event = cast(IpcEvent, controller.broadcast_mock.call_args.args[0])
+        self.assertIs(event.event_type, EventType.CONNECTION_FAILED)
+        self.assertEqual(event.error, 'Connection attempt failed.')
+        self.assertEqual(
+            controller._hm.log_event.call_args.kwargs['detail_text'],
+            'Connection attempt failed.',
+        )
+        self.assertNotIn(private_detail, event.to_json())
+        self.assertNotIn(private_detail, repr(controller._hm.log_event.call_args))
+
     def test_retunnel_connect_failure_preserves_current_live_connection(self) -> None:
         """
         Verifies that retunnel connect failure preserves current live connection.
@@ -2980,7 +3863,7 @@ class DaemonHardeningTests(unittest.TestCase):
 
                 return None
 
-            def read_line(self) -> str:
+            def read_line(self, *, deadline: float | None = None) -> str:
                 """
                 Reads line from the helper stream.
 
@@ -2991,7 +3874,10 @@ class DaemonHardeningTests(unittest.TestCase):
                     str: The computed return value.
                 """
 
-                return f'/challenge {"ab" * Constants.TOR_HANDSHAKE_CHALLENGE_BYTES}'
+                return (
+                    f'/challenge {"ab" * Constants.TOR_HANDSHAKE_CHALLENGE_BYTES} '
+                    f'{PEER_PROTOCOL_VERSION} {PEER_PROTOCOL_MIN_SUPPORTED}'
+                )
 
             def get_buffer(self) -> bytes:
                 """
@@ -3025,7 +3911,10 @@ class DaemonHardeningTests(unittest.TestCase):
 
         self.assertEqual(
             conn.sent,
-            [b'/auth self-onion signature RECOVER\n'],
+            [
+                b'/auth self-onion signature '
+                + f'{PEER_PROTOCOL_VERSION} {PEER_PROTOCOL_MIN_SUPPORTED} RECOVER\n'.encode()
+            ],
         )
 
     def test_connect_helper_closes_socket_after_handshake_failure(self) -> None:
@@ -3065,7 +3954,7 @@ class DaemonHardeningTests(unittest.TestCase):
 
                 return None
 
-            def read_line(self) -> str:
+            def read_line(self, *, deadline: float | None = None) -> str:
                 """
                 Reads line from the helper stream.
 
@@ -3212,7 +4101,7 @@ class DaemonHardeningTests(unittest.TestCase):
             cm=cast(ContactManager, _DummyContactManager()),
             hm=cast(HistoryManager, history_manager),
             mm=cast(MessageManager, message_manager),
-            state=cast(StateTracker, object()),
+            state=StateTracker(),
             broadcast_callback=lambda _event: None,
             has_clients_callback=lambda: False,
             has_live_consumers_callback=lambda: False,
@@ -3223,10 +4112,22 @@ class DaemonHardeningTests(unittest.TestCase):
             {'id': 'msg-1', 'text': 'hello', 'timestamp': '2026-04-04T12:00:00+00:00'}
         )
         payload_b64 = base64.b64encode(payload_text.encode('utf-8')).decode('utf-8')
+        invalid_timestamp = base64.b64encode(
+            b'{"id":"msg-1","text":"invalid","timestamp":{}}'
+        ).decode('ascii')
+        nested_json = base64.b64encode(b'[' * 1500 + b']' * 1500).decode('ascii')
         stream = _FakeStream(
             [
                 '/drop bad not-base64!!!',
+                '/drop array W10=',
+                '/drop null bnVsbA==',
+                '/drop scalar MQ==',
+                '/drop unframed aGVsbG8=',
+                '/drop missing-text e30=',
                 f'/drop transport-id {payload_b64}',
+                f'/drop msg-1 {invalid_timestamp}',
+                f'/drop nested {nested_json}',
+                f'/drop msg-1 {payload_b64}',
                 None,
             ]
         )
@@ -3241,7 +4142,7 @@ class DaemonHardeningTests(unittest.TestCase):
         self.assertEqual(len(message_manager.queued), 1)
         self.assertEqual(message_manager.queued[0]['msg_id'], 'msg-1')
         self.assertEqual(message_manager.queued[0]['payload'], 'hello')
-        self.assertEqual(conn.sent, [b'/ack msg-1\n'])
+        self.assertEqual(conn.sent, [b'/drop_ack msg-1\n'])
         self.assertTrue(conn.closed)
 
     def test_async_drop_stops_without_ack_when_drop_backlog_limit_is_reached(
@@ -3264,7 +4165,7 @@ class DaemonHardeningTests(unittest.TestCase):
             cm=cast(ContactManager, _DummyContactManager()),
             hm=cast(HistoryManager, history_manager),
             mm=cast(MessageManager, message_manager),
-            state=cast(StateTracker, object()),
+            state=StateTracker(),
             broadcast_callback=lambda _event: None,
             has_clients_callback=lambda: False,
             has_live_consumers_callback=lambda: False,
@@ -3275,7 +4176,7 @@ class DaemonHardeningTests(unittest.TestCase):
             {'id': 'msg-2', 'text': 'blocked', 'timestamp': '2026-04-04T12:05:00+00:00'}
         )
         payload_b64 = base64.b64encode(payload_text.encode('utf-8')).decode('utf-8')
-        stream = _FakeStream([f'/drop transport-id {payload_b64}', None])
+        stream = _FakeStream([f'/drop msg-2 {payload_b64}', None])
         conn = _DummyConn()
 
         router.process_async_drop(
@@ -3306,7 +4207,7 @@ class DaemonHardeningTests(unittest.TestCase):
             cm=cast(ContactManager, _DummyContactManager()),
             hm=cast(HistoryManager, history_manager),
             mm=cast(MessageManager, message_manager),
-            state=cast(StateTracker, object()),
+            state=StateTracker(),
             broadcast_callback=lambda _event: None,
             has_clients_callback=lambda: False,
             has_live_consumers_callback=lambda: False,
@@ -3362,29 +4263,11 @@ class DaemonHardeningTests(unittest.TestCase):
 
                 return 'peer', 'peer-onion'
 
-        class _NoLiveState:
-            """
-            Provides a no live state helper for test scenarios.
-            """
-
-            def get_connection(self, _onion: str) -> None:
-                """
-                Returns connection for the test scenario.
-
-                Args:
-                    _onion (str): The onion.
-
-                Returns:
-                    None
-                """
-
-                return None
-
         router = MessageRouter(
             cm=cast(ContactManager, _ResolvedContactManager()),
             hm=cast(HistoryManager, history_manager),
             mm=cast(MessageManager, message_manager),
-            state=cast(StateTracker, _NoLiveState()),
+            state=StateTracker(),
             broadcast_callback=broadcasted.append,
             has_clients_callback=lambda: False,
             has_live_consumers_callback=lambda: False,
@@ -3457,7 +4340,7 @@ class DaemonHardeningTests(unittest.TestCase):
         self.assertEqual(len(message_manager.queued), 1)
         self.assertEqual(message_manager.queued[0]['msg_id'], 'msg-1')
         self.assertEqual(message_manager.queued[0]['payload'], 'hello')
-        self.assertIs(message_manager.queued[0]['msg_type'], MessageType.LIVE_TEXT)
+        self.assertIs(message_manager.queued[0]['delivery'], Delivery.LIVE)
         self.assertIs(message_manager.queued[0]['status'], MessageStatus.PENDING)
         self.assertEqual(history_manager.events, [])
         self.assertTrue(state.has_unacked_messages('peer-onion'))
@@ -3480,12 +4363,13 @@ class DaemonHardeningTests(unittest.TestCase):
         conn = _DummyConn()
         state.add_active_connection('peer-onion', cast(socket.socket, conn))
         message_manager.pending_live_outbox.append(
-            (
-                1,
-                'peer-onion',
-                'hello after recovery',
-                'msg-1',
-                '2026-04-29T11:00:00+00:00',
+            PendingLiveRecord(
+                receipt_id=1,
+                peer_onion='peer-onion',
+                content_type='text',
+                payload='hello after recovery',
+                msg_id='msg-1',
+                timestamp='2026-04-29T11:00:00+00:00',
             )
         )
         router = MessageRouter(
@@ -3553,6 +4437,16 @@ class DaemonHardeningTests(unittest.TestCase):
             'hello',
             '2026-04-04T12:00:00+00:00',
         )
+        message_manager.pending_live_outbox.append(
+            PendingLiveRecord(
+                receipt_id=1,
+                peer_onion='peer-onion',
+                content_type=ContentType.TEXT.value,
+                payload='hello',
+                msg_id='msg-1',
+                timestamp='2026-04-04T12:00:00+00:00',
+            )
+        )
         state.remember_message_request_id('msg-1', 'req-live-1')
 
         router.process_incoming_ack('peer-onion', 'msg-1')
@@ -3583,12 +4477,13 @@ class DaemonHardeningTests(unittest.TestCase):
         message_manager = _DummyMessageManager()
         state = StateTracker()
         message_manager.pending_live_outbox.append(
-            (
-                1,
-                'peer-onion',
-                'hello before shutdown',
-                'msg-1',
-                '2026-04-29T11:05:00+00:00',
+            PendingLiveRecord(
+                receipt_id=1,
+                peer_onion='peer-onion',
+                content_type='text',
+                payload='hello before shutdown',
+                msg_id='msg-1',
+                timestamp='2026-04-29T11:05:00+00:00',
             )
         )
         router = MessageRouter(
@@ -3606,7 +4501,7 @@ class DaemonHardeningTests(unittest.TestCase):
         router.finalize_pending_live_messages()
 
         self.assertGreaterEqual(len(message_manager.queued), 1)
-        self.assertIs(message_manager.queued[-1]['msg_type'], MessageType.DROP_TEXT)
+        self.assertIs(message_manager.queued[-1]['delivery'], Delivery.DROP)
         self.assertEqual(message_manager.queued[-1]['msg_id'], 'msg-1')
         self.assertEqual(history_manager.events[-1][0][0], HistoryEvent.QUEUED)
 
@@ -3646,9 +4541,10 @@ class DaemonHardeningTests(unittest.TestCase):
             register_session_consumer_cb=lambda _conn: None,
             config=cast(Config, _DummyConfig()),
         )
-        command = SendDropCommand(
+        command = SendMessageCommand(
             target='peer',
-            text='hello',
+            delivery=Delivery.DROP,
+            content=TextContent('hello'),
             msg_id='msg-1',
             request_id='req-drop-1',
         )
@@ -3659,6 +4555,7 @@ class DaemonHardeningTests(unittest.TestCase):
         outbox_worker.remember_message_request_id.assert_called_once_with(
             'msg-1',
             'req-drop-1',
+            'peer-onion',
         )
         self.assertEqual(len(sent_events), 1)
         self.assertIs(sent_events[0].event_type, EventType.DROP_QUEUED)
@@ -3693,19 +4590,19 @@ class DaemonHardeningTests(unittest.TestCase):
         conn = _NetworkSocket()
 
         with patch.object(
-            worker,
-            '_establish_tunnel',
+            worker._tunnels,
+            'establish',
             return_value=(
                 cast(socket.socket, conn),
-                cast(TcpStreamReader, _FakeStream(['/ack msg-1'])),
+                cast(TcpStreamReader, _FakeStream(['/drop_ack msg-1'])),
             ),
         ):
-            worker._send_single_drop(
+            worker._delivery.send_single_drop(
                 'peer-onion',
                 (
                     1,
                     'peer-onion',
-                    'out',
+                    ContentType.TEXT.value,
                     'hello',
                     'msg-1',
                     '2026-04-04T12:00:00+00:00',
@@ -3743,6 +4640,51 @@ class DaemonHardeningTests(unittest.TestCase):
         finally:
             writer.close()
             reader.close()
+
+    def test_tcp_stream_reader_rejects_terminated_frame_over_limit(self) -> None:
+        """Rejects an oversized peer frame even when its delimiter arrives with it.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        frame_limit = len(b'abcd')
+        for payload, accepted in ((b'abcd\n', True), (b'abcde\n', False)):
+            with self.subTest(payload=payload):
+                writer, reader = socket.socketpair()
+                try:
+                    writer.sendall(payload)
+                    stream = TcpStreamReader(reader, max_bytes=frame_limit)
+                    if accepted:
+                        self.assertEqual(stream.read_line(), 'abcd')
+                    else:
+                        with self.assertRaises(MemoryError):
+                            stream.read_line()
+                finally:
+                    writer.close()
+                    reader.close()
+
+    def test_tcp_stream_reader_hides_socket_exception_details(self) -> None:
+        """Keeps raw socket error details out of the transport failure text.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        private_detail = 'private-profile-path-and-secret'
+        reader = Mock()
+        reader.recv.side_effect = OSError(private_detail)
+        stream = TcpStreamReader(cast(socket.socket, reader))
+
+        with self.assertRaises(ConnectionError) as raised:
+            stream.read_line()
+
+        self.assertEqual(str(raised.exception), 'Socket read failed.')
+        self.assertNotIn(private_detail, str(raised.exception))
 
     def test_add_pending_connection_rejects_shadow_socket_when_active_exists(
         self,
@@ -3839,7 +4781,7 @@ class DaemonHardeningTests(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             HandshakeProtocol.parse_challenge_line(
-                f'/challenge {"ab" * (Constants.TOR_HANDSHAKE_CHALLENGE_BYTES - 1)}'
+                f'/challenge {"ab" * (Constants.TOR_HANDSHAKE_CHALLENGE_BYTES - 1)} 1 1'
             )
 
     def test_handshake_protocol_rejects_auth_frame_with_extra_tokens(self) -> None:
@@ -3881,7 +4823,14 @@ class DaemonHardeningTests(unittest.TestCase):
 
             self.assertEqual(
                 parsed,
-                ('peer-onion', 'signature', False, True),
+                (
+                    'peer-onion',
+                    'signature',
+                    PEER_PROTOCOL_VERSION,
+                    PEER_PROTOCOL_MIN_SUPPORTED,
+                    False,
+                    True,
+                ),
             )
 
     def test_handshake_protocol_rejects_unsupported_recovery_hint(self) -> None:
@@ -3897,7 +4846,7 @@ class DaemonHardeningTests(unittest.TestCase):
 
         with self.assertRaises(ValueError):
             HandshakeProtocol.parse_auth_line(
-                f'/auth peer sig {ConnectionOrigin.MANUAL.value}'
+                f'/auth peer sig 1 1 {ConnectionOrigin.MANUAL.value}'
             )
 
     def test_crypto_verify_signature_rejects_invalid_onion_checksum(self) -> None:
@@ -5402,12 +6351,13 @@ class DaemonHardeningTests(unittest.TestCase):
         controller = _DisconnectControllerHarness(state, cast(Config, _DummyConfig()))
         message_manager = cast(_DummyMessageManager, controller._mm)
         message_manager.pending_live_outbox.append(
-            (
-                1,
-                'peer-onion',
-                'hello after disconnect',
-                'msg-1',
-                '2026-04-29T13:57:04+00:00',
+            PendingLiveRecord(
+                receipt_id=1,
+                peer_onion='peer-onion',
+                content_type='text',
+                payload='hello after disconnect',
+                msg_id='msg-1',
+                timestamp='2026-04-29T13:57:04+00:00',
             )
         )
         broadcast_mock = cast(Mock, controller._broadcast)
@@ -5432,7 +6382,7 @@ class DaemonHardeningTests(unittest.TestCase):
         )
         self.assertEqual(message_manager.pending_live_outbox, [])
         self.assertEqual(len(message_manager.queued), 1)
-        self.assertEqual(message_manager.queued[0]['msg_type'], MessageType.DROP_TEXT)
+        self.assertEqual(message_manager.queued[-1]['delivery'], Delivery.DROP)
         self.assertEqual(message_manager.queued[0]['msg_id'], 'msg-1')
 
     def test_manual_disconnect_during_retunnel_cancels_outbound_reconnect(self) -> None:
@@ -5489,12 +6439,13 @@ class DaemonHardeningTests(unittest.TestCase):
         controller = _DisconnectControllerHarness(state, cast(Config, _DummyConfig()))
         message_manager = cast(_DummyMessageManager, controller._mm)
         message_manager.pending_live_outbox.append(
-            (
-                1,
-                'peer-onion',
-                'hello after reject',
-                'msg-peer-reject',
-                '2026-04-29T15:04:00+00:00',
+            PendingLiveRecord(
+                receipt_id=1,
+                peer_onion='peer-onion',
+                content_type='text',
+                payload='hello after reject',
+                msg_id='msg-peer-reject',
+                timestamp='2026-04-29T15:04:00+00:00',
             )
         )
         broadcast_mock = cast(Mock, controller._broadcast)
@@ -5527,7 +6478,7 @@ class DaemonHardeningTests(unittest.TestCase):
         self.assertEqual(controller.enqueued_live_reconnects, [])
         self.assertEqual(message_manager.pending_live_outbox, [])
         self.assertEqual(len(message_manager.queued), 1)
-        self.assertEqual(message_manager.queued[0]['msg_type'], MessageType.DROP_TEXT)
+        self.assertEqual(message_manager.queued[0]['delivery'], Delivery.DROP)
         self.assertEqual(message_manager.queued[0]['msg_id'], 'msg-peer-reject')
         disconnected_event = cast(
             IpcEvent,
@@ -5570,12 +6521,13 @@ class DaemonHardeningTests(unittest.TestCase):
         controller = _DisconnectControllerHarness(state, cast(Config, _DummyConfig()))
         message_manager = cast(_DummyMessageManager, controller._mm)
         message_manager.pending_live_outbox.append(
-            (
-                1,
-                'peer-onion',
-                'hello after remote end',
-                'msg-remote-end',
-                '2026-04-29T14:10:00+00:00',
+            PendingLiveRecord(
+                receipt_id=1,
+                peer_onion='peer-onion',
+                content_type='text',
+                payload='hello after remote end',
+                msg_id='msg-remote-end',
+                timestamp='2026-04-29T14:10:00+00:00',
             )
         )
         broadcast_mock = cast(Mock, controller._broadcast)
@@ -5604,215 +6556,76 @@ class DaemonHardeningTests(unittest.TestCase):
         self.assertTrue(cast(_DummyConn, outbound_conn).closed)
         self.assertEqual(message_manager.pending_live_outbox, [])
         self.assertEqual(len(message_manager.queued), 1)
-        self.assertEqual(message_manager.queued[0]['msg_type'], MessageType.DROP_TEXT)
+        self.assertEqual(message_manager.queued[0]['delivery'], Delivery.DROP)
         self.assertEqual(message_manager.queued[0]['msg_id'], 'msg-remote-end')
 
     def test_remote_fallback_disconnect_defers_noise_until_reconnect_grace_expires(
         self,
     ) -> None:
-        """
-        Verifies that remote fallback disconnect stays silent until grace expires.
-
-        Args:
-            None
-
-        Returns:
-            None
-        """
-
+        """Schedules recovery on loss and reports terminal loss only at grace expiry."""
         state = StateTracker()
         conn = cast(socket.socket, _DummyConn())
         state.add_active_connection('peer-onion', conn)
         controller = _DisconnectControllerHarness(state, cast(Config, _DummyConfig()))
         broadcast_mock = cast(Mock, controller._broadcast)
-        history_manager = cast(_DummyHistoryManager, controller._hm)
-        scheduled_threads: list[tuple[Any, tuple[Any, ...]]] = []
-
-        class _CapturedThread:
-            """
-            Captures a deferred thread target for manual execution.
-            """
-
-            def __init__(self, target: Any, args: tuple[Any, ...]) -> None:
-                """
-                Initializes the captured thread helper.
-
-                Args:
-                    target (Any): The deferred target.
-                    args (tuple[Any, ...]): The deferred arguments.
-
-                Returns:
-                    None
-                """
-
-                self._target = target
-                self._args = args
-
-            def start(self) -> None:
-                """
-                Captures the deferred target instead of executing it.
-
-                Args:
-                    None
-
-                Returns:
-                    None
-                """
-
-                scheduled_threads.append((self._target, self._args))
-
-        def _thread_factory(*args: Any, **kwargs: Any) -> _CapturedThread:
-            """
-            Creates captured-thread helpers for the test scenario.
-
-            Args:
-                *args (Any): Ignored positional arguments.
-                **kwargs (Any): Thread keyword arguments.
-
-            Returns:
-                _CapturedThread: The computed return value.
-            """
-
-            del args
-            return _CapturedThread(kwargs['target'], kwargs.get('args', ()))
-
         with patch(
-            'metor.core.daemon.managed.network.controller.session.terminate.threading.Thread',
-            side_effect=_thread_factory,
-        ):
+            'metor.core.daemon.managed.network.controller.session.recovery.threading.Thread'
+        ) as worker:
             disconnect_helper(
-                controller,
-                'peer',
-                initiated_by_self=False,
-                is_fallback=True,
-                socket_to_close=conn,
-                origin=ConnectionOrigin.INCOMING,
+                controller, 'peer', False, True, conn, origin=ConnectionOrigin.INCOMING
             )
-
         self.assertTrue(cast(_DummyConn, conn).closed)
-        self.assertEqual(broadcast_mock.call_count, 1)
-        self.assertIsInstance(
-            cast(IpcEvent, broadcast_mock.call_args_list[0].args[0]),
-            ConnectionConnectingEvent,
-        )
-        self.assertEqual(history_manager.events, [])
-        self.assertEqual(controller.enqueued_live_reconnects, [])
-        self.assertEqual(len(scheduled_threads), 1)
-        self.assertTrue(state.has_live_reconnect_grace('peer-onion'))
-
-        with patch(
-            'metor.core.daemon.managed.network.controller.session.terminate.time.sleep',
-            side_effect=lambda _seconds: None,
-        ):
-            target, args = scheduled_threads[0]
-            target(*args)
-
-        event_types = [
-            cast(IpcEvent, call.args[0]).event_type
-            for call in broadcast_mock.call_args_list
-        ]
+        self.assertEqual(controller.enqueued_live_reconnects, ['peer-onion'])
         self.assertEqual(
-            event_types,
+            [
+                cast(IpcEvent, call.args[0]).event_type
+                for call in broadcast_mock.call_args_list
+            ],
+            [EventType.CONNECTION_CONNECTING, EventType.AUTO_RECONNECT_SCHEDULED],
+        )
+        target = worker.call_args.kwargs['target']
+        args = worker.call_args.kwargs['args']
+        with patch('time.monotonic', return_value=args[-1]):
+            target(*args)
+        self.assertEqual(
+            [
+                cast(IpcEvent, call.args[0]).event_type
+                for call in broadcast_mock.call_args_list
+            ],
             [
                 EventType.CONNECTION_CONNECTING,
-                EventType.DISCONNECTED,
                 EventType.AUTO_RECONNECT_SCHEDULED,
+                EventType.DISCONNECTED,
             ],
         )
-        self.assertEqual(controller.enqueued_live_reconnects, ['peer-onion'])
+        self.assertFalse(state.has_scheduled_auto_reconnect('peer-onion'))
 
     def test_remote_fallback_disconnect_keeps_unacked_live_messages_during_grace(
         self,
     ) -> None:
-        """
-        Verifies that recoverable fallback keeps unacked live messages pending.
-
-        Args:
-            None
-
-        Returns:
-            None
-        """
-
+        """Outgoing LIVE stays pending while bounded recovery is scheduled."""
         state = StateTracker()
         conn = cast(socket.socket, _DummyConn())
         state.add_active_connection('peer-onion', conn)
-        state.add_unacked_message(
-            'peer-onion',
-            'msg-1',
-            'hello',
-            '2026-04-28T14:24:09',
-        )
+        state.add_unacked_message('peer-onion', 'msg-1', 'hello', 'timestamp')
         controller = _DisconnectControllerHarness(state, cast(Config, _DummyConfig()))
-        broadcast_mock = cast(Mock, controller._broadcast)
-
-        class _CapturedThread:
-            """
-            Captures the deferred thread target for manual execution.
-            """
-
-            def __init__(self, target: Any, args: tuple[Any, ...]) -> None:
-                """
-                Initializes the captured thread helper.
-
-                Args:
-                    target (Any): The deferred target.
-                    args (tuple[Any, ...]): The deferred arguments.
-
-                Returns:
-                    None
-                """
-
-                self._target = target
-                self._args = args
-
-            def start(self) -> None:
-                """
-                Suppresses deferred execution for the immediate assertion window.
-
-                Args:
-                    None
-
-                Returns:
-                    None
-                """
-
-                return None
-
-        def _thread_factory(*args: Any, **kwargs: Any) -> _CapturedThread:
-            """
-            Creates captured-thread helpers for the test scenario.
-
-            Args:
-                *args (Any): Ignored positional arguments.
-                **kwargs (Any): Thread keyword arguments.
-
-            Returns:
-                _CapturedThread: The computed return value.
-            """
-
-            del args
-            return _CapturedThread(kwargs['target'], kwargs.get('args', ()))
-
         with patch(
-            'metor.core.daemon.managed.network.controller.session.terminate.threading.Thread',
-            side_effect=_thread_factory,
+            'metor.core.daemon.managed.network.controller.session.recovery.threading.Thread'
         ):
             disconnect_helper(
-                controller,
-                'peer',
-                initiated_by_self=False,
-                is_fallback=True,
-                socket_to_close=conn,
-                origin=ConnectionOrigin.INCOMING,
+                controller, 'peer', False, True, conn, origin=ConnectionOrigin.INCOMING
             )
-
+        self.assertTrue(state.has_unacked_messages('peer-onion'))
+        self.assertTrue(state.has_live_reconnect_grace('peer-onion'))
+        self.assertTrue(state.has_scheduled_auto_reconnect('peer-onion'))
         event_types = [
             cast(IpcEvent, call.args[0]).event_type
-            for call in broadcast_mock.call_args_list
+            for call in cast(Mock, controller._broadcast).call_args_list
         ]
-        self.assertEqual(event_types, [EventType.CONNECTION_CONNECTING])
-        self.assertTrue(state.has_unacked_messages('peer-onion'))
+        self.assertEqual(
+            event_types,
+            [EventType.CONNECTION_CONNECTING, EventType.AUTO_RECONNECT_SCHEDULED],
+        )
 
     def test_stale_remote_fallback_disconnect_still_enters_reconnect_grace(
         self,
@@ -5925,285 +6738,93 @@ class DaemonHardeningTests(unittest.TestCase):
         self.assertEqual(controller.enqueued_live_reconnects, ['peer-onion'])
 
     def test_remote_fallback_during_retunnel_stays_silent(self) -> None:
-        """
-        Verifies that generic reconnect grace UX stays silent during active retunnel.
-
-        Args:
-            None
-
-        Returns:
-            None
-        """
-
+        """Route replacement owns its notices and still has a bounded recovery timer."""
         state = StateTracker()
         conn = cast(socket.socket, _DummyConn())
         state.add_active_connection('peer-onion', conn)
         state.mark_retunnel_started('peer-onion')
         controller = _DisconnectControllerHarness(state, cast(Config, _DummyConfig()))
-        broadcast_mock = cast(Mock, controller._broadcast)
-        scheduled_threads: list[tuple[Any, tuple[Any, ...]]] = []
-
-        class _CapturedThread:
-            """
-            Captures a deferred thread target for manual execution.
-            """
-
-            def __init__(self, target: Any, args: tuple[Any, ...]) -> None:
-                """
-                Initializes the captured thread helper.
-
-                Args:
-                    target (Any): The deferred target.
-                    args (tuple[Any, ...]): The deferred arguments.
-
-                Returns:
-                    None
-                """
-
-                self._target = target
-                self._args = args
-
-            def start(self) -> None:
-                """
-                Captures the deferred target instead of executing it.
-
-                Args:
-                    None
-
-                Returns:
-                    None
-                """
-
-                scheduled_threads.append((self._target, self._args))
-
-        def _thread_factory(*args: Any, **kwargs: Any) -> _CapturedThread:
-            """
-            Creates captured-thread helpers for the test scenario.
-
-            Args:
-                *args (Any): Ignored positional arguments.
-                **kwargs (Any): Thread keyword arguments.
-
-            Returns:
-                _CapturedThread: The computed return value.
-            """
-
-            del args
-            return _CapturedThread(kwargs['target'], kwargs.get('args', ()))
-
         with patch(
-            'metor.core.daemon.managed.network.controller.session.terminate.threading.Thread',
-            side_effect=_thread_factory,
-        ):
+            'metor.core.daemon.managed.network.controller.session.recovery.threading.Thread'
+        ) as worker:
             disconnect_helper(
-                controller,
-                'peer',
-                initiated_by_self=False,
-                is_fallback=True,
-                socket_to_close=conn,
-                origin=ConnectionOrigin.INCOMING,
+                controller, 'peer', False, True, conn, origin=ConnectionOrigin.INCOMING
             )
-
         self.assertTrue(state.has_live_reconnect_grace('peer-onion'))
-        self.assertEqual(scheduled_threads, [])
-        self.assertEqual(broadcast_mock.call_count, 0)
+        self.assertIsNotNone(state.accepted_live_recovery_deadline('peer-onion'))
+        self.assertEqual(worker.call_count, 1)
+        cast(Mock, controller._broadcast).assert_not_called()
+        self.assertEqual(controller.enqueued_live_reconnects, [])
 
     def test_remote_fallback_disconnect_stays_silent_when_replacement_arrives_in_time(
         self,
     ) -> None:
-        """
-        Verifies that delayed fallback noise is cancelled when recovery reconnect wins.
-
-        Args:
-            None
-
-        Returns:
-            None
-        """
-
+        """A recognized recovery socket invalidates the old loss timer."""
         state = StateTracker()
         conn = cast(socket.socket, _DummyConn())
-        replacement_conn = cast(socket.socket, _DummyConn())
+        replacement = cast(socket.socket, _DummyConn())
         state.add_active_connection('peer-onion', conn)
+        generation = state.get_live_context_generation('peer-onion')
         controller = _DisconnectControllerHarness(state, cast(Config, _DummyConfig()))
-        broadcast_mock = cast(Mock, controller._broadcast)
-        scheduled_threads: list[tuple[Any, tuple[Any, ...]]] = []
-
-        class _CapturedThread:
-            """
-            Captures a deferred thread target for manual execution.
-            """
-
-            def __init__(self, target: Any, args: tuple[Any, ...]) -> None:
-                """
-                Initializes the captured thread helper.
-
-                Args:
-                    target (Any): The deferred target.
-                    args (tuple[Any, ...]): The deferred arguments.
-
-                Returns:
-                    None
-                """
-
-                self._target = target
-                self._args = args
-
-            def start(self) -> None:
-                """
-                Captures the deferred target instead of executing it.
-
-                Args:
-                    None
-
-                Returns:
-                    None
-                """
-
-                scheduled_threads.append((self._target, self._args))
-
-        def _thread_factory(*args: Any, **kwargs: Any) -> _CapturedThread:
-            """
-            Creates captured-thread helpers for the test scenario.
-
-            Args:
-                *args (Any): Ignored positional arguments.
-                **kwargs (Any): Thread keyword arguments.
-
-            Returns:
-                _CapturedThread: The computed return value.
-            """
-
-            del args
-            return _CapturedThread(kwargs['target'], kwargs.get('args', ()))
-
         with patch(
-            'metor.core.daemon.managed.network.controller.session.terminate.threading.Thread',
-            side_effect=_thread_factory,
-        ):
+            'metor.core.daemon.managed.network.controller.session.recovery.threading.Thread'
+        ) as worker:
             disconnect_helper(
-                controller,
-                'peer',
-                initiated_by_self=False,
-                is_fallback=True,
-                socket_to_close=conn,
-                origin=ConnectionOrigin.INCOMING,
+                controller, 'peer', False, True, conn, origin=ConnectionOrigin.INCOMING
             )
-
+        state.add_active_connection(
+            'peer-onion', replacement, expected_context_generation=generation
+        )
+        target = worker.call_args.kwargs['target']
+        args = worker.call_args.kwargs['args']
+        with patch('time.monotonic', return_value=args[-1]):
+            target(*args)
+        self.assertIs(state.get_connection('peer-onion'), replacement)
+        self.assertEqual(state.get_live_context_generation('peer-onion'), generation)
+        self.assertFalse(state.has_scheduled_auto_reconnect('peer-onion'))
         event_types = [
             cast(IpcEvent, call.args[0]).event_type
-            for call in broadcast_mock.call_args_list
+            for call in cast(Mock, controller._broadcast).call_args_list
         ]
-        self.assertEqual(event_types, [EventType.CONNECTION_CONNECTING])
+        self.assertEqual(
+            event_types,
+            [EventType.CONNECTION_CONNECTING, EventType.AUTO_RECONNECT_SCHEDULED],
+        )
 
-        state.add_active_connection('peer-onion', replacement_conn)
-
-        with patch(
-            'metor.core.daemon.managed.network.controller.session.terminate.time.sleep',
-            side_effect=lambda _seconds: None,
-        ):
-            target, args = scheduled_threads[0]
-            target(*args)
-
-        self.assertEqual(broadcast_mock.call_count, 1)
-        self.assertEqual(controller.enqueued_live_reconnects, [])
-
-    def test_remote_fallback_finalizer_stays_silent_while_outbound_attempt_is_in_flight(
+    def test_remote_fallback_finalizer_expires_the_original_recovery_attempt(
         self,
     ) -> None:
-        """
-        Verifies that deferred fallback does not emit disconnect noise while a new outbound attempt is already running.
-
-        Args:
-            None
-
-        Returns:
-            None
-        """
-
+        """An in-flight attempt never extends accepted recovery beyond its deadline."""
         state = StateTracker()
         conn = cast(socket.socket, _DummyConn())
         state.add_active_connection('peer-onion', conn)
         controller = _DisconnectControllerHarness(state, cast(Config, _DummyConfig()))
-        broadcast_mock = cast(Mock, controller._broadcast)
-        scheduled_threads: list[tuple[Any, tuple[Any, ...]]] = []
-
-        class _CapturedThread:
-            """
-            Captures a deferred thread target for manual execution.
-            """
-
-            def __init__(self, target: Any, args: tuple[Any, ...]) -> None:
-                """
-                Initializes the captured thread helper.
-
-                Args:
-                    target (Any): The deferred target.
-                    args (tuple[Any, ...]): The deferred arguments.
-
-                Returns:
-                    None
-                """
-
-                self._target = target
-                self._args = args
-
-            def start(self) -> None:
-                """
-                Captures the deferred target instead of executing it.
-
-                Args:
-                    None
-
-                Returns:
-                    None
-                """
-
-                scheduled_threads.append((self._target, self._args))
-
-        def _thread_factory(*args: Any, **kwargs: Any) -> _CapturedThread:
-            """
-            Creates captured-thread helpers for the test scenario.
-
-            Args:
-                *args (Any): Ignored positional arguments.
-                **kwargs (Any): Thread keyword arguments.
-
-            Returns:
-                _CapturedThread: The computed return value.
-            """
-
-            del args
-            return _CapturedThread(kwargs['target'], kwargs.get('args', ()))
-
         with patch(
-            'metor.core.daemon.managed.network.controller.session.terminate.threading.Thread',
-            side_effect=_thread_factory,
-        ):
+            'metor.core.daemon.managed.network.controller.session.recovery.threading.Thread'
+        ) as worker:
             disconnect_helper(
-                controller,
-                'peer',
-                initiated_by_self=False,
-                is_fallback=True,
-                socket_to_close=conn,
-                origin=ConnectionOrigin.INCOMING,
+                controller, 'peer', False, True, conn, origin=ConnectionOrigin.INCOMING
             )
-
-        state.add_outbound_attempt('peer-onion', origin=ConnectionOrigin.MANUAL)
-
-        with patch(
-            'metor.core.daemon.managed.network.controller.session.terminate.time.sleep',
-            side_effect=lambda _seconds: None,
-        ):
-            target, args = scheduled_threads[0]
+        state.add_outbound_attempt('peer-onion', ConnectionOrigin.AUTO_RECONNECT)
+        target = worker.call_args.kwargs['target']
+        args = worker.call_args.kwargs['args']
+        with patch('time.monotonic', return_value=args[-1]):
             target(*args)
-
+        self.assertIsNone(state.accepted_live_context_generation('peer-onion'))
+        self.assertFalse(state.has_outbound_attempt('peer-onion'))
+        self.assertFalse(state.has_scheduled_auto_reconnect('peer-onion'))
         event_types = [
             cast(IpcEvent, call.args[0]).event_type
-            for call in broadcast_mock.call_args_list
+            for call in cast(Mock, controller._broadcast).call_args_list
         ]
-        self.assertEqual(event_types, [EventType.CONNECTION_CONNECTING])
-        self.assertEqual(controller.enqueued_live_reconnects, [])
+        self.assertEqual(
+            event_types,
+            [
+                EventType.CONNECTION_CONNECTING,
+                EventType.AUTO_RECONNECT_SCHEDULED,
+                EventType.DISCONNECTED,
+            ],
+        )
 
     def test_discard_outbound_attempt_clears_recent_mutual_connect_window(self) -> None:
         """
@@ -6226,137 +6847,56 @@ class DaemonHardeningTests(unittest.TestCase):
 
         self.assertFalse(state.has_active_or_recent_outbound_attempt('peer-onion'))
 
-    def test_remote_fallback_grace_expiry_without_auto_reconnect_keeps_unacked_live_messages(
+    def test_remote_fallback_grace_expiry_without_automatic_fallback_keeps_unacked_live_messages(
         self,
     ) -> None:
-        """
-        Verifies that grace expiry without local auto reconnect keeps unacked live messages retained.
+        """Disabled reconnect and fallback preserve publication for explicit user action."""
 
-        Args:
-            None
-
-        Returns:
-            None
-        """
-
-        class _NoAutoReconnectConfig(_DummyConfig):
-            """
-            Provides one config that disables local auto reconnect for the test.
-            """
+        class _NoAutomaticConfig(_DummyConfig):
+            """Disables automatic connection work and permanent-end DROP promotion."""
 
             def get_int(self, key: Any) -> int:
-                """
-                Returns integer settings for the test scenario.
+                """Returns zero only for the automatic retry setting."""
+                return (
+                    0
+                    if key is SettingKey.LIVE_RECONNECT_DELAY
+                    else super().get_int(key)
+                )
 
-                Args:
-                    key (Any): The requested setting key.
-
-                Returns:
-                    int: The configured integer value.
-                """
-
-                if key is SettingKey.LIVE_RECONNECT_DELAY:
-                    return 0
-                if key is SettingKey.LIVE_RECONNECT_GRACE_TIMEOUT:
-                    return 1
-                return super().get_int(key)
+            def get_bool(self, key: Any) -> bool:
+                """Retains pending publication when recovery expires."""
+                return (
+                    False
+                    if key is SettingKey.FALLBACK_TO_DROP
+                    else super().get_bool(key)
+                )
 
         state = StateTracker()
         conn = cast(socket.socket, _DummyConn())
         state.add_active_connection('peer-onion', conn)
-        state.add_unacked_message(
-            'peer-onion',
-            'msg-1',
-            'hello',
-            '2026-04-28T16:13:02',
-        )
+        state.add_unacked_message('peer-onion', 'msg-1', 'hello', 'timestamp')
         controller = _DisconnectControllerHarness(
-            state,
-            cast(Config, _NoAutoReconnectConfig()),
+            state, cast(Config, _NoAutomaticConfig())
         )
-        broadcast_mock = cast(Mock, controller._broadcast)
-        scheduled_threads: list[tuple[Any, tuple[Any, ...]]] = []
-
-        class _CapturedThread:
-            """
-            Captures a deferred thread target for manual execution.
-            """
-
-            def __init__(self, target: Any, args: tuple[Any, ...]) -> None:
-                """
-                Initializes the captured thread helper.
-
-                Args:
-                    target (Any): The deferred target.
-                    args (tuple[Any, ...]): The deferred arguments.
-
-                Returns:
-                    None
-                """
-
-                self._target = target
-                self._args = args
-
-            def start(self) -> None:
-                """
-                Captures the deferred target instead of executing it.
-
-                Args:
-                    None
-
-                Returns:
-                    None
-                """
-
-                scheduled_threads.append((self._target, self._args))
-
-        def _thread_factory(*args: Any, **kwargs: Any) -> _CapturedThread:
-            """
-            Creates captured-thread helpers for the test scenario.
-
-            Args:
-                *args (Any): Ignored positional arguments.
-                **kwargs (Any): Thread keyword arguments.
-
-            Returns:
-                _CapturedThread: The computed return value.
-            """
-
-            del args
-            return _CapturedThread(kwargs['target'], kwargs.get('args', ()))
-
         with patch(
-            'metor.core.daemon.managed.network.controller.session.terminate.threading.Thread',
-            side_effect=_thread_factory,
-        ):
+            'metor.core.daemon.managed.network.controller.session.recovery.threading.Thread'
+        ) as worker:
             disconnect_helper(
-                controller,
-                'peer',
-                initiated_by_self=False,
-                is_fallback=True,
-                socket_to_close=conn,
-                origin=ConnectionOrigin.INCOMING,
+                controller, 'peer', False, True, conn, origin=ConnectionOrigin.INCOMING
             )
-
-        with patch(
-            'metor.core.daemon.managed.network.controller.session.terminate.time.sleep',
-            side_effect=lambda _seconds: None,
-        ):
-            target, args = scheduled_threads[0]
+        target = worker.call_args.kwargs['target']
+        args = worker.call_args.kwargs['args']
+        with patch('time.monotonic', return_value=args[-1]):
             target(*args)
-
+        self.assertTrue(state.has_unacked_messages('peer-onion'))
+        self.assertEqual(controller.enqueued_live_reconnects, [])
         event_types = [
             cast(IpcEvent, call.args[0]).event_type
-            for call in broadcast_mock.call_args_list
+            for call in cast(Mock, controller._broadcast).call_args_list
         ]
         self.assertEqual(
-            event_types,
-            [
-                EventType.CONNECTION_CONNECTING,
-                EventType.DISCONNECTED,
-            ],
+            event_types, [EventType.CONNECTION_CONNECTING, EventType.DISCONNECTED]
         )
-        self.assertTrue(state.has_unacked_messages('peer-onion'))
 
     def test_auto_reconnect_terminal_failure_converts_retained_unacked_to_drop(
         self,
@@ -6428,6 +6968,16 @@ class DaemonHardeningTests(unittest.TestCase):
             'hello',
             '2026-04-28T15:46:44',
         )
+        message_manager.queue_message(
+            contact_onion='peer-onion',
+            direction=MessageDirection.OUT,
+            delivery=Delivery.LIVE,
+            content_type=ContentType.TEXT,
+            payload='hello',
+            status=MessageStatus.PENDING,
+            msg_id='msg-1',
+            timestamp='2026-04-28T15:46:44',
+        )
         router = MessageRouter(
             cm=cast(ContactManager, _DummyContactManager()),
             hm=cast(HistoryManager, history_manager),
@@ -6467,6 +7017,16 @@ class DaemonHardeningTests(unittest.TestCase):
             'hello',
             '2026-04-28T15:46:44',
         )
+        message_manager.queue_message(
+            contact_onion='peer-onion',
+            direction=MessageDirection.OUT,
+            delivery=Delivery.LIVE,
+            content_type=ContentType.TEXT,
+            payload='hello',
+            status=MessageStatus.PENDING,
+            msg_id='msg-1',
+            timestamp='2026-04-28T15:46:44',
+        )
         router = MessageRouter(
             cm=cast(ContactManager, _DummyContactManager()),
             hm=cast(HistoryManager, history_manager),
@@ -6485,7 +7045,7 @@ class DaemonHardeningTests(unittest.TestCase):
             emit_event=False,
         )
 
-        self.assertEqual(message_manager.queued[0]['msg_type'], MessageType.DROP_TEXT)
+        self.assertEqual(message_manager.queued[-1]['delivery'], Delivery.DROP)
 
     def test_listener_tracks_remote_auto_reconnect_replacement_as_pending(
         self,
@@ -6593,6 +7153,7 @@ class DaemonHardeningTests(unittest.TestCase):
             broadcast_callback=lambda _event: None,
             stop_flag=threading.Event(),
             config=cast(Config, _DummyConfig()),
+            state=StateTracker(),
         )
 
         class _InvalidChallengeStream:
@@ -6613,7 +7174,7 @@ class DaemonHardeningTests(unittest.TestCase):
 
                 return None
 
-            def read_line(self) -> str:
+            def read_line(self, *, deadline: float | None = None) -> str:
                 """
                 Reads line from the helper stream.
 
@@ -6627,10 +7188,10 @@ class DaemonHardeningTests(unittest.TestCase):
                 return '/msg invalid'
 
         with patch(
-            'metor.core.daemon.managed.outbox.TcpStreamReader',
+            'metor.core.daemon.managed.outbox.tunnel.TcpStreamReader',
             _InvalidChallengeStream,
         ):
-            result = worker._establish_tunnel('peer-onion')
+            result = worker._tunnels.establish('peer-onion')
 
         self.assertIsNone(result)
         self.assertTrue(conn.closed)
@@ -6651,17 +7212,69 @@ class DaemonHardeningTests(unittest.TestCase):
         """
         daemon = self._build_daemon()
         daemon._ipc = Mock()
-        daemon._network_handler = Mock()
+        network_handler = Mock()
+        daemon._command_dispatcher._network_handler = network_handler
         conn, peer = socket.socketpair()
 
         try:
             daemon._process_ui_command(GetChatStartupStateCommand(), conn)
-            daemon._network_handler.handle.assert_called_once()
-            routed_cmd = daemon._network_handler.handle.call_args.args[0]
+            network_handler.handle.assert_called_once()
+            routed_cmd = network_handler.handle.call_args.args[0]
             self.assertIsInstance(routed_cmd, GetChatStartupStateCommand)
         finally:
             conn.close()
             peer.close()
+
+    def test_blocked_writer_does_not_stall_actual_daemon_command_dispatch(
+        self,
+    ) -> None:
+        """R2-T10: a stalled session cannot hold the canonical dispatch lock."""
+        daemon = self._build_daemon()
+        daemon._ipc.stop()
+        daemon._ipc = IpcServer(
+            cast(ProfileManager, _DummyProfileManager()),
+            daemon._process_ui_command,
+        )
+        stalled_server, stalled_client = socket.socketpair()
+        active_server, active_client = socket.socketpair()
+        active_client.settimeout(1.0)
+        stalled_server.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4096)
+        daemon._ipc._clients = [stalled_server, active_server]
+        daemon._ipc._enqueue_client_frame(stalled_server, b'x' * (2 * 1024 * 1024))
+
+        network_handler = Mock()
+
+        def answer(cmd: object, conn: socket.socket) -> None:
+            daemon._ipc.send_to(
+                conn,
+                AckEvent(msg_id=type(cmd).__name__),
+            )
+
+        network_handler.handle.side_effect = answer
+        daemon._command_dispatcher._network_handler = network_handler
+        try:
+            daemon._process_ui_command(
+                SendMessageCommand(
+                    'peer-b', Delivery.LIVE, TextContent('responsive'), 'text-b'
+                ),
+                active_server,
+            )
+            daemon._process_ui_command(GetRuntimeSnapshotCommand(), active_server)
+            payload = b''
+            while payload.count(b'\n') < 2:
+                payload += active_client.recv(Constants.TCP_BUFFER_SIZE)
+            events = [
+                IpcEvent.from_dict(json.loads(line))
+                for line in payload.decode('utf-8').splitlines()
+            ]
+            self.assertEqual(
+                [cast(AckEvent, event).msg_id for event in events],
+                ['SendMessageCommand', 'GetRuntimeSnapshotCommand'],
+            )
+        finally:
+            daemon._ipc.stop()
+            stalled_client.close()
+            active_client.close()
 
 
 if __name__ == '__main__':

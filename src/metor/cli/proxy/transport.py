@@ -1,0 +1,424 @@
+"""Transport helpers for CLI proxy daemon and headless request flows."""
+
+import socket
+from typing import Callable, Optional
+
+from metor.application import run_with_headless_daemon
+from metor.core.api import (
+    EventType,
+    GetConfigCommand,
+    GetConfigListCommand,
+    GetSettingCommand,
+    GetSettingsListCommand,
+    IpcCommand,
+    IpcEvent,
+    SetConfigCommand,
+    SetSettingCommand,
+    SyncConfigCommand,
+)
+from metor.data import ProfileManager, SettingKey
+from metor.shared import escape_terminal_text
+from metor.cli.prompt import PromptAbortedError, PromptOutputSpacer
+from metor.cli.theme import Theme
+from metor.cli.errors import format_safe_local_runtime_error
+from metor.cli.ipc import IpcRequestResult, IpcRequestSession
+
+
+CLI_ASYNC_EVENT_TYPES: set[EventType] = {
+    EventType.ACK,
+    EventType.AUTO_FALLBACK_QUEUED,
+    EventType.AUTO_RECONNECT_SCHEDULED,
+    EventType.CONNECTED,
+    EventType.CONNECTION_AUTO_ACCEPTED,
+    EventType.CONNECTION_CONNECTING,
+    EventType.CONNECTION_FAILED,
+    EventType.CONNECTION_PENDING,
+    EventType.CONNECTION_REJECTED,
+    EventType.CONNECTION_RETRY,
+    EventType.CONNECTIONS_STATE,
+    EventType.CONTACT_REMOVED,
+    EventType.DISCONNECTED,
+    EventType.DROP_FAILED,
+    EventType.FALLBACK_SUCCESS,
+    EventType.INBOX_NOTIFICATION,
+    EventType.INCOMING_CONNECTION,
+    EventType.INIT,
+    EventType.NO_PENDING_LIVE_MSGS,
+    EventType.PENDING_CONNECTION_EXPIRED,
+    EventType.MESSAGE_RECEIVED,
+    EventType.RENAME_SUCCESS,
+    EventType.RETUNNEL_FAILED,
+    EventType.RETUNNEL_INITIATED,
+    EventType.RETUNNEL_SUCCESS,
+    EventType.RUNTIME_STATE_CHANGED,
+    EventType.SWITCH_SUCCESS,
+}
+
+HEADLESS_CONFIG_COMMANDS: tuple[type[IpcCommand], ...] = (
+    GetSettingCommand,
+    SetSettingCommand,
+    GetSettingsListCommand,
+    GetConfigCommand,
+    GetConfigListCommand,
+    SetConfigCommand,
+    SyncConfigCommand,
+)
+
+HEADLESS_RUNTIME_FAILURE: str = (
+    'The local command did not complete safely. '
+    'Its outcome could not be confirmed; check the profile before retrying.'
+)
+
+
+class CliProxyTransport:
+    """Executes IPC and local headless request flows for the CLI proxy."""
+
+    def __init__(
+        self,
+        pm: ProfileManager,
+        *,
+        is_remote: bool,
+        prompt_password: Callable[..., Optional[str]],
+        prefix_remote: Callable[[str], str],
+        format_event: Callable[..., str],
+        send_socket_command: Callable[[socket.socket, IpcCommand], None],
+        mark_error: Optional[Callable[[], None]] = None,
+    ) -> None:
+        """
+        Initializes the request transport helper.
+
+        Args:
+            pm (ProfileManager): The active profile configuration.
+            is_remote (bool): Whether the active profile is remote.
+            prompt_password (Callable[..., Optional[str]]): Password prompt callback.
+            prefix_remote (Callable[[str], str]): Remote-prefix renderer callback.
+            format_event (Callable[..., str]): IPC event renderer callback.
+            send_socket_command (Callable[[socket.socket, IpcCommand], None]): Socket serializer callback.
+            mark_error (Optional[Callable[[], None]]): Nonzero-exit callback for
+                transport failures and incomplete authentication.
+
+        Returns:
+            None
+        """
+        self._pm = pm
+        self._is_remote = is_remote
+        self._prompt_password = prompt_password
+        self._prefix_remote = prefix_remote
+        self._format_event = format_event
+        self._send_socket_command = send_socket_command
+        self._mark_error = mark_error
+
+    def _track_result(self, result: IpcRequestResult) -> IpcRequestResult:
+        """Propagate unsuccessful exchanges without inspecting rendered text.
+
+        Args:
+            result: Structured command exchange outcome.
+        Returns:
+            IpcRequestResult: The unchanged outcome for caller reconciliation.
+        """
+        if (result.failed or result.auth_incomplete) and self._mark_error is not None:
+            self._mark_error()
+        return result
+
+    def _should_prompt_headless_password(self, cmd: IpcCommand) -> bool:
+        """
+        Decides whether one offline headless request must prompt for a password.
+
+        Args:
+            cmd (IpcCommand): The offline command about to be routed.
+
+        Returns:
+            bool: True when the current request must collect a password first.
+        """
+        if not self._pm.supports_password_auth():
+            return False
+
+        if not isinstance(cmd, HEADLESS_CONFIG_COMMANDS):
+            return True
+
+        return self._pm.config.get_bool(SettingKey.REQUIRE_LOCAL_AUTH)
+
+    def request_ipc(self, cmd: IpcCommand, wait_for_response: bool = True) -> str:
+        """
+        Routes one command to the active daemon or a temporary headless instance.
+
+        Args:
+            cmd (IpcCommand): The outbound command DTO.
+            wait_for_response (bool): Whether to block for one response.
+
+        Returns:
+            str: The formatted CLI response.
+        """
+        result: IpcRequestResult = self.request_ipc_result(cmd, wait_for_response)
+        rendered: str
+        if result.event is not None:
+            rendered = self._format_event(result.event, prefix_remote=True)
+        else:
+            message: str = result.message or 'Command executed successfully.'
+            rendered = self._prefix_remote(message)
+
+        spacer = PromptOutputSpacer(result.insert_leading_blank_line)
+        return spacer.format(rendered)
+
+    def request_ipc_result(
+        self,
+        cmd: IpcCommand,
+        wait_for_response: bool = True,
+    ) -> IpcRequestResult:
+        """
+        Routes one command and returns the raw typed result before CLI formatting.
+
+        Args:
+            cmd (IpcCommand): The outbound command DTO.
+            wait_for_response (bool): Whether to block for one response.
+
+        Returns:
+            IpcRequestResult: The typed raw response payload.
+        """
+        return self._track_result(self._request_ipc_result(cmd, wait_for_response))
+
+    def _request_ipc_result(
+        self, cmd: IpcCommand, wait_for_response: bool
+    ) -> IpcRequestResult:
+        """Resolve the endpoint or bounded offline Core for one exchange.
+
+        Args:
+            cmd: The outbound typed command.
+            wait_for_response: Whether a correlated confirmation is required.
+        Returns:
+            IpcRequestResult: Typed result before process-status propagation.
+        """
+        try:
+            port: Optional[int] = self._pm.get_daemon_port()
+
+            if not port:
+                if self._is_remote:
+                    return IpcRequestResult(
+                        message=(
+                            f'Cannot reach remote Daemon on port '
+                            f'{Theme.YELLOW}{self._pm.get_static_port()}{Theme.RESET}. '
+                            'Did you forget the SSH tunnel?'
+                        ),
+                        failed=True,
+                    )
+
+                password: Optional[str] = None
+                prompted_for_password: bool = False
+                if self._should_prompt_headless_password(cmd):
+                    password = self._prompt_password()
+                    prompted_for_password = True
+                    if password is None:
+                        return IpcRequestResult(
+                            message='Aborted.',
+                            insert_leading_blank_line=True,
+                            auth_incomplete=True,
+                            failed=True,
+                        )
+
+                headless_result: str | IpcRequestResult = run_with_headless_daemon(
+                    self._pm,
+                    password,
+                    lambda connected: self._send_to_endpoint_result(
+                        connected,
+                        cmd,
+                        wait_for_response,
+                    ),
+                )
+
+                if isinstance(headless_result, IpcRequestResult):
+                    result: IpcRequestResult = headless_result
+                else:
+                    result = IpcRequestResult(message=headless_result)
+
+                return IpcRequestResult(
+                    event=result.event,
+                    message=result.message,
+                    insert_leading_blank_line=(
+                        prompted_for_password or result.insert_leading_blank_line
+                    ),
+                    auth_incomplete=result.auth_incomplete,
+                    failed=result.failed,
+                )
+
+            return self.send_to_port_result(port, cmd, wait_for_response)
+        except PromptAbortedError:
+            return IpcRequestResult(
+                message='Aborted.', auth_incomplete=True, failed=True
+            )
+        except ValueError as exc:
+            return IpcRequestResult(
+                message=format_safe_local_runtime_error(exc),
+                failed=True,
+            )
+        except (OSError, RuntimeError):
+            return IpcRequestResult(message=HEADLESS_RUNTIME_FAILURE, failed=True)
+
+    def request_ipc_event(self, cmd: IpcCommand) -> Optional[IpcEvent]:
+        """
+        Routes one command to the active daemon and returns the terminal typed event.
+
+        Args:
+            cmd (IpcCommand): The outbound command DTO.
+
+        Returns:
+            Optional[IpcEvent]: The terminal typed event, if one was received.
+        """
+        return self.request_ipc_result(cmd, wait_for_response=True).event
+
+    def request_local_headless(
+        self,
+        cmd: IpcCommand,
+        wait_for_response: bool = True,
+    ) -> str:
+        """
+        Routes one host-local command through the ephemeral headless daemon.
+
+        Args:
+            cmd (IpcCommand): The local command DTO.
+            wait_for_response (bool): Whether to await one terminal response.
+
+        Returns:
+            str: The formatted local response.
+        """
+        try:
+            return run_with_headless_daemon(
+                self._pm,
+                None,
+                lambda connected: self._format_result(
+                    self._send_to_endpoint_result(connected, cmd, wait_for_response),
+                    prefix_remote=False,
+                ),
+            )
+        except PromptAbortedError:
+            if self._mark_error is not None:
+                self._mark_error()
+            return 'Aborted.'
+        except ValueError as exc:
+            if self._mark_error is not None:
+                self._mark_error()
+            return escape_terminal_text(str(exc))
+        except (OSError, RuntimeError):
+            return self._format_result(
+                IpcRequestResult(message=HEADLESS_RUNTIME_FAILURE, failed=True),
+                prefix_remote=False,
+            )
+
+    def send_to_port(
+        self,
+        port: int,
+        cmd: IpcCommand,
+        wait_for_response: bool,
+        *,
+        prefix_remote: bool = True,
+    ) -> str:
+        """
+        Executes the TCP socket transmission and parses the strict JSON response.
+
+        Args:
+            port (int): The target IPC socket port.
+            cmd (IpcCommand): The outbound DTO.
+            wait_for_response (bool): Whether to await one response.
+            prefix_remote (bool): Whether to mark the output as remote.
+
+        Returns:
+            str: The formatted terminal output.
+        """
+        return self._format_result(
+            self.send_to_port_result(port, cmd, wait_for_response),
+            prefix_remote=prefix_remote,
+        )
+
+    def _format_result(self, result: IpcRequestResult, *, prefix_remote: bool) -> str:
+        """Formats one confirmed port or private-channel result consistently."""
+        result = self._track_result(result)
+        rendered: str
+        if result.event is not None:
+            rendered = self._format_event(
+                result.event,
+                prefix_remote=prefix_remote,
+            )
+        else:
+            message: str = result.message or 'Command executed successfully.'
+            if prefix_remote:
+                rendered = self._prefix_remote(message)
+            else:
+                rendered = message
+
+        spacer = PromptOutputSpacer(result.insert_leading_blank_line)
+        return spacer.format(rendered)
+
+    def send_to_port_result(
+        self,
+        port: int,
+        cmd: IpcCommand,
+        wait_for_response: bool,
+    ) -> IpcRequestResult:
+        """
+        Executes the TCP transmission and returns the raw typed request result.
+
+        Args:
+            port (int): The target IPC socket port.
+            cmd (IpcCommand): The outbound DTO.
+            wait_for_response (bool): Whether to await one response.
+
+        Returns:
+            IpcRequestResult: The raw terminal response payload.
+        """
+        return self._send_to_endpoint_result(port, cmd, wait_for_response)
+
+    def _send_to_endpoint_result(
+        self,
+        endpoint: int | socket.socket,
+        cmd: IpcCommand,
+        wait_for_response: bool,
+    ) -> IpcRequestResult:
+        """Uses managed TCP or a private offline channel through the same exchange."""
+        try:
+            session = IpcRequestSession(
+                self._pm,
+                async_event_types=CLI_ASYNC_EVENT_TYPES,
+                format_event=lambda event: self._format_event(
+                    event,
+                    prefix_remote=True,
+                ),
+                format_message=self._prefix_remote,
+                prompt_password=self._prompt_password,
+                send_socket_command=self._send_socket_command,
+            )
+            if isinstance(endpoint, socket.socket):
+                return session.execute_socket_result(endpoint, cmd, wait_for_response)
+            return session.execute_result(endpoint, cmd, wait_for_response)
+        except PromptAbortedError:
+            return IpcRequestResult(
+                message='Aborted.', auth_incomplete=True, failed=True
+            )
+        except ValueError as exc:
+            return IpcRequestResult(message=escape_terminal_text(str(exc)), failed=True)
+        except Exception:
+            if self._is_remote:
+                return IpcRequestResult(
+                    message=(
+                        f'Cannot reach remote Daemon on port '
+                        f'{Theme.YELLOW}{self._pm.get_static_port()}{Theme.RESET}. '
+                        'Did you forget the SSH tunnel?'
+                    ),
+                    failed=True,
+                )
+            return IpcRequestResult(
+                message='Failed to communicate with the daemon.', failed=True
+            )
+
+    def send_to_port_event(self, port: int, cmd: IpcCommand) -> Optional[IpcEvent]:
+        """
+        Executes the TCP transmission and returns the terminal typed event.
+
+        Args:
+            port (int): The target IPC socket port.
+            cmd (IpcCommand): The outbound DTO.
+
+        Returns:
+            Optional[IpcEvent]: The terminal event, if one was received.
+        """
+        return self._track_result(
+            self.send_to_port_result(port, cmd, wait_for_response=True)
+        ).event

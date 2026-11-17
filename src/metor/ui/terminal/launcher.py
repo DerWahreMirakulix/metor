@@ -1,0 +1,143 @@
+"""Public launcher entry point for the independently installed Terminal UI."""
+
+import sys
+import time
+
+from metor.client import (
+    FRONTEND_LAUNCH_CONTRACT_VERSION,
+    FrontendBootstrapError,
+    FrontendInteractions,
+    FrontendLaunchContext,
+    FrontendLaunchError,
+    FrontendSelectionKind,
+)
+from metor.ui.terminal import (
+    PromptAbortedError,
+    PromptOutputSpacer,
+    Theme,
+    prompt_hidden,
+    prompt_text,
+)
+from metor.shared import escape_terminal_text
+from metor.ui.terminal.chat import Chat
+from metor.versioning import APP_VERSION
+
+
+class _TerminalInteractions(FrontendInteractions):
+    """Terminal adapter for host-owned bootstrap decisions."""
+
+    def __init__(self) -> None:
+        """Initializes Terminal-specific bootstrap output spacing.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        self._spacer = PromptOutputSpacer()
+
+    def confirm_daemon_start(self) -> bool | None:
+        """Prompts for optional local daemon startup.
+
+        Args:
+            None
+
+        Returns:
+            bool | None: Decision, or None after prompt cancellation.
+        """
+        try:
+            value = prompt_text("Type 'yes' to start the local daemon: ")
+            self._spacer.mark_prompt()
+        except PromptAbortedError:
+            return None
+        return value.strip().lower() == 'yes'
+
+    def request_session_auth_secret(self) -> str | None:
+        """Prompts for a startup-only session authentication secret.
+
+        Args:
+            None
+
+        Returns:
+            str | None: Secret text, or None after cancellation.
+        """
+        try:
+            value = prompt_hidden(
+                f'{Theme.GREEN}Enter Session Auth Password: {Theme.RESET}'
+            )
+            self._spacer.mark_prompt()
+        except PromptAbortedError:
+            return None
+        return value or None
+
+    def show_status(self, message: str) -> None:
+        """Prints one host-owned non-secret bootstrap status.
+
+        Args:
+            message (str): Safe status text.
+
+        Returns:
+            None
+        """
+        print(self._spacer.format(message))
+
+
+def launch(context: FrontendLaunchContext) -> int:
+    """Starts the Terminal frontend from the public versioned launch context.
+
+    Args:
+        context (FrontendLaunchContext): Base-CLI bootstrap context.
+
+    Raises:
+        FrontendLaunchError: If the launcher contract is incompatible.
+
+    Returns:
+        int: Process exit status.
+    """
+    if context.contract_version != FRONTEND_LAUNCH_CONTRACT_VERSION:
+        raise FrontendLaunchError(
+            'The installed Terminal frontend uses an incompatible launch contract.'
+        )
+    selection = context.host.initial_selection()
+    if selection.kind is not FrontendSelectionKind.RESOLVED:
+        messages = {
+            FrontendSelectionKind.EMPTY: 'No profiles exist yet. Create one with `metor profiles add NAME`.',
+            FrontendSelectionKind.CHOICE_REQUIRED: 'Select a profile with -p NAME or set a default.',
+            FrontendSelectionKind.REQUESTED_MISSING: 'Requested profile does not exist. Choose another with -p NAME.',
+            FrontendSelectionKind.UNAVAILABLE: 'Some profiles are unavailable or damaged. Repair storage or choose another profile.',
+        }
+        sys.stderr.write(messages[selection.kind] + '\n')
+        return 1
+    interactions = _TerminalInteractions()
+    started = time.monotonic()
+    try:
+        bootstrap = context.host.bootstrap(interactions)
+    except FrontendBootstrapError as exc:
+        if str(exc):
+            print(interactions._spacer.format(escape_terminal_text(str(exc))))
+        if context.debug:
+            sys.stderr.write(
+                f'Metor {APP_VERSION} Terminal [host-bootstrap]: '
+                f'{exc.reason.value}; status {exc.exit_code}; '
+                f'elapsed {time.monotonic() - started:.3f}s\n'
+            )
+        return exc.exit_code
+    chat = Chat(
+        bootstrap,
+        startup_session_auth_provider=bootstrap.session_auth.take,
+    )
+    if chat.run():
+        return 0
+    if context.debug:
+        sys.stderr.write(
+            f'Metor {APP_VERSION} Terminal [pre-chat]: status 1; '
+            f'elapsed {time.monotonic() - started:.3f}s\n'
+        )
+    return 1
+
+
+# Entry-point metadata cannot express the typed contract generation. Publishing
+# it on the selected callable allows the base launcher to reject incompatible UI
+# packages before it performs profile or daemon bootstrap side effects.
+setattr(launch, 'contract_version', FRONTEND_LAUNCH_CONTRACT_VERSION)

@@ -3,6 +3,7 @@
 # ruff: noqa: E402
 
 import json
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -34,14 +35,15 @@ from metor.data.settings import (
     SettingKey,
     SettingValidationError,
 )
-from metor.ui import Theme, UIPresenter
-from metor.ui.cli.ipc.request.models import IpcRequestResult
-from metor.ui.cli.proxy.settings import CliProxySettingsActions
-from metor.ui.cli.proxy.transport import CliProxyTransport
+from metor.ui.terminal import Theme, UIPresenter
+from metor.cli.ipc.request.models import IpcRequestResult
+from metor.cli.proxy.settings import CliProxySettingsActions
+from metor.cli.proxy.transport import CliProxyTransport
 from metor.data.settings_registry import (
     get_ui_setting_spec,
     validate_ui_setting_value,
 )
+from metor.utils import Constants
 
 
 class _DummyPaths:
@@ -577,6 +579,33 @@ class SettingsContractTests(unittest.TestCase):
                 self.assertIn('updated successfully', result)
                 self.assertEqual(Settings.get_str(SettingKey.DEFAULT_PROFILE), 'work')
 
+    def test_local_settings_write_errors_do_not_expose_exception_details(
+        self,
+    ) -> None:
+        """Map local settings I/O errors to a stable failure event.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        private_detail = 'private-settings-path-and-secret'
+        with TemporaryDirectory() as temp_dir:
+            actions, _pm, _settings_path = self._build_actions(temp_dir)
+            with patch.object(Settings, 'set', side_effect=OSError(private_detail)):
+                client_result = actions.handle_settings_set(
+                    SettingKey.DEFAULT_PROFILE.value, 'work'
+                )
+            with patch.object(
+                Settings, 'set_namespace', side_effect=OSError(private_detail)
+            ):
+                ui_result = actions.handle_settings_set('ui.terminal.prompt_sign', '!')
+
+        expected = EventType.SETTING_UPDATE_FAILED.value
+        self.assertEqual((client_result, ui_result), (expected, expected))
+        self.assertNotIn(private_detail, client_result + ui_result)
+
     def test_global_settings_validate_integrity_rejects_semantic_errors(self) -> None:
         """
         Verifies that global settings validate integrity rejects semantic errors.
@@ -600,6 +629,83 @@ class SettingsContractTests(unittest.TestCase):
             ):
                 with self.assertRaisesRegex(ValueError, 'ui.ipc_timeout'):
                     Settings.validate_integrity()
+
+    def test_global_settings_writes_preserve_corrupt_file(self) -> None:
+        """Reject writes to malformed global settings without replacing the source.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with TemporaryDirectory() as temp_dir:
+            settings_path = Path(temp_dir) / 'settings.json'
+            original = b'{"client":'
+            settings_path.write_bytes(original)
+            with patch.object(
+                Settings, 'get_global_settings_path', return_value=settings_path
+            ):
+                with self.assertRaises(SettingValidationError):
+                    Settings.set(SettingKey.DEFAULT_PROFILE, 'work')
+                with self.assertRaises(SettingValidationError):
+                    Settings.set_namespace('ui.terminal.prompt_sign', '!')
+                self.assertEqual(settings_path.read_bytes(), original)
+
+                invalid_values = (
+                    b'{"ui": {"unknown": true}, "client": {}, "daemon": {}}'
+                )
+                settings_path.write_bytes(invalid_values)
+                with self.assertRaises(SettingValidationError):
+                    Settings.set(SettingKey.DEFAULT_PROFILE, 'work')
+                self.assertEqual(settings_path.read_bytes(), invalid_values)
+
+    def test_global_settings_replace_failure_preserves_previous_document(
+        self,
+    ) -> None:
+        """Keep the prior settings and clean the temporary copy on replace failure.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with TemporaryDirectory() as temp_dir:
+            settings_path = Path(temp_dir) / 'settings.json'
+            original = json.dumps(
+                {'ui': {}, 'client': {'default_profile': 'home'}, 'daemon': {}}
+            ).encode('utf-8')
+            settings_path.write_bytes(original)
+            with (
+                patch.object(
+                    Settings, 'get_global_settings_path', return_value=settings_path
+                ),
+                patch.object(Path, 'replace', side_effect=OSError('private-path')),
+            ):
+                with self.assertRaises(OSError):
+                    Settings.set(SettingKey.DEFAULT_PROFILE, 'work')
+            self.assertEqual(settings_path.read_bytes(), original)
+            self.assertEqual(
+                list(settings_path.parent.glob('.settings.json.*.tmp')), []
+            )
+
+    @unittest.skipUnless(os.name == 'posix', 'POSIX permission bits are required.')
+    def test_global_settings_create_private_directory_and_file(self) -> None:
+        """Protect fresh global settings and their parent from other local users.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with TemporaryDirectory() as temp_dir:
+            data_dir = Path(temp_dir) / '.metor'
+            with patch.object(Constants, 'DATA', data_dir):
+                Settings.set(SettingKey.DEFAULT_PROFILE, 'work')
+            self.assertEqual(data_dir.stat().st_mode & 0o777, 0o700)
+            self.assertEqual((data_dir / 'settings.json').stat().st_mode & 0o777, 0o600)
 
     def test_chat_daemon_autostart_setting_accepts_known_policies(self) -> None:
         """
@@ -741,7 +847,7 @@ class SettingsContractTests(unittest.TestCase):
         )
 
         with patch(
-            'metor.ui.cli.proxy.transport.run_with_headless_daemon',
+            'metor.cli.proxy.transport.run_with_headless_daemon',
             side_effect=_build_headless_result_callback(
                 captured_passwords,
                 'settings-output\nline-2',
@@ -777,7 +883,7 @@ class SettingsContractTests(unittest.TestCase):
         )
 
         with patch(
-            'metor.ui.cli.proxy.transport.run_with_headless_daemon',
+            'metor.cli.proxy.transport.run_with_headless_daemon',
             return_value='history-output\nline-2',
         ):
             result = transport.request_ipc(GetHistoryCommand())
@@ -809,7 +915,7 @@ class SettingsContractTests(unittest.TestCase):
         )
 
         with patch(
-            'metor.ui.cli.proxy.transport.run_with_headless_daemon',
+            'metor.cli.proxy.transport.run_with_headless_daemon',
             return_value='setting-value',
         ):
             result = transport.request_ipc(
@@ -842,7 +948,7 @@ class SettingsContractTests(unittest.TestCase):
         )
 
         with patch(
-            'metor.ui.cli.proxy.transport.run_with_headless_daemon',
+            'metor.cli.proxy.transport.run_with_headless_daemon',
             side_effect=_build_headless_result_callback(
                 captured_passwords,
                 'ok',
@@ -1394,3 +1500,16 @@ class SettingsContractTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+    def test_auto_accept_contacts_defaults_to_disabled(self) -> None:
+        """Verifies inbound LIVE sessions require explicit acceptance by default.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        from metor.data import SETTING_SPECS, SettingKey
+
+        self.assertFalse(SETTING_SPECS[SettingKey.AUTO_ACCEPT_CONTACTS].default)

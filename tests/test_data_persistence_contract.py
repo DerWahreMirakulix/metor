@@ -3,6 +3,8 @@
 # ruff: noqa: E402
 
 import sys
+import json
+import traceback
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -11,15 +13,23 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
 from metor.data import ContactManager, HistoryActor, HistoryEvent, HistoryManager
+from metor.core.api import (
+    ContentType,
+    Delivery,
+    EventType,
+    IpcEvent,
+    ListRetainedMessagesCommand,
+    RetainedMessagesUnavailableEvent,
+)
+from metor.core.daemon.handlers.db.messages import DatabaseCommandMessagesMixin
 from metor.data.contact import ContactOperationType
 from metor.data.message import (
     MessageDirection,
     MessageManager,
     MessageStatus,
-    MessageType,
 )
 from metor.data.profile import ProfileManager
-from metor.data.sql import SqlManager
+from metor.data.sql import DatabaseCorruptedError, SqlManager
 from metor.utils import Constants
 
 
@@ -80,6 +90,130 @@ class DataPersistenceContractTests(unittest.TestCase):
         snapshot = self._cm.get_contacts_data()
         self.assertEqual(
             tuple(entry.alias for entry in snapshot.discovered), ('renamed',)
+        )
+
+    def test_retained_inventory_is_paginated_non_consuming_and_stale_safe(self) -> None:
+        """R2-T26: inventory pagination neither consumes nor tears across change."""
+        onion = 'f' * Constants.TOR_V3_ONION_ADDRESS_LENGTH
+        self._cm.ensure_alias_for_onion(onion)
+        for index in range(3):
+            outcome = self._mm.queue_pending_live_if_capacity(
+                onion,
+                ContentType.TEXT,
+                f'payload-{index}',
+                f'retained-{index}',
+                f'2025-01-01T00:00:0{index}+00:00',
+                0,
+                10,
+                1024,
+            )
+            self.assertEqual(outcome.value, 'accepted')
+
+        first = self._mm.list_retained_messages(limit=2)
+        self.assertEqual(
+            [message.msg_id for message in first.messages],
+            ['retained-0', 'retained-1'],
+        )
+        self.assertIsNotNone(first.next_cursor)
+        assert first.next_cursor is not None
+        second = self._mm.list_retained_messages(cursor=first.next_cursor, limit=2)
+        self.assertEqual(
+            [message.msg_id for message in second.messages], ['retained-2']
+        )
+        self.assertEqual(len(self._mm.get_pending_live_outbox(onion)), 3)
+
+        changed = self._mm.list_retained_messages(limit=1)
+        assert changed.next_cursor is not None
+        self._mm.queue_pending_live_if_capacity(
+            onion,
+            ContentType.TEXT,
+            'new payload',
+            'retained-new',
+            '2025-01-01T00:00:04+00:00',
+            0,
+            10,
+            1024,
+        )
+        with self.assertRaises(ValueError):
+            self._mm.list_retained_messages(cursor=changed.next_cursor, limit=1)
+
+    def test_retained_inventory_error_cannot_leak_record_values_over_ipc(self) -> None:
+        """A storage conversion error yields a fixed, round-trippable IPC reason.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        private_detail = 'private-retained-payload-and-path'
+        handler = DatabaseCommandMessagesMixin()
+        handler._mm = self._mm
+        handler._cm = self._cm
+        with patch.object(
+            self._mm,
+            'list_retained_messages',
+            side_effect=ValueError(private_detail),
+        ):
+            event = handler._handle_list_retained_messages(
+                ListRetainedMessagesCommand()
+            )
+
+        self.assertIsInstance(event, RetainedMessagesUnavailableEvent)
+        assert isinstance(event, RetainedMessagesUnavailableEvent)
+        self.assertIs(event.event_type, EventType.RETAINED_MESSAGES_UNAVAILABLE)
+        self.assertEqual(event.reason, 'Retained-message inventory is unavailable.')
+        self.assertTrue(event.retryable)
+        encoded = event.to_json()
+        self.assertIsInstance(
+            IpcEvent.from_dict(json.loads(encoded)),
+            RetainedMessagesUnavailableEvent,
+        )
+        self.assertNotIn(private_detail, encoded)
+
+    def test_sql_manager_errors_do_not_expose_native_details(self) -> None:
+        """Open and export failures retain safe text through normal tracebacks.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        private_detail = 'private-sql-query-and-key'
+        db_path = self._pm.paths.get_db_file()
+        with (
+            patch(
+                'metor.data.sql.manager.read_schema_version',
+                side_effect=ValueError(private_detail),
+            ),
+            self.assertRaises(DatabaseCorruptedError) as open_error,
+        ):
+            SqlManager(db_path, self._pm.config)
+
+        self.assertEqual(
+            str(open_error.exception),
+            'Profile database could not be opened safely.',
+        )
+        self.assertNotIn(
+            private_detail, ''.join(traceback.format_exception(open_error.exception))
+        )
+
+        with (
+            patch(
+                'metor.data.sql.manager.read_schema_version',
+                side_effect=MemoryError(private_detail),
+            ),
+            self.assertRaises(DatabaseCorruptedError) as export_error,
+        ):
+            SqlManager.export_database_copy(db_path, self._data_root / 'staged.db')
+
+        self.assertEqual(
+            str(export_error.exception),
+            'Profile database could not be migrated safely.',
+        )
+        self.assertNotIn(
+            private_detail, ''.join(traceback.format_exception(export_error.exception))
         )
 
     def test_promotion_keeps_the_same_discovered_peer_identity(self) -> None:
@@ -226,7 +360,8 @@ class DataPersistenceContractTests(unittest.TestCase):
         self._mm.queue_message(
             contact_onion=kept_onion,
             direction=MessageDirection.IN,
-            msg_type=MessageType.DROP_TEXT,
+            delivery=Delivery.DROP,
+            content_type=ContentType.TEXT,
             payload='hello',
             status=MessageStatus.UNREAD,
             msg_id='msg-1',
@@ -267,7 +402,7 @@ class DataPersistenceContractTests(unittest.TestCase):
 
     def test_inbox_consume_rows_carry_msg_id(self) -> None:
         """
-        Verifies that get_and_read_inbox returns five-field rows including msg id.
+        Verifies get_and_read_inbox includes message ID and content discriminator.
 
         Regression guard for the MarkRead consume path: the SQL row must expose
         the stable message id so the read-receipt chain can address the message.
@@ -285,7 +420,8 @@ class DataPersistenceContractTests(unittest.TestCase):
         self._mm.queue_message(
             contact_onion=onion,
             direction=MessageDirection.IN,
-            msg_type=MessageType.DROP_TEXT,
+            delivery=Delivery.DROP,
+            content_type=ContentType.TEXT,
             payload='hello e2e',
             status=MessageStatus.UNREAD,
             msg_id='e2e-consume-msg-1',
@@ -293,10 +429,155 @@ class DataPersistenceContractTests(unittest.TestCase):
 
         rows = self._mm.get_and_read_inbox(onion)
         self.assertEqual(len(rows), 1)
-        self.assertEqual(len(rows[0]), 5)
+        self.assertEqual(len(rows[0]), 6)
         self.assertEqual(rows[0][4], 'e2e-consume-msg-1')
         self.assertEqual(str(rows[0][2]), 'hello e2e')
-        self.assertEqual(str(rows[0][1]), MessageType.DROP_TEXT.value)
+        self.assertEqual(str(rows[0][1]), Delivery.DROP.value)
+        self.assertEqual(str(rows[0][5]), ContentType.TEXT.value)
+
+    def test_selective_fallback_is_atomic_and_preserves_message_identity(self) -> None:
+        """Promotes only a fully valid selected LIVE subset into the DROP outbox."""
+        onion = '7' * Constants.TOR_V3_ONION_ADDRESS_LENGTH
+        self._cm.ensure_alias_for_onion(onion)
+        for msg_id, payload in (('live-1', 'one'), ('live-2', 'two')):
+            self._mm.queue_message(
+                contact_onion=onion,
+                direction=MessageDirection.OUT,
+                delivery=Delivery.LIVE,
+                content_type=ContentType.TEXT,
+                payload=payload,
+                status=MessageStatus.PENDING,
+                msg_id=msg_id,
+            )
+
+        self.assertIsNone(
+            self._mm.promote_pending_live_to_drop(onion, ['live-1', 'does-not-exist'])
+        )
+        self.assertEqual(
+            [record.msg_id for record in self._mm.get_pending_live_outbox(onion)],
+            ['live-1', 'live-2'],
+        )
+
+        promoted = self._mm.promote_pending_live_to_drop(onion, ['live-1'])
+        self.assertIsNotNone(promoted)
+        assert promoted is not None
+        self.assertEqual([record.msg_id for record in promoted], ['live-1'])
+        self.assertEqual(
+            [record.msg_id for record in self._mm.get_pending_live_outbox(onion)],
+            ['live-2'],
+        )
+        self.assertIn('live-1', [row[4] for row in self._mm.get_pending_outbox()])
+
+    def test_fallback_never_promotes_an_unfinished_voice_turn(self) -> None:
+        """Leaves recording Voice LIVE-pending until its logical turn finalizes."""
+        onion = '6' * Constants.TOR_V3_ONION_ADDRESS_LENGTH
+        self._cm.ensure_alias_for_onion(onion)
+        metadata = {
+            'type': 'voice',
+            'blob_id': 'ab' * 32,
+            'codec': 'opus',
+            'size_bytes': 5,
+            'duration_ms': None,
+            'finalized': False,
+            'acknowledged_offset': 0,
+        }
+        self._mm.queue_message(
+            contact_onion=onion,
+            direction=MessageDirection.OUT,
+            delivery=Delivery.LIVE,
+            content_type=ContentType.VOICE,
+            payload=json.dumps(metadata),
+            status=MessageStatus.PENDING,
+            msg_id='voice-recording',
+            retained_bytes=5,
+        )
+
+        self.assertIsNone(
+            self._mm.promote_pending_live_to_drop(onion, ['voice-recording'])
+        )
+        self.assertEqual(self._mm.promote_pending_live_to_drop(onion), [])
+        metadata['finalized'] = True
+        self.assertTrue(
+            self._mm.update_retained_bytes(
+                onion, 'voice-recording', 5, json.dumps(metadata)
+            )
+        )
+
+        promoted = self._mm.promote_pending_live_to_drop(onion, ['voice-recording'])
+        self.assertIsNotNone(promoted)
+        assert promoted is not None
+        self.assertEqual([record.msg_id for record in promoted], ['voice-recording'])
+
+    def test_delivery_filtered_consume_does_not_touch_other_projection(self) -> None:
+        """Consumes LIVE without marking the same peer's DROP inbox as read."""
+        onion = '8' * Constants.TOR_V3_ONION_ADDRESS_LENGTH
+        self._cm.ensure_alias_for_onion(onion)
+        for delivery, msg_id in (
+            (Delivery.DROP, 'drop-unread'),
+            (Delivery.LIVE, 'live-unread'),
+        ):
+            self._mm.queue_message(
+                contact_onion=onion,
+                direction=MessageDirection.IN,
+                delivery=delivery,
+                content_type=ContentType.TEXT,
+                payload=msg_id,
+                status=MessageStatus.UNREAD,
+                msg_id=msg_id,
+            )
+
+        consumed = self._mm.get_and_read_inbox(onion, Delivery.LIVE)
+        self.assertEqual([row[4] for row in consumed], ['live-unread'])
+        self.assertEqual(self._mm.get_unread_live_count(onion), 0)
+        self.assertEqual(self._mm.get_unread_drop_count(onion), 1)
+
+    def test_clear_messages_preserves_live_and_pending_drop_delivery(self) -> None:
+        """Clears DROP presentation while retaining all delivery-critical state."""
+        onion = '9' * Constants.TOR_V3_ONION_ADDRESS_LENGTH
+        self._cm.ensure_alias_for_onion(onion)
+        self._mm.queue_message(
+            contact_onion=onion,
+            direction=MessageDirection.OUT,
+            delivery=Delivery.LIVE,
+            content_type=ContentType.TEXT,
+            payload='recover me',
+            status=MessageStatus.PENDING,
+            msg_id='live-pending',
+        )
+        self._mm.queue_message(
+            contact_onion=onion,
+            direction=MessageDirection.OUT,
+            delivery=Delivery.DROP,
+            content_type=ContentType.TEXT,
+            payload='deliver me',
+            status=MessageStatus.PENDING,
+            msg_id='drop-pending',
+        )
+
+        self._mm.clear_messages(onion)
+
+        self.assertEqual(
+            [record.msg_id for record in self._mm.get_pending_live_outbox(onion)],
+            ['live-pending'],
+        )
+        self.assertIn('drop-pending', [row[4] for row in self._mm.get_pending_outbox()])
+
+    def test_single_drop_delete_rejects_pending_delivery(self) -> None:
+        """Prevents local delete from becoming a hidden DROP cancellation path."""
+        onion = 'a' * Constants.TOR_V3_ONION_ADDRESS_LENGTH
+        self._cm.ensure_alias_for_onion(onion)
+        self._mm.queue_message(
+            contact_onion=onion,
+            direction=MessageDirection.OUT,
+            delivery=Delivery.DROP,
+            content_type=ContentType.TEXT,
+            payload='still sending',
+            status=MessageStatus.PENDING,
+            msg_id='pending-drop',
+        )
+        outcome = self._mm.delete_drop_message(onion, 'pending-drop')
+        self.assertEqual(outcome.value, 'pending_delivery')
+        self.assertIn('pending-drop', [row[4] for row in self._mm.get_pending_outbox()])
 
     def test_add_contact_rejects_invalid_onion_format(self) -> None:
         """

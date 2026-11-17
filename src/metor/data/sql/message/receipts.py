@@ -1,0 +1,213 @@
+"""Canonical typed SQL receipt collaborators shared by message operations."""
+
+from __future__ import annotations
+from dataclasses import dataclass
+from datetime import datetime, timezone
+import json
+from typing import TYPE_CHECKING, List, Optional, Tuple, cast
+from metor.core.api import ContentType, Delivery
+from metor.data.message.models import MessageDirection, MessageStatus
+from metor.data.sql.backends import SqlCipherCursor, SqlParam
+from metor.shared import clean_onion
+
+if TYPE_CHECKING:
+    from metor.data.sql.manager import SqlManager
+
+
+@dataclass(frozen=True)
+class MessageReceiptRow:
+    """Represents one persisted message receipt row."""
+
+    receipt_id: int
+    msg_id: str
+    peer_onion: str
+    direction: MessageDirection
+    delivery: Delivery
+    content_type: ContentType
+    retained_bytes: int
+    status: MessageStatus
+    visible_in_history: bool
+    created_at: str
+    updated_at: str
+
+
+class MessageReceiptStore:
+    """Owns exact receipt lookup and common transaction primitives."""
+
+    _sql: SqlManager
+
+    def drop_delivery_pending(self, receipt_id: int, onion: str, msg_id: str) -> bool:
+        """Checks exact durable authority immediately before DROP frame emission.
+
+        Callers serialize this read with cancellation using Core's operation lock.
+        A retained receipt without a spool records an unknown remote outcome but
+        has no authority to emit more frames or retry delivery.
+        """
+        return bool(
+            self._sql.fetchall(
+                'SELECT 1 FROM message_receipts AS r '
+                'INNER JOIN outbox_spool AS o ON o.receipt_id = r.id '
+                'WHERE r.id = ? AND r.peer_onion = ? AND r.msg_id = ? '
+                'AND r.direction = ? AND r.delivery = ? AND r.status = ?',
+                (
+                    receipt_id,
+                    clean_onion(onion),
+                    msg_id,
+                    MessageDirection.OUT.value,
+                    Delivery.DROP.value,
+                    MessageStatus.PENDING.value,
+                ),
+            )
+        )
+
+    @staticmethod
+    def _now() -> str:
+        """
+        Returns one UTC ISO timestamp.
+
+        Args:
+            None
+
+        Returns:
+            str: The timestamp string.
+        """
+        return datetime.now(timezone.utc).isoformat()
+
+    @staticmethod
+    def _placeholders(count: int) -> str:
+        """
+        Creates one SQL placeholder sequence.
+
+        Args:
+            count (int): The number of placeholders.
+
+        Returns:
+            str: The placeholder string.
+        """
+        return ', '.join('?' for _ in range(count))
+
+    @staticmethod
+    def _voice_payload_finalized(payload: str) -> bool:
+        """Checks whether compact Voice metadata represents a complete turn.
+
+        Args:
+            payload (str): The payload input.
+
+        Returns:
+            bool: Whether the documented condition holds.
+        """
+        try:
+            metadata = json.loads(payload)
+        except (TypeError, ValueError):
+            return False
+        return isinstance(metadata, dict) and metadata.get('finalized') is True
+
+    def _receipt_from_row(self, row: Tuple[SqlParam, ...]) -> MessageReceiptRow:
+        """
+        Casts one SQL row into one typed receipt row.
+
+        Args:
+            row (Tuple[SqlParam, ...]): The raw SQL row.
+
+        Returns:
+            MessageReceiptRow: The typed receipt row.
+        """
+        return MessageReceiptRow(
+            receipt_id=int(str(row[0])),
+            msg_id=str(row[1]),
+            peer_onion=str(row[2]),
+            direction=MessageDirection(str(row[3])),
+            delivery=Delivery(str(row[4])),
+            content_type=ContentType(str(row[5])),
+            retained_bytes=int(str(row[6])),
+            status=MessageStatus(str(row[7])),
+            visible_in_history=int(str(row[8])) == 1,
+            created_at=str(row[9]),
+            updated_at=str(row[10]),
+        )
+
+    def has_outbound_identity(self, msg_id: str) -> bool:
+        """Checks globally retained outbound identity before fresh capture admission."""
+        return bool(
+            self._sql.fetchall(
+                'SELECT 1 FROM message_receipts WHERE msg_id = ? AND direction = ? LIMIT 1',
+                (msg_id, MessageDirection.OUT.value),
+            )
+        )
+
+    def _get_receipt(
+        self,
+        contact_onion: str,
+        direction: MessageDirection,
+        msg_id: str,
+        cursor: Optional[SqlCipherCursor] = None,
+    ) -> Optional[MessageReceiptRow]:
+        """
+        Retrieves one logical message receipt by stable identity.
+
+        Args:
+            contact_onion (str): The normalized peer onion.
+            direction (MessageDirection): The message direction.
+            msg_id (str): The stable message identifier.
+            cursor (Optional[SqlCipherCursor]): Optional active transaction cursor.
+
+        Returns:
+            Optional[MessageReceiptRow]: The matching receipt, if present.
+        """
+        query = (
+            'SELECT id, msg_id, peer_onion, direction, delivery, content_type, retained_bytes, status, '
+            'visible_in_history, created_at, updated_at '
+            'FROM message_receipts WHERE peer_onion = ? AND direction = ? AND msg_id = ?'
+        )
+        if cursor is None:
+            rows = self._sql.fetchall(query, (contact_onion, direction.value, msg_id))
+        else:
+            rows = cast(
+                List[Tuple[SqlParam, ...]],
+                cursor.execute(
+                    query,
+                    (contact_onion, direction.value, msg_id),
+                ).fetchall(),
+            )
+        if not rows:
+            return None
+        return self._receipt_from_row(rows[0])
+
+    def message_outcome(
+        self, onion: str, msg_id: str, direction: MessageDirection
+    ) -> tuple[Delivery, MessageStatus] | None:
+        """Reads exact receipt facts without loading content or changing handoff state.
+
+        Args:
+            onion: Canonical peer identity.
+            msg_id: Exact logical message ID.
+            direction: Local direction qualifying this identity.
+        Returns:
+            tuple[Delivery, MessageStatus] | None: Durable facts or no retained receipt.
+        """
+        state = self.message_state(onion, msg_id, direction)
+        return (state[0], state[1]) if state is not None else None
+
+    def message_state(
+        self, onion: str, msg_id: str, direction: MessageDirection
+    ) -> tuple[Delivery, MessageStatus, bool] | None:
+        """Reads exact receipt and archive presence atomically without selecting payloads.
+
+        Args:
+            onion: Canonical peer identity.
+            msg_id: Exact logical message identity.
+            direction: Explicit local direction.
+        Returns:
+            tuple[Delivery, MessageStatus, bool] | None: Receipt facts and local archive presence.
+        """
+        rows = self._sql.fetchall(
+            'SELECT r.delivery, r.status, EXISTS('
+            'SELECT 1 FROM message_archive AS a WHERE a.receipt_id = r.id) '
+            'FROM message_receipts AS r WHERE r.peer_onion = ? '
+            'AND r.direction = ? AND r.msg_id = ?',
+            (onion, direction.value, msg_id),
+        )
+        if not rows:
+            return None
+        row = rows[0]
+        return Delivery(str(row[0])), MessageStatus(str(row[1])), bool(row[2])

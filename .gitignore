@@ -15,7 +15,10 @@ node_modules
 *.egg-info/
 *.squash.txt
 .mypy_cache
+.pytest_cache
 .ruff_cache
+.agents
+.codex
 
 # ---------------------------------------------------
 # Virtual Environments
@@ -37,3 +40,6 @@ Thumbs.db
 todo
 todo.txt
 todo.md
+/docs/audits/
+/docs/AUDIT.md
+/docs/governance/AUDIT.md

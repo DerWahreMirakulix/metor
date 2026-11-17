@@ -1,33 +1,157 @@
 name: CI
 
+permissions: {}
+
 on:
   push:
+    branches:
+      - main
   pull_request:
   workflow_dispatch:
 
+concurrency:
+  group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  python-quality:
-    name: Python Quality (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os:
-          - ubuntu-latest
-          - windows-latest
-
+  static:
+    name: Static checks and generated references
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
-
-      - name: Run Shared Python Quality Checks
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Check formatting, boundaries, and Linux/Python 3.11 types
         uses: ./.github/actions/python-quality
         with:
           python-version: "3.11"
           ruff-check-paths: "src/metor/ scripts/ tests/"
           ruff-format-paths: "src/metor/ scripts/ tests/"
           mypy-paths: "src/metor/ scripts/"
-          run-tests: "true"
+      - name: Check Windows/Python 3.13 type branches
+        run: mypy --python-version 3.13 --platform win32 src/metor/ scripts/
+      - name: Check generated references and central version
+        run: |
+          python scripts/validate_generated_docs.py
+          python scripts/versioning.py validate
 
-      - name: Build Wheel
-        run: python -m pip wheel --no-deps --no-build-isolation . -w dist
+  runtime:
+    name: Unittest (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 75
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.11", "3.13"]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install the checkout
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip==26.2.1
+          python -m pip install -r requirements/dev.txt
+          python -m pip check
+      - name: Run complete unittest suite
+        run: python scripts/run_tests.py --suite all
+      - name: Upload bounded unittest report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: unittest-report-${{ matrix.os }}-py${{ matrix.python-version }}
+          path: build/test-report.txt
+          if-no-files-found: warn
+          retention-days: 14
+
+  installed:
+    name: Installed packages and GUI (${{ matrix.os }}, Python 3.11)
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install build and acceptance dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip==26.2.1
+          python -m pip install -r requirements/dev.txt
+          python -m pip check
+      - name: Build native offline packages
+        shell: bash
+        run: python scripts/build_release_wheelhouse.py --variant all --skip-pip-upgrade --output-dir closure-bundles
+      - name: Validate coordinated package versions and installers
+        shell: bash
+        run: |
+          python scripts/validate_wheel_versions.py \
+            closure-bundles/metor-wheelhouse-*/wheelhouse/metor-*.whl \
+            closure-bundles/metor-sdk-wheelhouse-*/wheelhouse/metor_sdk-*.whl \
+            closure-bundles/metor-ui-terminal-wheelhouse-*/wheelhouse/metor_ui_terminal-*.whl \
+            closure-bundles/metor-ui-gui-wheelhouse-*/wheelhouse/metor_ui_gui-*.whl
+          python scripts/validate_release_installers.py closure-bundles
+      - name: Provision a virtual Linux display
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends xvfb xauth libxtst6 libegl1 libegl-mesa0 libgl1-mesa-dri dbus-daemon dbus-x11 at-spi2-core python3-gi
+          python -c "import ctypes; ctypes.CDLL('libEGL.so.1')"
+      - name: Validate installed consumers and native GUI on Linux
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          KIVY_WINDOW: sdl2
+          KIVY_CLIPBOARD: dummy
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          SDL_VIDEODRIVER: x11
+        run: xvfb-run -a --server-args='-screen 0 1280x1024x24' python scripts/validate_installed_artifacts.py closure-bundles --gui-smoke
+      - name: Validate installed consumers and native GUI on Windows
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          KIVY_GL_BACKEND: angle_sdl2
+        run: python scripts/validate_installed_artifacts.py closure-bundles --gui-smoke --windows-launch
+      - name: Accept native GUI behavior
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/gui-acceptance
+        with:
+          revision: ${{ github.sha }}
+          artifact-name: gui-native-evidence-linux-py311
+
+  acceptance:
+    name: Required CI result
+    if: always()
+    needs: [static, runtime, installed]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Require every static, runtime, and installed job
+        shell: bash
+        env:
+          STATIC: ${{ needs.static.result }}
+          RUNTIME: ${{ needs.runtime.result }}
+          INSTALLED: ${{ needs.installed.result }}
+        run: |
+          set -euo pipefail
+          for result in "$STATIC" "$RUNTIME" "$INSTALLED"; do
+            if [[ "$result" != success ]]; then
+              echo "Required CI job incomplete or failed: $result" >&2
+              exit 1
+            fi
+          done

@@ -39,6 +39,10 @@ class ConnectionReasonCode(str, Enum):
     MUTUAL_TIEBREAKER_LOSER = 'mutual_tiebreaker_loser'
     DUPLICATE_INCOMING_CONNECTED = 'duplicate_incoming_connected'
     DUPLICATE_INCOMING_PENDING = 'duplicate_incoming_pending'
+    LIVE_BACKLOG_LIMIT_REACHED = 'live_backlog_limit_reached'
+    LIVE_VOICE_LIMIT_REACHED = 'live_voice_limit_reached'
+    INVALID_PEER_FRAME = 'invalid_peer_frame'
+    IDLE_TIMEOUT = 'idle_timeout'
 
 
 class PendingConnectionReasonCode(str, Enum):
