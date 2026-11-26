@@ -14,6 +14,8 @@ from unittest.mock import Mock, patch
 from link_fixtures import create_native_symlink_or_skip
 
 from metor.core.daemon.managed.ipc import IpcServer
+from metor.core.daemon.managed.engine.daemon import Daemon
+from metor.core.daemon.managed.engine.lifecycle import DaemonLifecycle
 from metor.core.daemon.managed.notify.notification import (
     NotificationPayload,
     NotificationService,
@@ -23,6 +25,62 @@ from metor.core.daemon.managed.notify.sinks import FileSink, WebhookSink
 
 class NotificationDeliveryTests(unittest.TestCase):
     """Keeps optional sink latency and failures outside messaging callers."""
+
+    def test_detached_routing_respects_session_authorization_and_lock(self) -> None:
+        daemon = object.__new__(Daemon)
+        daemon._pm = Mock()
+        daemon._ipc = Mock()
+        daemon._session_access = Mock()
+        daemon._lifecycle = DaemonLifecycle.UNLOCKED
+        daemon._pm.config.get_str.return_value = 'enabled'
+        connected = Mock()
+        daemon._ipc.active_clients.return_value = {connected}
+        daemon._session_access.requires_auth.return_value = True
+        daemon._session_access.authenticated_recipients.return_value = set()
+        self.assertEqual(daemon._detached_notification_config(), 'enabled')
+        daemon._session_access.authenticated_recipients.return_value = {connected}
+        self.assertEqual(daemon._detached_notification_config(), '')
+        daemon._session_access.authenticated_recipients.return_value = set()
+        daemon._lifecycle = DaemonLifecycle.LOCKED
+        self.assertEqual(daemon._detached_notification_config(), '')
+
+    def test_queued_metadata_never_moves_to_a_new_export_destination(self) -> None:
+        started, release, delivered = (
+            threading.Event(),
+            threading.Event(),
+            threading.Event(),
+        )
+        first_sink, second_sink = Mock(), Mock()
+        first_sink.deliver.side_effect = lambda _: (started.set(), release.wait(2))
+        second_sink.deliver.side_effect = lambda _: delivered.set()
+        route = json.dumps({'type': 'first'})
+        with patch(
+            'metor.core.daemon.managed.notify.notification.build_sink',
+            side_effect=lambda config: (
+                first_sink if config['type'] == 'first' else second_sink
+            ),
+        ):
+            service = NotificationService(lambda: route)
+            try:
+                service.dispatch(NotificationPayload('in-flight'))
+                self.assertTrue(started.wait(1))
+                service.dispatch(NotificationPayload('queued-for-first'))
+                route = ''
+                service.dispatch(NotificationPayload('disabled'))
+                route = json.dumps({'type': 'second'})
+                service.dispatch(NotificationPayload('previous-configuration'))
+                service.discard_pending()
+                expected = NotificationPayload('new')
+                service.dispatch(expected)
+                release.set()
+                self.assertTrue(delivered.wait(1))
+                first_sink.deliver.assert_called_once_with(
+                    NotificationPayload('in-flight')
+                )
+                second_sink.deliver.assert_called_once_with(expected)
+            finally:
+                release.set()
+                service.close()
 
     def test_file_sink_appends_with_private_permissions(self) -> None:
         """Plaintext notification exports preserve records in an owner-private file."""

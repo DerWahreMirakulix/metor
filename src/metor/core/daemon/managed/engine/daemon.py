@@ -215,7 +215,7 @@ class Daemon(DaemonLifecycleMixin):
 
         self._crypto: Optional[Crypto] = None
         self._notification_service: NotificationService = NotificationService(
-            config_getter=lambda: self._pm.config.get_str(SettingKey.NOTIFICATION_SINK),
+            config_getter=self._detached_notification_config,
             error_callback=self._on_runtime_internal_error,
         )
         self._ipc: IpcServer = IpcServer(
@@ -229,7 +229,10 @@ class Daemon(DaemonLifecycleMixin):
         self._session_maintenance: Optional[SessionMaintenance] = None
 
         self._command_dispatcher: DaemonCommandDispatcher = DaemonCommandDispatcher(
-            ConfigCommandHandler(self._pm),
+            ConfigCommandHandler(
+                self._pm,
+                discard_notifications=self._notification_service.discard_pending,
+            ),
             self._send_to_client,
         )
         profile_paths = getattr(self._pm, 'paths', None)
@@ -324,6 +327,7 @@ class Daemon(DaemonLifecycleMixin):
         Returns:
             None
         """
+        self._notification_service.discard_pending()
         self._runtime_stop_flag = threading.Event()
         self._km = runtime.km
         self._tm = runtime.tm
@@ -342,7 +346,7 @@ class Daemon(DaemonLifecycleMixin):
             runtime.mm,
             self._crypto,
             self._broadcast_ipc_event,
-            self._ipc.has_active_clients,
+            self._has_notification_recipient,
             self._session_access.has_session_consumers,
             self._notification_service.dispatch,
             self._runtime_stop_flag,
@@ -494,6 +498,24 @@ class Daemon(DaemonLifecycleMixin):
                 self._status_cb(DaemonStatus.RUNTIME_ERROR, {'message': message})
         except Exception:
             pass
+
+    def _has_notification_recipient(self) -> bool:
+        """Count only sockets eligible for internal delivery, including restricted clients."""
+        if self._session_access.requires_auth():
+            return bool(
+                self._session_access.authenticated_recipients()
+                & self._ipc.active_clients()
+            )
+        return self._ipc.has_active_clients()
+
+    def _detached_notification_config(self) -> str:
+        """Allow detached delivery only while the eligible profile is headless."""
+        if (
+            self._lifecycle is not DaemonLifecycle.UNLOCKED
+            or self._has_notification_recipient()
+        ):
+            return ''
+        return self._pm.config.get_str(SettingKey.NOTIFICATION_SINK)
 
     def _broadcast_ipc_event(self, event: IpcEvent) -> None:
         """
@@ -1154,8 +1176,7 @@ class Daemon(DaemonLifecycleMixin):
                 return
             replacement_auth = None
             try:
-                if self._require_session_auth:
-                    replacement_auth = create_session_auth_context(cmd.new_password)
+                replacement_auth = create_session_auth_context(cmd.new_password)
                 self._km.change_password(cmd.current_password, cmd.new_password)
                 if replacement_auth is not None:
                     self._session_access.install_context(replacement_auth)

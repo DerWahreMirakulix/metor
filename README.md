@@ -474,7 +474,7 @@ When interacting with a remote daemon over SSH, Metor's CLI acts as a smart rout
 - `daemon.allow_drops` (bool): Globally allows or blocks the reception of asynchronous offline messages.
 - `daemon.max_unseen_live_msgs` (int): Caps unread crash-safe live backlog per peer. `0` disables headless live backlog, `-1` removes the limit.
 - `daemon.reuse_live_for_drops` (bool): Routes queued drop messages over an existing live session channel when available, avoiding a second circuit. Paired with `daemon.allow_drop_standby_on_live` as one drop-delivery policy.
-- `daemon.notification_sink` (str): Optional JSON sink config (`file` or `webhook`) for structured notifications when no UI is connected. File exports contain plaintext peer metadata; webhooks use direct host networking, not Tor, and disclose host/network and peer metadata to the configured service. See the [notification sink contract](docs/ARCHITECTURE.md#notification-sinks) before enabling an export.
+- `daemon.notification_sink` (str): Optional JSON sink config (`file` or `webhook`) for structured notifications when no connected client is authorized to receive them. Changing the destination discards queued exports. File exports contain plaintext peer metadata; webhooks use direct host networking, not Tor, and disclose host/network and peer metadata to the configured service. See the [notification sink contract](docs/ARCHITECTURE.md#notification-sinks) before enabling an export.
 - `ui.terminal.inbox_notification_delay` (float): Delays and aggregates unread-message notifications for unfocused peers on this local UI.
 - `ui.terminal.chat_limit` (int): Maximum number of messages kept in the UI's volatile RAM display buffer.
 

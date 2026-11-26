@@ -4,7 +4,7 @@ Encapsulates operations routing global settings and profile configurations.
 Enforces the Zero-Text Policy by eliminating raw string errors from DTOs.
 """
 
-from typing import Iterable
+from typing import Callable, Iterable
 
 from metor.core.api import (
     EventType,
@@ -65,7 +65,12 @@ def _snapshot_rows_to_json(
 class ConfigCommandHandler:
     """Processes configuration and settings IPC commands from the UI."""
 
-    def __init__(self, pm: ProfileManager) -> None:
+    def __init__(
+        self,
+        pm: ProfileManager,
+        *,
+        discard_notifications: Callable[[], None] | None = None,
+    ) -> None:
         """
         Initializes the ConfigCommandHandler.
 
@@ -76,6 +81,7 @@ class ConfigCommandHandler:
             None
         """
         self._pm: ProfileManager = pm
+        self._discard_notifications = discard_notifications
 
     def handle(self, cmd: IpcCommand) -> IpcEvent:
         """
@@ -101,6 +107,11 @@ class ConfigCommandHandler:
 
             try:
                 Settings.set(setting_key, cmd.setting_value)
+                if (
+                    setting_key is SettingKey.NOTIFICATION_SINK
+                    and self._discard_notifications
+                ):
+                    self._discard_notifications()
                 return create_event(
                     EventType.SETTING_UPDATED,
                     {'key': cmd.setting_key},
@@ -163,6 +174,11 @@ class ConfigCommandHandler:
                     cmd.setting_value,
                     expected_value=cmd.expected_value,
                 )
+                if (
+                    set_config_key is SettingKey.NOTIFICATION_SINK
+                    and self._discard_notifications
+                ):
+                    self._discard_notifications()
                 return create_event(
                     EventType.CONFIG_UPDATED,
                     {'key': cmd.setting_key},
@@ -217,6 +233,8 @@ class ConfigCommandHandler:
         if isinstance(cmd, SyncConfigCommand):
             try:
                 self._pm.config.sync_with_global(domain='daemon')
+                if self._discard_notifications:
+                    self._discard_notifications()
                 return create_event(EventType.CONFIG_SYNCED)
             except Exception:
                 return create_event(EventType.CONFIG_UPDATE_FAILED)

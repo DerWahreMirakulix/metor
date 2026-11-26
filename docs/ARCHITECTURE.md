@@ -784,9 +784,12 @@ canonical contract for that path:
 - A sink is a named registration with a documented payload contract. Sinks are
   configured through the `daemon.notification_sink` setting and receive the
   daemon's structured notifications.
-- Sinks fire only while the daemon has no connected interactive clients. As soon
-  as an interactive client attaches, sink delivery is suspended because the
-  attached client is the authoritative notification consumer.
+- An unlocked daemon uses a detached sink when no connected client is authorized
+  to receive internal events. An attached, authenticated client keeps its own
+  lock-screen privacy policy, including when that policy hides an event entirely.
+  Each queued notification belongs to the destination selected at event time.
+  Changing or disabling the sink discards pending exports. A delivery already
+  in progress can finish at its original destination.
 - UI developers register their own sink types for their frontend instead of
   bolting display logic onto the daemon broadcast path.
 

@@ -143,7 +143,8 @@ class NotificationService:
         if queue_limit < 1 or stop_timeout < 0:
             raise ValueError('Notification queue bounds must be positive')
         self._condition = threading.Condition()
-        self._queue: deque[NotificationPayload] = deque()
+        self._queue: deque[tuple[str, int, NotificationPayload]] = deque()
+        self._generation = 0
         self._queue_limit = queue_limit
         self._stop_timeout = stop_timeout
         self._closed = False
@@ -167,12 +168,17 @@ class NotificationService:
             None
         """
         with self._condition:
-            if self._closed:
+            generation = self._generation
+        raw = self._current_config()
+        if not raw.strip():
+            return
+        with self._condition:
+            if self._closed or generation != self._generation:
                 return
             if len(self._queue) >= self._queue_limit:
                 self._overloaded = True
             else:
-                self._queue.append(payload)
+                self._queue.append((raw, generation, payload))
             self._condition.notify()
 
     def _run(self) -> None:
@@ -185,7 +191,7 @@ class NotificationService:
             None
         """
         while True:
-            payload = None
+            work = None
             overloaded = False
             with self._condition:
                 while not self._closed and not self._queue and not self._overloaded:
@@ -195,14 +201,20 @@ class NotificationService:
                     return
                 overloaded, self._overloaded = self._overloaded, False
                 if self._queue:
-                    payload = self._queue.popleft()
+                    work = self._queue.popleft()
             if overloaded:
                 self._report('Notification sink queue is full; notification dropped')
-            if payload is None:
+            if work is None:
                 continue
-            sink = self._resolve_sink()
+            raw, generation, payload = work
+            if self._current_config() != raw:
+                continue
+            sink = self._resolve_sink(raw)
             if sink is None:
                 continue
+            with self._condition:
+                if self._closed or generation != self._generation:
+                    continue
             try:
                 sink.deliver(payload)
             except Exception:
@@ -224,7 +236,22 @@ class NotificationService:
             self._condition.notify_all()
         self._worker.join(self._stop_timeout)
 
-    def _resolve_sink(self) -> Optional[Sink]:
+    def discard_pending(self) -> None:
+        """Revoke queued work on a destination or profile-lifetime change."""
+        with self._condition:
+            self._generation += 1
+            self._queue.clear()
+            self._overloaded = False
+
+    def _current_config(self) -> str:
+        """Read the export policy, treating an unavailable setting as disabled."""
+        try:
+            return self._config_getter()
+        except Exception:
+            self._report('Notification configuration unavailable')
+            return ''
+
+    def _resolve_sink(self, raw: str) -> Optional[Sink]:
         """Resolves the cached sink for the current setting value.
 
         Args:
@@ -234,11 +261,6 @@ class NotificationService:
             Optional[Sink]: The configured sink, or None when disabled or misconfigured.
         """
         try:
-            raw: str = self._config_getter()
-            if not raw.strip():
-                self._cached_raw = None
-                self._cached_sink = None
-                return None
             if raw == self._cached_raw:
                 return self._cached_sink
             parsed: object = json.loads(raw)
