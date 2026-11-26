@@ -181,7 +181,7 @@ class IpcServer:
             server: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             try:
                 bind_option = (
-                    socket.SO_EXCLUSIVEADDRUSE
+                    int(getattr(socket, 'SO_EXCLUSIVEADDRUSE'))
                     if os.name == 'nt'
                     else socket.SO_REUSEADDR
                 )
