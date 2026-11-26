@@ -373,6 +373,7 @@ class IndependentCliContractTests(unittest.TestCase):
             data_path = Path(temp_dir) / '.metor'
             with (
                 patch('metor.data.settings.Constants.DATA', data_path),
+                patch('metor.application.environment.Constants.TOR_PATH', ''),
                 patch('metor.application.environment._loaded', False),
                 patch('metor.application.environment.load_dotenv'),
                 patch(
