@@ -117,16 +117,23 @@ class DropTunnelManager:
             if negotiated_version is None:
                 raise ValueError('Peer protocol ranges do not overlap')
 
-            signature: Optional[str] = self._crypto.sign_challenge(challenge)
-            if not signature:
-                conn.close()
-                return None
-
             local_onion: Optional[str] = self._tm.onion
             if not local_onion:
                 conn.close()
                 return None
 
+            proof = HandshakeProtocol.proof(
+                challenge,
+                local_onion,
+                onion,
+                HandshakeProtocol.auth_mode(is_async=True),
+                (PEER_PROTOCOL_VERSION, PEER_PROTOCOL_MIN_SUPPORTED),
+                (peer_current, peer_minimum),
+            )
+            signature = self._crypto.sign_challenge(proof)
+            if not signature:
+                conn.close()
+                return None
             conn.sendall(
                 HandshakeProtocol.build_auth_line(
                     local_onion,

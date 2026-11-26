@@ -14,6 +14,7 @@ from unittest.mock import Mock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
 from private_fixtures import PrivateTemporaryDirectory
+from metor.utils import Constants
 
 from metor.cli.handlers import CommandHandlers
 from metor.client import (
@@ -199,10 +200,9 @@ class FinalRemediationContractTests(unittest.TestCase):
         self,
     ) -> None:
         """C06: false prep, DB close, and memory-key errors cannot skip erasure."""
-        pm = Mock(spec=ProfileManager)
-        pm.paths = Mock()
-        pm.paths.get_db_file.return_value = Path('db')
-        pm.paths.get_config_dir.return_value = Path('profile')
+        root = Path(self.enterContext(PrivateTemporaryDirectory()))
+        self.enterContext(patch.object(Constants, 'DATA', root))
+        pm = ProfileManager('profile')
         protector = Mock()
         cleanup = Mock()
         failures: list[tuple[str, bool]] = []
@@ -211,7 +211,7 @@ class FinalRemediationContractTests(unittest.TestCase):
             self.assertRaises(RuntimeError),
         ):
             destroy_profile_storage(
-                cast(ProfileManager, pm),
+                pm,
                 prepare_runtime=lambda: False,
                 clear_runtime_keys=Mock(side_effect=RuntimeError('memory')),
                 protector=protector,
@@ -221,7 +221,7 @@ class FinalRemediationContractTests(unittest.TestCase):
                 ),
             )
         protector.destroy.assert_called_once_with()
-        cleanup.assert_called_once_with(Path('profile'))
+        cleanup.assert_called_once_with(pm.paths.get_config_dir())
         self.assertEqual(failures, [('preparation', True)])
 
     def test_restricted_message_media_has_no_live_exception(self) -> None:
@@ -397,6 +397,10 @@ class FinalRemediationContractTests(unittest.TestCase):
 
     def test_fake_gui_observes_missing_profile_as_typed_first_run_state(self) -> None:
         """C11: missing profile is reported after frontend startup, not before it."""
+        from metor.utils import Constants
+
+        catalog = self.enterContext(PrivateTemporaryDirectory())
+        self.enterContext(patch.object(Constants, 'DATA', Path(catalog)))
         started = False
         pm = Mock(spec=ProfileManager)
         pm.profile_name = 'missing'

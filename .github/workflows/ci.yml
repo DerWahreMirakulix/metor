@@ -59,7 +59,25 @@ jobs:
           python -m pip install --upgrade pip==26.2.1
           python -m pip install -r requirements/dev.txt
           python -m pip check
+      - name: Provision Tor for the offline control test
+        if: runner.os == 'Linux'
+        shell: bash
+        working-directory: ${{ runner.temp }}
+        run: |
+          mkdir metor-offline-tor
+          cd metor-offline-tor
+          sudo apt-get update -qq
+          apt-get download tor
+          packages=(tor_*.deb)
+          test "${#packages[@]}" -eq 1
+          sudo apt-get satisfy --assume-yes --no-install-recommends "$(dpkg-deb -f "${packages[0]}" Depends)"
+          dpkg-deb -x "${packages[0]}" extracted
+          tor_path="$PWD/extracted/usr/bin/tor"
+          "$tor_path" --version
+          echo "METOR_TOR_PATH=$tor_path" >> "$GITHUB_ENV"
       - name: Run complete unittest suite
+        env:
+          METOR_REQUIRE_SSH_TEST: ${{ runner.os == 'Linux' && '1' || '0' }}
         run: python scripts/run_tests.py --suite all
       - name: Upload bounded unittest report
         if: always()
@@ -89,12 +107,11 @@ jobs:
       - name: Install build and acceptance dependencies
         shell: bash
         run: |
-          python -m pip install --upgrade pip==26.2.1
-          python -m pip install -r requirements/dev.txt
+          python -m scripts.release.inputs --install-build-environment
           python -m pip check
       - name: Build native offline packages
         shell: bash
-        run: python scripts/build_release_wheelhouse.py --variant all --skip-pip-upgrade --output-dir closure-bundles
+        run: python scripts/build_release_wheelhouse.py --variant all --skip-pip-upgrade --output-dir closure-bundles --revision "${{ github.sha }}"
       - name: Validate coordinated package versions and installers
         shell: bash
         run: |

@@ -97,6 +97,7 @@ class AckEvent(IpcEvent):
     """Confirms delivery of a live outbound message."""
 
     msg_id: str
+    onion: str
     timestamp: Optional[str] = None
     event_type: EventType = field(default=EventType.ACK, init=False)
 
@@ -107,6 +108,7 @@ class DropFailedEvent(IpcEvent):
     """Marks an asynchronous drop as failed."""
 
     msg_id: str
+    onion: str
     reason: Optional[str] = None
     event_type: EventType = field(default=EventType.DROP_FAILED, init=False)
 

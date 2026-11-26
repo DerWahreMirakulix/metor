@@ -52,7 +52,7 @@ from scripts.release.paths import (
     GENERATED_DOCS_DIR,
     SETTINGS_DOC_PATH,
 )
-from scripts.release.refs import push_atomic_release_refs
+from scripts.release.refs import publish_tag
 from scripts.release.semver import calculate_next_version, select_latest_stable_release
 from scripts import validate_generated_docs
 from scripts.validate_wheel_versions import validate_wheel_versions
@@ -945,10 +945,10 @@ class DocumentationReleaseArchitectureTests(unittest.TestCase):
         validation_jobs, publish_job = workflow.split('\n  publish:', maxsplit=1)
         self.assertNotIn('\npermissions:\n  contents: write', workflow)
         self.assertIn('Reject non-main publish requests', validation_jobs)
-        self.assertIn("$GITHUB_REF_NAME\" != 'main'", validation_jobs)
+        self.assertIn('refs/heads/main', validation_jobs)
         self.assertIn('contents: read', validation_jobs)
         self.assertIn('contents: write', publish_job)
-        self.assertIn("github.ref_name == 'main'", publish_job)
+        self.assertIn("github.ref == 'refs/heads/main'", publish_job)
         quality_action = (
             root / '.github' / 'actions' / 'python-quality' / 'action.yml'
         ).read_text(encoding='utf-8')
@@ -960,8 +960,8 @@ class DocumentationReleaseArchitectureTests(unittest.TestCase):
         self.assertIn('node-version: "22.17.1"', quality_action)
         self.assertIn('npm ci', quality_action)
         self.assertIn('python scripts/validate_generated_docs.py', validation_jobs)
-        self.assertIn('docs/generated/SETTINGS.md', workflow)
-        self.assertIn('if ! git diff --cached --quiet; then', publish_job)
+        self.assertNotIn('git commit ', publish_job)
+        self.assertNotIn('versioning.py set-app', workflow)
         self.assertIn('--select-baseline', validation_jobs)
         self.assertNotIn('prerelease:', workflow)
         self.assertNotIn('--prerelease', workflow)
@@ -1002,83 +1002,37 @@ class DocumentationReleaseArchitectureTests(unittest.TestCase):
         self.assertNotIn('metor-daemon', validation_jobs)
         self.assertNotIn('metor.daemon_main', validation_jobs)
         self.assertIn('candidate_sha:', workflow)
-        self.assertIn('main moved after release validation', publish_job)
         self.assertIn('python -m scripts.release.refs', publish_job)
-        self.assertIn('--branch main', publish_job)
-        self.assertNotIn('git push origin HEAD:refs/heads/main', publish_job)
-        ref_publisher = (root / 'scripts' / 'release' / 'refs.py').read_text(
-            encoding='utf-8'
-        )
-        self.assertIn("'--atomic'", ref_publisher)
-        self.assertIn("f'HEAD:refs/heads/{branch}'", ref_publisher)
+        self.assertIn('scripts.release.publication publish', publish_job)
+        self.assertIn('scripts.release.publication authorize', publish_job)
+        self.assertNotIn('refs/heads/main:', publish_job)
 
-    def test_atomic_release_ref_push_rejects_branch_and_leaves_no_tag(self) -> None:
-        """A remote branch rejection cannot publish only the release tag.
+    def test_release_tag_never_updates_main_and_can_be_resumed(self) -> None:
+        """A moved candidate cannot create a tag; the reviewed one can be retried."""
 
-        Args:
-            None
-        Returns:
-            None
-        """
-
-        def git(repository: Path, *args: str) -> str:
-            """Runs one isolated Git command and returns its stripped stdout.
-
-            Args:
-                repository: Disposable working tree or bare repository.
-                args: Exact Git operands.
-            Returns:
-                str: Captured standard output.
-            """
-            return subprocess.run(
-                ['git', *args],
-                cwd=repository,
-                check=True,
-                capture_output=True,
-                text=True,
-            ).stdout.strip()
+        def git(repo: Path, *args: str) -> str:
+            return subprocess.check_output(['git', *args], cwd=repo, text=True).strip()
 
         with TemporaryDirectory() as directory:
             root = Path(directory)
-            remote, repository = root / 'remote.git', root / 'source'
-            remote.mkdir()
-            repository.mkdir()
-            git(remote, 'init', '--bare')
-            git(repository, 'init', '-b', 'main')
-            git(repository, 'config', 'user.name', 'Release Test')
-            git(repository, 'config', 'user.email', 'release@example.invalid')
-            (repository / 'candidate.txt').write_text('initial\n', encoding='utf-8')
-            git(repository, 'add', 'candidate.txt')
-            git(repository, 'commit', '-m', 'initial')
-            git(repository, 'remote', 'add', 'origin', str(remote))
-            git(repository, 'push', 'origin', 'HEAD:refs/heads/main')
-            original = git(remote, 'rev-parse', 'refs/heads/main')
-
-            (repository / 'candidate.txt').write_text('release\n', encoding='utf-8')
-            git(repository, 'commit', '-am', 'release')
-            git(repository, 'tag', '-a', 'v9.9.9', '-m', 'release')
-            hook = remote / 'hooks' / 'pre-receive'
-            hook.write_text(
-                '#!/bin/sh\n'
-                'while read old new ref; do\n'
-                '  if [ "$ref" = refs/heads/main ]; then exit 1; fi\n'
-                'done\n'
-                'exit 0\n',
-                encoding='utf-8',
-            )
-            hook.chmod(0o755)
-
-            with self.assertRaises(subprocess.CalledProcessError):
-                push_atomic_release_refs(repository, 'origin', 'main', 'v9.9.9')
-
-            self.assertEqual(git(remote, 'rev-parse', 'refs/heads/main'), original)
-            missing_tag = subprocess.run(
-                ['git', 'rev-parse', '--verify', 'refs/tags/v9.9.9'],
-                cwd=remote,
-                capture_output=True,
-                text=True,
-            )
-            self.assertNotEqual(missing_tag.returncode, 0)
+            remote, repo = root / 'remote.git', root / 'repo'
+            git(root, 'init', '--bare', str(remote))
+            git(root, 'init', '-b', 'main', str(repo))
+            git(repo, 'config', 'user.name', 'Release test')
+            git(repo, 'config', 'user.email', 'release@example.invalid')
+            git(repo, 'commit', '--allow-empty', '-m', 'reviewed')
+            git(repo, 'remote', 'add', 'origin', str(remote))
+            git(repo, 'push', 'origin', 'HEAD:refs/heads/main')
+            reviewed = git(repo, 'rev-parse', 'HEAD')
+            git(repo, 'commit', '--allow-empty', '-m', 'unreviewed')
+            with self.assertRaises(ValueError):
+                publish_tag(repo, 'origin', 'v1.0.0', git(repo, 'rev-parse', 'HEAD'))
+            self.assertEqual(git(remote, 'tag', '-l'), '')
+            git(repo, 'checkout', '--detach', reviewed)
+            publish_tag(repo, 'origin', 'v1.0.0', reviewed)
+            publish_tag(repo, 'origin', 'v1.0.0', reviewed)
+            self.assertEqual(git(remote, 'rev-parse', 'v1.0.0^{}'), reviewed)
+            self.assertEqual(git(remote, 'rev-parse', 'refs/heads/main'), reviewed)
 
     def test_external_actions_are_commit_pinned_and_permissions_are_explicit(
         self,
@@ -1143,10 +1097,9 @@ class DocumentationReleaseArchitectureTests(unittest.TestCase):
             '\n  publish:', maxsplit=1
         )[0]
 
-        generator = quality.index('npm run generate:docs')
+        self.assertNotIn('npm run generate:docs', quality)
         validator = quality.index('python scripts/validate_generated_docs.py')
         tests = quality.index('python scripts/run_tests.py --suite all')
-        self.assertLess(generator, validator)
         self.assertLess(validator, tests)
 
     def test_generated_freshness_restores_stale_and_unchanged_inputs(self) -> None:

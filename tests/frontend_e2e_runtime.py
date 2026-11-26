@@ -175,6 +175,12 @@ class CoreEndpoint:
         )
         if not forwarded.success:
             raise AssertionError('Disposable forwarded endpoint creation failed')
+        from metor.data.profile.ipc_identity import trust_remote_certificate
+
+        trust_remote_certificate(
+            ProfileManager(self.endpoint_profile_name),
+            self.profile_manager.paths.get_config_dir() / 'ipc-daemon.crt',
+        )
 
     def client(
         self,
@@ -185,6 +191,7 @@ class CoreEndpoint:
         """Open and authorize an actual public SDK session on the real IPC server."""
         client = MetorClient(
             self.port,
+            daemon_certificate=self.profile_manager.get_daemon_certificate(),
             auth_provider=FixtureAuthProvider(),
             timeout=FIXTURE_WAIT_SECONDS,
             on_event=on_event,

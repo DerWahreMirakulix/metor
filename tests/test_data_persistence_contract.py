@@ -65,6 +65,52 @@ class DataPersistenceContractTests(unittest.TestCase):
 
         self.addCleanup(SqlManager.close_connection, self._pm.paths.get_db_file())
 
+    def test_consumed_live_text_can_only_promote_identical_content(self) -> None:
+        """A read receipt keeps content identity without retaining the original text."""
+        messages, peer, identity = (
+            self._mm,
+            'b' * Constants.TOR_V3_ONION_ADDRESS_LENGTH,
+            'live-fallback',
+        )
+        self._cm.ensure_alias_for_onion(peer)
+        messages.queue_message(
+            peer,
+            MessageDirection.IN,
+            Delivery.LIVE,
+            ContentType.TEXT,
+            'original',
+            MessageStatus.UNREAD,
+            identity,
+        )
+        self.assertEqual(
+            messages.get_and_read_inbox(peer, Delivery.LIVE)[0][2], 'original'
+        )
+        self.assertEqual(messages.get_and_read_inbox(peer, Delivery.LIVE), [])
+        SqlManager.close_connection(self._pm.paths.get_db_file())
+        messages = MessageManager(self._pm)
+        self.assertTrue(messages.matches_inbound_text(peer, identity, 'original'))
+        self.assertFalse(messages.matches_inbound_text(peer, identity, 'changed'))
+        self.assertEqual(
+            messages.store_inbound_drop_text(peer, identity, 'changed', None, 10).value,
+            'conflict',
+        )
+        self.assertEqual(messages.get_unread_drop_count(peer), 0)
+        self.assertEqual(
+            messages.store_inbound_drop_text(
+                peer, identity, 'original', None, 10
+            ).value,
+            'promoted',
+        )
+        self.assertEqual(
+            messages.store_inbound_drop_text(
+                peer, identity, 'original', None, 10
+            ).value,
+            'duplicate',
+        )
+        self.assertEqual(
+            messages.get_and_read_inbox(peer, Delivery.DROP)[0][2], 'original'
+        )
+
     def test_discovered_peer_can_be_renamed_without_promotion(self) -> None:
         """
         Verifies that discovered peer can be renamed without promotion.

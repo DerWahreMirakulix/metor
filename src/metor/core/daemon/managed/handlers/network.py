@@ -44,6 +44,7 @@ from metor.core.api import (
     SwitchSuccessEvent,
     RetunnelCommand,
     RuntimeErrorCode,
+    RuntimeSnapshotEvent,
     MessageOperationReason,
     request_context,
     stamp_request_id,
@@ -72,6 +73,7 @@ from metor.versioning import (
 # Local Package Imports
 from metor.core.daemon.managed.outbox import OutboxWorker
 from .snapshot import RuntimeSnapshotProjectionMixin
+from .snapshot_pages import SnapshotPages
 from .text import TextCommandHandler
 from .calls import CallCommandHandler, CALL_COMMANDS
 
@@ -165,6 +167,7 @@ class NetworkCommandHandler(RuntimeSnapshotProjectionMixin):
         )
         self._config: 'Config' = config
         self._current_revision: Callable[[], int] = current_revision_cb or (lambda: 0)
+        self._snapshot_pages = SnapshotPages()
         self._profile_instance = profile_instance_cb
         self._voice_owners = voice_owner_available
         self._client_focuses: Dict[socket.socket, str] = {}
@@ -430,7 +433,13 @@ class NetworkCommandHandler(RuntimeSnapshotProjectionMixin):
             self._send_event(conn, self._build_chat_startup_state())
 
         elif isinstance(cmd, GetRuntimeSnapshotCommand):
-            self._send_event(conn, self._build_runtime_snapshot())
+            if cmd.snapshot_id is None:
+                result = self._build_runtime_snapshot()
+                if isinstance(result, RuntimeSnapshotEvent):
+                    result = self._snapshot_pages.begin(result)
+            else:
+                result = self._snapshot_pages.read(cmd.snapshot_id, cmd.offset)
+            self._send_event(conn, result)
 
         elif isinstance(cmd, RegisterLiveConsumerCommand):
             self._register_session_consumer(conn)
@@ -694,7 +703,7 @@ class NetworkCommandHandler(RuntimeSnapshotProjectionMixin):
             self._start_request_thread(
                 cmd.request_id,
                 self._network.connect_to,
-                cmd.target,
+                resolved[1],
             )
 
         elif isinstance(cmd, DisconnectCommand):

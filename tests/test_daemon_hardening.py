@@ -8,7 +8,6 @@ import hashlib
 import json
 import socket
 import sys
-import tempfile
 import threading
 import time
 import unittest
@@ -115,6 +114,9 @@ from metor.client import (
 )
 from metor.data.profile import ProfileManager
 from metor.data.profile.config import Config
+from metor.data.profile.ipc_identity import read_daemon_certificate
+from metor.shared.ipc_tls import authenticate_daemon
+from private_fixtures import PrivateTemporaryDirectory
 from metor.cli.handlers import CommandHandlers
 from metor.ui.terminal.theme import Theme
 from metor.utils import Constants
@@ -124,6 +126,12 @@ from metor.versioning import (
     PEER_PROTOCOL_MIN_SUPPORTED,
     PEER_PROTOCOL_VERSION,
 )
+
+
+def _pinned_connection(address: tuple[str, int], certificate: str) -> socket.socket:
+    """Connect to a test listener using its independently read profile certificate."""
+    with socket.create_connection(address, timeout=2) as raw:
+        return authenticate_daemon(raw, certificate)
 
 
 class _DummyConfig:
@@ -592,7 +600,7 @@ class _DummyMessageManager:
         )
         return InboundDropOutcome.CREATED
 
-    def has_inbound_text_receipt(self, _onion: str, _msg_id: str) -> bool:
+    def matches_inbound_text(self, _onion: str, _msg_id: str, _payload: str) -> bool:
         """Reports no duplicate inbound text receipt in this test double."""
         return False
 
@@ -980,60 +988,6 @@ class _AcceptorSocket:
 
         conn = self._accepted_connections.pop(0)
         return conn, ('127.0.0.1', 0)
-
-
-class _StopAfterRejectSocket:
-    """
-    Provides a stop after reject socket helper for test scenarios.
-    """
-
-    def __init__(self, server: IpcServer, conn: _AcceptedClientSocket) -> None:
-        """
-        Initializes the stop after reject socket helper.
-
-        Args:
-            server (IpcServer): The server.
-            conn (_AcceptedClientSocket): The conn.
-
-        Returns:
-            None
-        """
-
-        self._server: IpcServer = server
-        self._conn: _AcceptedClientSocket = conn
-        self._accepted: bool = False
-        self.timeouts: list[float] = []
-
-    def settimeout(self, timeout: float) -> None:
-        """
-        Captures one timeout value for assertions.
-
-        Args:
-            timeout (float): The timeout.
-
-        Returns:
-            None
-        """
-
-        self.timeouts.append(timeout)
-
-    def accept(self) -> tuple[_AcceptedClientSocket, tuple[str, int]]:
-        """
-        Returns the next queued accepted client socket.
-
-        Args:
-            None
-
-        Returns:
-            tuple[_AcceptedClientSocket, tuple[str, int]]: The computed return value.
-        """
-
-        if not self._accepted:
-            self._accepted = True
-            return self._conn, ('127.0.0.1', 0)
-
-        self._server._stop_flag.set()
-        raise OSError('stop accept loop')
 
 
 class _ThreadStartHandle:
@@ -2718,6 +2672,8 @@ class DaemonHardeningTests(unittest.TestCase):
         daemon = self._build_daemon(require_session_auth=True)
         context = create_session_auth_context('synthetic-admission-secret')
         daemon._session_access.install_context(context)
+        profile = Path(self.enterContext(PrivateTemporaryDirectory()))
+        cast(Mock, daemon._pm.paths.get_config_dir).return_value = profile
         with (
             patch.object(daemon._pm.config, 'get_float', return_value=0.12),
             patch.object(daemon._pm.config, 'get_int', return_value=1),
@@ -2727,10 +2683,11 @@ class DaemonHardeningTests(unittest.TestCase):
             self.addCleanup(daemon._ipc.stop)
             assert daemon._ipc.port is not None
             address = (Constants.LOCALHOST, daemon._ipc.port)
+            certificate = read_daemon_certificate(profile)
             for initial in (b'', b'{', b'{}\n'):
                 with (
                     self.subTest(initial=initial),
-                    socket.create_connection(address, timeout=2) as client,
+                    _pinned_connection(address, certificate) as client,
                 ):
                     reader = BufferedIpcEventReader()
                     if initial:
@@ -2742,7 +2699,7 @@ class DaemonHardeningTests(unittest.TestCase):
                     self.assertIsNone(reader.read_from_socket(client))
 
             request = (PrepareProfileExitCommand().to_json() + '\n').encode()
-            with socket.create_connection(address, timeout=2) as untrusted:
+            with _pinned_connection(address, certificate) as untrusted:
                 reader = BufferedIpcEventReader()
                 end = time.monotonic() + 2
                 challenges = 0
@@ -2767,7 +2724,7 @@ class DaemonHardeningTests(unittest.TestCase):
                     )
                 self.assertGreater(challenges, 1)
 
-            with socket.create_connection(address, timeout=2) as admitted:
+            with _pinned_connection(address, certificate) as admitted:
                 reader = BufferedIpcEventReader()
                 admitted.sendall(request)
                 challenge = reader.read_from_socket(admitted)
@@ -2798,11 +2755,12 @@ class DaemonHardeningTests(unittest.TestCase):
         """A real lease can idle during unlock but cannot bypass a locked profile."""
         daemon = self._build_daemon(start_locked=True, require_session_auth=True)
         with (
-            tempfile.TemporaryDirectory() as folder,
+            PrivateTemporaryDirectory() as folder,
             patch.object(daemon._pm.config, 'get_float', return_value=0.1),
             patch.object(daemon._pm.config, 'get_int', return_value=1),
             patch.object(Constants, 'IPC_CREDENTIAL_PROMPT_TIMEOUT_SEC', 0.24),
         ):
+            cast(Mock, daemon._pm.paths.get_config_dir).return_value = Path(folder)
             lifetime = FrontendLifetime(Path(folder), automatic=True)
             lifetime.publish()
             token = read_frontend_lifetime_token(Path(folder))
@@ -2816,10 +2774,11 @@ class DaemonHardeningTests(unittest.TestCase):
                 InitCommand(IPC_PROTOCOL_VERSION, IPC_PROTOCOL_MIN_SUPPORTED).to_json()
                 + '\n'
             ).encode()
+            certificate = read_daemon_certificate(Path(folder))
             for bearer, expected in ((None, 'denied'), (token, 'joined')):
                 with (
                     self.subTest(state=expected),
-                    socket.create_connection(address, timeout=2) as client,
+                    _pinned_connection(address, certificate) as client,
                 ):
                     reader = BufferedIpcEventReader()
                     lease = FrontendLeaseCommand(
@@ -3327,6 +3286,11 @@ class DaemonHardeningTests(unittest.TestCase):
             socket.socket,
             _AcceptorSocket([first_conn, second_conn]),
         )
+        tls = Mock()
+        first_stream = Mock()
+        second_stream = Mock()
+        tls.wrap_socket.side_effect = [first_stream, second_stream]
+        server._tls = tls
         thread_factory = _ThreadStartFactory(server)
 
         with patch(
@@ -3341,41 +3305,38 @@ class DaemonHardeningTests(unittest.TestCase):
         )
         self.assertEqual(thread_factory.calls, 2)
         self.assertTrue(first_conn.closed)
-        self.assertNotIn(first_conn, server._clients)
-        self.assertIn(second_conn, server._clients)
+        self.assertTrue(second_conn.closed)
+        first_stream.close.assert_called_once_with()
+        self.assertNotIn(first_stream, server._negotiating)
+        self.assertIn(second_stream, server._negotiating)
+        self.assertEqual(server.active_clients(), set())
 
     def test_ipc_acceptor_rejects_clients_over_limit(self) -> None:
-        """
-        Verifies that IPC acceptor rejects clients over limit.
-
-        Args:
-            None
-
-        Returns:
-            None
-        """
-
+        """An additional pinned TLS connection gets a typed limit response."""
+        pm = _DummyProfileManager()
+        profile = Path(self.enterContext(PrivateTemporaryDirectory()))
+        pm.paths.get_config_dir.return_value = profile
         server = IpcServer(
-            cast(ProfileManager, _DummyProfileManager()),
-            lambda _cmd, _conn: None,
+            cast(ProfileManager, pm),
+            lambda _cmd, conn: server.send_to(conn, AckEvent('message', 'peer')),
         )
-        existing_client = cast(socket.socket, _DummyConn())
-        limited_conn = _AcceptedClientSocket()
-        server._clients = [existing_client]
-        server._server = cast(
-            socket.socket,
-            _StopAfterRejectSocket(server, limited_conn),
-        )
-
-        with patch('metor.core.daemon.managed.ipc.threading.Thread') as thread_cls:
-            server._acceptor()
-
-        thread_cls.assert_not_called()
-        self.assertTrue(limited_conn.closed)
-        self.assertEqual(len(limited_conn.sent), 1)
-        event = IpcEvent.from_dict(json.loads(limited_conn.sent[0].decode('utf-8')))
-        self.assertIs(event.event_type, EventType.IPC_CLIENT_LIMIT_REACHED)
-        self.assertEqual(getattr(event, 'max_clients'), 1)
+        server.start()
+        self.addCleanup(server.stop)
+        assert server.port is not None
+        address = (Constants.LOCALHOST, server.port)
+        certificate = read_daemon_certificate(profile)
+        with _pinned_connection(address, certificate) as first:
+            first.sendall((PrepareProfileExitCommand().to_json() + '\n').encode())
+            acknowledged = BufferedIpcEventReader().read_from_socket(first)
+            self.assertIsInstance(acknowledged, AckEvent)
+            with _pinned_connection(address, certificate) as second:
+                reader = BufferedIpcEventReader()
+                event = reader.read_from_socket(second)
+                self.assertIsNotNone(event)
+                assert event is not None
+                self.assertIs(event.event_type, EventType.IPC_CLIENT_LIMIT_REACHED)
+                self.assertEqual(getattr(event, 'max_clients'), 1)
+                self.assertIsNone(reader.read_from_socket(second))
 
     def test_daemon_reports_local_auth_rate_limit_during_locked_startup(self) -> None:
         """
@@ -3526,16 +3487,21 @@ class DaemonHardeningTests(unittest.TestCase):
         client = IpcClient(
             port=4312,
             timeout=2.5,
+            daemon_certificate='test-trust',
             on_event=lambda _event: None,
             on_disconnect=disconnect_mock,
         )
 
         with (
             patch('metor.client.ipc.socket.socket', return_value=fake_socket),
+            patch(
+                'metor.client.ipc.authenticate_daemon', return_value=fake_socket
+            ) as authenticate,
             patch('metor.client.ipc.threading.Thread', return_value=_PassiveThread()),
         ):
             self.assertTrue(client.connect())
 
+        authenticate.assert_called_once_with(fake_socket, 'test-trust')
         self.assertEqual(fake_socket.timeouts, [2.5])
         client._listener_thread_main()
         client._event_thread_main()
@@ -4145,6 +4111,40 @@ class DaemonHardeningTests(unittest.TestCase):
         self.assertEqual(conn.sent, [b'/drop_ack msg-1\n'])
         self.assertTrue(conn.closed)
 
+    def test_open_drop_tunnel_observes_current_admission(self) -> None:
+        """Each new admission honors the setting while preserving earlier receipts."""
+        config = Mock(wraps=_DummyConfig())
+        messages = _DummyMessageManager()
+        conn = _DummyConn()
+        router = MessageRouter(
+            cm=cast(ContactManager, _DummyContactManager()),
+            hm=cast(HistoryManager, _DummyHistoryManager()),
+            mm=cast(MessageManager, messages),
+            state=StateTracker(),
+            broadcast_callback=lambda _: None,
+            has_clients_callback=lambda: False,
+            has_live_consumers_callback=lambda: False,
+            notify_callback=lambda _: None,
+            config=config,
+        )
+
+        def frames():
+            for msg_id, enabled in (('one', True), ('two', False), ('three', True)):
+                config.get_bool.side_effect = lambda key: (
+                    enabled if key is SettingKey.ALLOW_DROPS else False
+                )
+                content = base64.b64encode(
+                    json.dumps({'id': msg_id, 'text': msg_id}).encode()
+                ).decode()
+                yield f'/drop {msg_id} {content}'
+            yield None
+
+        stream = Mock()
+        stream.read_line.side_effect = frames()
+        router.process_async_drop(cast(socket.socket, conn), stream, 'peer')
+        self.assertEqual([row['msg_id'] for row in messages.queued], ['one', 'three'])
+        self.assertEqual(conn.sent, [b'/drop_ack one\n', b'/drop_ack three\n'])
+
     def test_async_drop_stops_without_ack_when_drop_backlog_limit_is_reached(
         self,
     ) -> None:
@@ -4447,7 +4447,9 @@ class DaemonHardeningTests(unittest.TestCase):
                 timestamp='2026-04-04T12:00:00+00:00',
             )
         )
-        state.remember_message_request_id('msg-1', 'req-live-1')
+        state.remember_message_request_id(
+            'peer-onion', 'msg-1', 'req-live-1', Delivery.LIVE
+        )
 
         router.process_incoming_ack('peer-onion', 'msg-1')
 
@@ -4458,7 +4460,7 @@ class DaemonHardeningTests(unittest.TestCase):
             message_manager.updated_outbound_statuses,
             [('peer-onion', 'msg-1', MessageStatus.DELIVERED)],
         )
-        self.assertIsNone(state.pop_message_request_id('msg-1'))
+        self.assertIsNone(state.pop_message_request_id('peer-onion', 'msg-1'))
 
     def test_finalize_pending_live_messages_converts_durable_live_rows_to_drops(
         self,
@@ -4575,7 +4577,9 @@ class DaemonHardeningTests(unittest.TestCase):
         """
 
         state = StateTracker()
-        state.remember_message_request_id('msg-1', 'req-drop-ack-1')
+        state.remember_message_request_id(
+            'peer-onion', 'msg-1', 'req-drop-ack-1', Delivery.DROP
+        )
         broadcasted: list[IpcEvent] = []
         worker = OutboxWorker(
             tm=cast(TorManager, Mock(onion='self-onion')),
@@ -4615,7 +4619,7 @@ class DaemonHardeningTests(unittest.TestCase):
             cast(AckEvent, broadcasted[0]).request_id,
             'req-drop-ack-1',
         )
-        self.assertIsNone(state.pop_message_request_id('msg-1'))
+        self.assertIsNone(state.pop_message_request_id('peer-onion', 'msg-1'))
 
     def test_tcp_stream_reader_preserves_partial_buffer_bytes(self) -> None:
         """
@@ -4849,6 +4853,41 @@ class DaemonHardeningTests(unittest.TestCase):
                 f'/auth peer sig 1 1 {ConnectionOrigin.MANUAL.value}'
             )
 
+    def test_peer_auth_proof_is_bound_to_exact_handshake(self) -> None:
+        """Every transport intent authenticates role, peer, generation and challenge."""
+        public, secret = nacl.bindings.crypto_sign_seed_keypair(bytes(range(32)))
+        version = bytes([Constants.TOR_V3_VERSION_BYTE])
+        signer = self._build_v3_onion(
+            public, self._build_v3_checksum(public, version), version
+        )
+        crypto = Crypto(cast(KeyManager, _DummyKeyManager(secret)))
+        ranges = (PEER_PROTOCOL_VERSION, PEER_PROTOCOL_MIN_SUPPORTED)
+        for mode in ('LIVE', 'ASYNC', 'CALL', 'RECOVER'):
+            parts = (
+                'aa' * Constants.TOR_HANDSHAKE_CHALLENGE_BYTES,
+                signer,
+                'destination',
+                mode,
+                ranges,
+                ranges,
+            )
+            proof = HandshakeProtocol.proof(*parts)
+            signature = crypto.sign_challenge(proof)
+            assert signature is not None
+            self.assertTrue(crypto.verify_signature(signer, proof, signature))
+            changes = (
+                HandshakeProtocol.proof('00', *parts[1:]),
+                HandshakeProtocol.proof(parts[0], parts[2], parts[1], *parts[3:]),
+                HandshakeProtocol.proof(parts[0], signer, 'other', *parts[3:]),
+                HandshakeProtocol.proof(
+                    *parts[:3], 'CALL' if mode != 'CALL' else 'LIVE', ranges, ranges
+                ),
+                HandshakeProtocol.proof(*parts[:4], (2, 1), ranges),
+                HandshakeProtocol.proof(*parts[:4], ranges, (2, 1)),
+            )
+            for changed in changes:
+                self.assertFalse(crypto.verify_signature(signer, changed, signature))
+
     def test_crypto_verify_signature_rejects_invalid_onion_checksum(self) -> None:
         """
         Verifies that crypto verify signature rejects invalid onion checksum.
@@ -4864,7 +4903,7 @@ class DaemonHardeningTests(unittest.TestCase):
         public_key, secret_key = nacl.bindings.crypto_sign_seed_keypair(seed)
         crypto = Crypto(cast(KeyManager, _DummyKeyManager(secret_key)))
         challenge = 'ab' * Constants.TOR_HANDSHAKE_CHALLENGE_BYTES
-        signature = crypto.sign_challenge(challenge)
+        signature = crypto.sign_challenge(challenge.encode())
 
         self.assertIsNotNone(signature)
 
@@ -4877,8 +4916,12 @@ class DaemonHardeningTests(unittest.TestCase):
         invalid_onion = self._build_v3_onion(public_key, b'\x00\x00', version)
 
         assert signature is not None
-        self.assertTrue(crypto.verify_signature(valid_onion, challenge, signature))
-        self.assertFalse(crypto.verify_signature(invalid_onion, challenge, signature))
+        self.assertTrue(
+            crypto.verify_signature(valid_onion, challenge.encode(), signature)
+        )
+        self.assertFalse(
+            crypto.verify_signature(invalid_onion, challenge.encode(), signature)
+        )
 
     def test_crypto_verify_signature_rejects_invalid_onion_version(self) -> None:
         """
@@ -4895,7 +4938,7 @@ class DaemonHardeningTests(unittest.TestCase):
         public_key, secret_key = nacl.bindings.crypto_sign_seed_keypair(seed)
         crypto = Crypto(cast(KeyManager, _DummyKeyManager(secret_key)))
         challenge = 'cd' * Constants.TOR_HANDSHAKE_CHALLENGE_BYTES
-        signature = crypto.sign_challenge(challenge)
+        signature = crypto.sign_challenge(challenge.encode())
 
         self.assertIsNotNone(signature)
 
@@ -4907,7 +4950,7 @@ class DaemonHardeningTests(unittest.TestCase):
         )
 
         assert signature is not None
-        self.assertFalse(crypto.verify_signature(onion, challenge, signature))
+        self.assertFalse(crypto.verify_signature(onion, challenge.encode(), signature))
 
     def test_receiver_treats_legacy_disconnect_as_terminal(self) -> None:
         """
@@ -5427,7 +5470,7 @@ class DaemonHardeningTests(unittest.TestCase):
         receiver = StreamReceiver(
             cm=cast(ContactManager, _DummyContactManagerReceiver()),
             hm=cast(HistoryManager, _DummyHistoryManagerReceiver()),
-            state=cast(StateTracker, _DummyState()),
+            state=StateTracker(),
             router=cast(MessageRouter, _AckTrackingRouter()),
             broadcast_callback=lambda _event: None,
             disconnect_cb=lambda *args: disconnect_calls.append(args),
@@ -5436,6 +5479,7 @@ class DaemonHardeningTests(unittest.TestCase):
         )
         writer, reader = socket.socketpair()
         try:
+            receiver._state.add_active_connection('peer-onion', reader)
             writer.sendall(b'/ack msg-1 extra\n/disconnect\n')
             writer.shutdown(socket.SHUT_WR)
 
@@ -7247,7 +7291,7 @@ class DaemonHardeningTests(unittest.TestCase):
         def answer(cmd: object, conn: socket.socket) -> None:
             daemon._ipc.send_to(
                 conn,
-                AckEvent(msg_id=type(cmd).__name__),
+                AckEvent(onion='peer', msg_id=type(cmd).__name__),
             )
 
         network_handler.handle.side_effect = answer

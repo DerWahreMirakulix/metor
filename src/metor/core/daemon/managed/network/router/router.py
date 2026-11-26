@@ -483,23 +483,24 @@ class MessageRouter:
         Returns:
             FrameAdmission: The resulting value.
         """
-        if self._voice is None:
+        with self._operation_lock:
+            if self._voice is None:
+                return FrameAdmission.MALFORMED
+            if not self._drop.allows_inbound_drops():
+                self._drop.reject_disabled_drop(conn)
+                return FrameAdmission.POLICY_REJECTED
+            payload = self._voice.decode_wire_payload(encoded)
+            if payload is None:
+                return FrameAdmission.MALFORMED
+            if command == TorCommand.DROP_VOICE_BEGIN.value:
+                return self._voice.receive_begin(
+                    conn, onion, payload, delivery=Delivery.DROP
+                )
+            if command == TorCommand.DROP_VOICE_CHUNK.value:
+                return self._voice.receive_chunk(conn, onion, payload)
+            if command == TorCommand.DROP_VOICE_END.value:
+                return self._voice.receive_end(conn, onion, payload)
             return FrameAdmission.MALFORMED
-        if not self._drop.allows_inbound_drops():
-            self._drop.reject_disabled_drop(conn)
-            return FrameAdmission.POLICY_REJECTED
-        payload = self._voice.decode_wire_payload(encoded)
-        if payload is None:
-            return FrameAdmission.MALFORMED
-        if command == TorCommand.DROP_VOICE_BEGIN.value:
-            return self._voice.receive_begin(
-                conn, onion, payload, delivery=Delivery.DROP
-            )
-        if command == TorCommand.DROP_VOICE_CHUNK.value:
-            return self._voice.receive_chunk(conn, onion, payload)
-        if command == TorCommand.DROP_VOICE_END.value:
-            return self._voice.receive_end(conn, onion, payload)
-        return FrameAdmission.MALFORMED
 
     def process_voice_ack(self, onion: str, msg_id: str, next_offset: int) -> None:
         """Delegates one monotonic Voice resume acknowledgement.

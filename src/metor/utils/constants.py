@@ -28,20 +28,20 @@ class Constants(ContractConstants):
     SOCKET_WRITER_POLL_TIMEOUT_SEC: float = 0.1
 
     # Tor Bootstrapping
-    UNIX_TOR_TIMEOUT: int = 45  # Process launch timeout for Unix Tor binaries
-    WINDOWS_TOR_BOOTSTRAP_TIMEOUT_SEC: float = 45.0
-    WINDOWS_TOR_CONFIG_MAX_BYTES: int = 4096
-    WINDOWS_TOR_LOG_LINE_MAX_BYTES: int = 4096
+    TOR_BOOTSTRAP_TIMEOUT_SEC: float = 45.0
+    TOR_CONFIG_MAX_BYTES: int = 4096
+    TOR_LOG_LINE_MAX_BYTES: int = 4096
     MAX_DERIVED_DAEMON_START_WAIT_SEC: float = (
         210.0  # Bound the automatic cold-start wait before an explicit IPC override
     )
     TOR_BOOTSTRAP_POLL_SEC: float = 1.0
     TOR_BOOTSTRAP_RETRY_SEC: float = 2.0
+    TOR_CONTROL_TIMEOUT_SEC: float = 5.0
+    TOR_CONTROL_REPLY_MAX_BYTES: int = 4096
     TOR_CONTROL_RETRY_SEC: float = 1.0  # Delay between Tor control-port retry attempts
     TOR_PROXY_READY_RETRY_SEC: float = (
         1.0  # Delay between local Tor SOCKS readiness probes
     )
-    TOR_HOSTNAME_POLL_RETRIES: int = 10
     TOR_CONTROL_RETRY_ATTEMPTS: int = 5  # Retry budget for NEWNYM control calls
     TOR_PROXY_READY_ATTEMPTS: int = (
         5  # Retry budget for local Tor SOCKS readiness checks
@@ -148,3 +148,16 @@ class Constants(ContractConstants):
     # Uses METOR_DATA_DIR_PARENT from environment if set, otherwise falls back to the user's home directory natively via pathlib
     DATA: Path = Path(os.getenv('METOR_DATA_DIR_PARENT', Path.home())) / DATA_DIR
     TOR_PATH: str = os.getenv('METOR_TOR_PATH', '').strip()
+
+    @classmethod
+    def tor_start_budget(cls, retries: int) -> float:
+        """Budget bootstrap, authenticated service registration and listener readiness."""
+        # Connect, SAFECOOKIE challenge, response proof and service registration.
+        registration = 4 * cls.TOR_CONTROL_TIMEOUT_SEC
+        return (
+            retries * (cls.TOR_BOOTSTRAP_TIMEOUT_SEC + registration)
+            + max(0, retries - 1) * cls.TOR_BOOTSTRAP_RETRY_SEC
+            + cls.TOR_PROXY_READY_ATTEMPTS
+            * (cls.TOR_PROXY_READY_TIMEOUT_SEC + cls.TOR_PROXY_READY_RETRY_SEC)
+            + cls.LISTENER_READY_TIMEOUT
+        )

@@ -1,5 +1,6 @@
 """Graphical prompt bridge; workers wait while the native input loop stays live."""
 
+from collections.abc import Callable
 from dataclasses import dataclass
 import threading
 from typing import Literal
@@ -39,6 +40,26 @@ class Interactions:
         self._answered: bool = False
         self._cancelled: bool = False
         self._startup: OneUseSecretProvider | None = None
+        self._disconnect_candidate: Callable[[], None] | None = None
+
+    @property
+    def cancelled(self) -> bool:
+        """Exclude late callbacks from an abandoned provisional connection."""
+        with self._condition:
+            return self._cancelled
+
+    def watch_candidate(self, disconnect: Callable[[], None]) -> bool:
+        """Let a new native lock interrupt the provisional SDK connection during setup."""
+        with self._condition:
+            if self._cancelled:
+                return False
+            self._disconnect_candidate = disconnect
+            return True
+
+    def release_candidate(self) -> None:
+        """The activation or transition now owns installation and disposal."""
+        with self._condition:
+            self._disconnect_candidate = None
 
     def startup_secret(self, provider: OneUseSecretProvider | None) -> None:
         """Transfers or clears the public host's one-use bootstrap credential.
@@ -92,12 +113,17 @@ class Interactions:
         """
         with self._condition:
             self._cancelled = True
+            disconnect, self._disconnect_candidate = self._disconnect_candidate, None
             self._answer = None
             self._prompt = None
             if self._startup is not None:
                 self._startup.take()
                 self._startup = None
             self._condition.notify_all()
+        if disconnect is not None:
+            threading.Thread(
+                target=disconnect, name='metor-gui-cancel-bootstrap', daemon=True
+            ).start()
 
     def _ask(self, kind: Literal['start'] | CredentialKind) -> str | bool | None:
         """Waits off the UI/IPC-reader thread for a graphical response.

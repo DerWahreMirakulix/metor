@@ -21,8 +21,8 @@ end of an authenticated SSH tunnel. The port belongs to the selected profile.
 from metor.client import AuthProvider, MetorClient
 
 
-def negotiated_protocol(port: int, credentials: AuthProvider) -> int:
-    client = MetorClient(port, auth_provider=credentials)
+def negotiated_protocol(port: int, certificate: str, credentials: AuthProvider) -> int:
+    client = MetorClient(port, daemon_certificate=certificate, auth_provider=credentials)
     try:
         session = client.bootstrap()
         if session is None:
@@ -39,6 +39,11 @@ proofs or the full initialization event. After bootstrap, use `request` with a
 typed command and its expected reply; broadcasts and request replies share the
 same socket. A native GUI should perform the blocking handshake off its render
 thread. See the [wire reference](../generated/API.md) for command and event pairs.
+
+The SDK takes the selected daemon's public PEM certificate as a string. A
+frontend launched by Base uses `FrontendBootstrapResult.daemon_certificate`.
+Standalone clients provision the certificate through a verified channel.
+The client verifies it during TLS establishment on every connection.
 
 ## Ownership boundary
 
@@ -221,7 +226,10 @@ queued DROP retries. Exact durable emission claims fence cached text and Voice
 frames against cancellation. An already transmitted copy may still arrive;
 this operation never recalls remote content. Content-free receipts preserve an
 unknown remote outcome after the spool is removed. Saved contacts, LIVE state,
-and unsent Voice drafts remain intact.
+and unsent Voice drafts remain intact. Clearing profile history and deleting
+selected messages persist Voice object deletion intent alongside the SQL change.
+Core retries incomplete object cleanup at database handler startup and on a
+subsequent deletion request. Physical cleanup errors produce a failure result.
 `DismissLiveContextCommand` is the explicit cleanup action for a disconnected,
 non-recovering LIVE context. Its default rejects outbound pending LIVE content
 that still needs reconnect or fallback. With Core's `live_pending_cancellation`

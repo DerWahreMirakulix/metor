@@ -153,9 +153,11 @@ Argon2id
 - `DB_KEY` is the raw 32-byte SQLCipher key. User passwords are never passed to
   SQLCipher.
 - `SECRET_KEY` encrypts long-lived Metor signing and Tor Onion Service private
-  identity files. These remain separate files because Tor consumes its own key
-  format at runtime; moving them into SQLCipher would not remove the need for a
-  carefully controlled Tor runtime export.
+  identity files. Metor authenticates the profile-owned Tor process using
+  SAFECOOKIE, then registers the existing expanded identity with `ADD_ONION`.
+  The owning control connection stays open until lock or shutdown. Tor receives
+  the key in memory. Its returned service ID must match the profile signing
+  identity before it can become the active address.
 - `BLOB_KEY` is the root for encrypted external binary objects. It is not a
   network key and is never used by the typed message/delivery layer directly.
 
@@ -201,7 +203,9 @@ current-password verification even from an authenticated unlocked daemon session
 this prevents a separate local IPC client from changing another session's
 profile password. Password-bearing commands suppress dataclass `repr` output.
 
-`PasswordKeyProtector.destroy` overwrites and `fsync`s its regular keyslot file,
+Creation, rotation and destruction share an exclusive keyslot lock. The active
+keyslot and its single staged replacement belong to the same profile.
+`PasswordKeyProtector.destroy` overwrites and `fsync`s each present wrapper,
 unlinks it, and synchronizes the parent directory where supported. This is
 best-effort software destruction only: flash wear-leveling, copy-on-write,
 snapshots, backups, and remapped blocks can retain historical copies.
@@ -220,8 +224,10 @@ each staged read-back with its source payload, and validate target database
 not modified during preparation.
 
 Temporary blobs are non-durable runtime spool state. Security migration requires
-the profile daemon to be offline, so the staged target discards that namespace
-instead of copying mode-incompatible runtime residue. Persistent blobs are all
+the profile daemon to be offline. Finalized DROP receipts can own segments in
+either namespace after interrupted promotion. The converter checks the receipt
+manifest, authenticates each required object, verifies its byte count, and writes
+it to persistent target storage before commit. Unowned temporary data is discarded. Persistent blobs are all
 migrated, including currently orphaned canonical objects, because ownership
 metadata is not yet sufficient to discard them without risking data loss.
 
@@ -231,7 +237,9 @@ has been synchronized. Recovery reads this journal before opening a profile:
 `prepared` discards the staged tree and continues using the unchanged source;
 `committed` completes generation activation and then performs best-effort old
 source cleanup. Cleanup failure after commit leaves the target authoritative and
-usable; it never triggers destructive rollback.
+usable. The command returns a cleanup-pending result until the prior directory
+is removed. Repeating the same command retries cleanup without re-converting
+the active profile.
 
 ### Profile layout
 
@@ -247,8 +255,7 @@ profile/
 │   └── temporary/                     # non-durable mode-appropriate runtime spool
 ├── hidden_service/
 │   ├── metor_secret.key               # SECRET_KEY ciphertext when encrypted
-│   ├── hs_ed25519_secret_key.enc       # SECRET_KEY ciphertext when encrypted
-│   └── hs_ed25519_secret_key           # runtime-only Tor plaintext, shredded
+│   └── hs_ed25519_secret_key.enc       # SECRET_KEY ciphertext when encrypted
 └── tor_data/                           # Tor runtime state
 ```
 
@@ -310,7 +317,9 @@ SQLCipher access, clears any injected runtime keys, calls
 `KeyProtector.destroy`, and only afterward invokes recursive filesystem cleanup.
 `SelfDestructCommand`, individual profile removal, and global purge share this
 key-first ordering. If cleanup fails after key destruction, nothing recreates
-protected key material.
+protected key material. Global purge fences the catalog, daemon starts and
+live instances before removing profiles. It retains the root's synchronization
+files so a concurrent process cannot replace an acquired lock.
 
 An opt-in `SelfDestructCommand.operation_id` binds GUI lifecycle reports to one
 accepted operation on its already authorized connection. `SelfDestructRuntimeReleased`
@@ -629,6 +638,18 @@ Configuration should follow these rules:
 
 ## IPC Contract Model
 
+Managed loopback IPC uses TLS 1.3 with a certificate pinned to the selected
+profile, including when the endpoint is an SSH-forwarded port. Base provisions
+the daemon identity under the profile's OS user permissions. It remains available
+while the profile is locked. Remote profile pairing installs only the public
+certificate. Headless offline commands use a process-owned private socket pair.
+
+Changing authentication, logging, disclosure or retention policy and synchronizing
+daemon settings requires a password-strength session. This also applies to GUI
+unlock policy, idle locking, and information shown on the lock screen. A
+PIN-authorized client can continue ordinary messaging and establish password
+strength before retrying a protected write.
+
 The IPC boundary is typed on purpose. Future changes should extend that contract instead of reintroducing string parsing in the UI.
 
 1. UI behavior must branch on `event_type` or explicit structured payload fields.
@@ -708,7 +729,7 @@ token and a random frontend ID. Independent daemons, remote profiles, and
 short-lived queries do not require this lifetime registration. The lease does
 not authenticate a profile or grant content access.
 
-1. **Connect:** Connect to the daemon's local IPC listener (`127.0.0.1:<daemon_port>`). When connecting to a remote VPS daemon, the port is forwarded locally via SSH tunnel, keeping remote transparent.
+1. **Connect** to the daemon's local IPC listener (`127.0.0.1:<daemon_port>`) and verify its TLS 1.3 certificate against the selected profile's enrolled public certificate. Use the same authenticated stream for all commands. A remote daemon uses the same handshake through the SSH-forwarded port.
 2. **Handshake:** Send `InitCommand(current_version, min_supported)` with a unique `request_id`. The reply may require authentication or unlocking before the daemon returns `InitEvent(negotiated_version)`.
 3. **Auth & Unlock Gate:**
    - If the daemon responds with `DaemonLockedEvent`, send `UnlockCommand(password=...)` and await `DaemonUnlockedEvent`.
@@ -871,13 +892,13 @@ They exist so future work extends one coherent model instead of reintroducing ad
    Live and drop payloads may be rendered optimistically in the terminal, but daemon-authored timestamps remain the canonical values exposed over IPC.
 
 10. Delivery ACK is not a read receipt.
-    A sender-side ACK only means the peer daemon durably accepted the logical message. Read state is a separate local consume action.
+    A sender-side ACK identifies the exact peer and outgoing message ID whose delivery was accepted. A selected conversation remains addressed to its onion identity even if its alias changes. For free-form CLI targets a valid v3 onion takes precedence over a contact of the same name. Read state is a separate local consume action.
 
 11. Every logical message keeps one stable identifier across transports.
     Live, drop, fallback, and retry paths must reuse the same `msg_id` so duplicate deliveries stay idempotent.
 
 12. Inbound live delivery is crash-safe but not normal chat history.
-    Live payloads must be durably spooled before ACK, then shredded on explicit consume while retaining only minimal dedupe metadata. They do not become ordinary visible chat-history rows by default.
+    Live payloads must be durably spooled before ACK, then shredded on explicit consume while retaining only minimal dedupe metadata. An inbound text receipt retains a profile-keyed content tag. Converting that identity to DROP after reading requires the original content. LIVE receipts stay out of ordinary visible chat history by default.
 
 ### Transport Settings
 
@@ -966,7 +987,7 @@ The UI may translate them differently, but it must not reinterpret them.
 
 1. `connect_to()` resolves the peer, registers an outbound attempt, and emits `ConnectionConnectingEvent`.
 
-2. The outbound socket completes the challenge-response handshake.
+2. The outbound socket completes the Ed25519 challenge-response handshake. The signed transcript binds the challenge, ordered initiator and responder onions, both advertised version ranges, and the intent (LIVE, recovery, DROP, or dedicated CALL). Only accepted LIVE sockets carry conversation data or receipts. A dedicated CALL socket has a single deadline to submit its first offer.
    Until the peer replies with `PENDING` or `ACCEPTED`, that socket is an outbound attempt, not an active live session.
 
 3. If the peer replies with `PENDING`, the receiver emits `ConnectionPendingEvent` and keeps the socket under late-acceptance timeout.

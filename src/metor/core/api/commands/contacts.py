@@ -7,6 +7,7 @@ from typing import Optional
 from metor.core.api.base import IpcCommand
 from metor.core.api.codes import CommandType
 from metor.core.api.registry import register_command
+from metor.shared.constants import Constants
 
 
 @register_command(CommandType.GET_CONTACTS_LIST)
@@ -15,10 +16,19 @@ class GetContactsListCommand(IpcCommand):
     """Requests the structured address book."""
 
     chat_mode: bool = False
+    onions: Optional[list[str]] = None
     command_type: CommandType = field(
         default=CommandType.GET_CONTACTS_LIST,
         init=False,
     )
+
+    def __post_init__(self) -> None:
+        """Limit identity-scoped lookups to one bounded contact selection."""
+        if self.onions is not None and (
+            len(self.onions) > Constants.CONTACT_RECHECK_ITEMS
+            or any(not 0 < len(onion) <= 62 for onion in self.onions)
+        ):
+            raise ValueError('Invalid contact selection')
 
 
 @register_command(CommandType.ADD_CONTACT)

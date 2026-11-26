@@ -6,12 +6,13 @@ from typing import TYPE_CHECKING, Optional
 from metor.core.daemon import InvalidMasterPasswordError, verify_master_password
 from metor.core.key import KeyManager
 from metor.data import DatabaseCorruptedError, SettingKey, Settings, SqlManager
-from metor.utils import secure_remove_path, secure_shred_file
+from metor.data.blob import open_blob_store
+from metor.utils import Constants, FileLock, secure_remove_path, secure_shred_file
 
 # Local Package Imports
 from metor.data.profile.migration.blobs import (
     migrate_persistent_blobs,
-    open_blob_store,
+    required_voice_segments,
     validate_database_blob_references,
 )
 from metor.data.profile.migration.journal import (
@@ -72,25 +73,30 @@ def migrate_profile_security(
     if not safe_name:
         return ProfileOperationResult(False, ProfileOperationType.INVALID_NAME, {})
 
-    try:
-        pm = ProfileManager(safe_name)
-    except ValueError:
-        return ProfileOperationResult(False, ProfileOperationType.INVALID_NAME, {})
-    if not pm.exists():
+    if not Constants.DATA.exists():
         return ProfileOperationResult(
             False, ProfileOperationType.PROFILE_NOT_FOUND, {'profile': safe_name}
         )
-    with offline_profile_guard(pm.paths) as offline:
-        if not offline:
+    with FileLock(Constants.DATA / '.profile-catalog'):
+        try:
+            pm = ProfileManager(safe_name)
+        except ValueError:
+            return ProfileOperationResult(False, ProfileOperationType.INVALID_NAME, {})
+        if not pm.exists():
             return ProfileOperationResult(
-                False,
-                ProfileOperationType.CANNOT_MIGRATE_RUNNING,
-                {'profile': safe_name},
+                False, ProfileOperationType.PROFILE_NOT_FOUND, {'profile': safe_name}
             )
-        with migration_lock(safe_name):
-            return _migrate_existing_profile(
-                pm, target_mode, current_password, new_password
-            )
+        with offline_profile_guard(pm.paths) as offline:
+            if not offline:
+                return ProfileOperationResult(
+                    False,
+                    ProfileOperationType.CANNOT_MIGRATE_RUNNING,
+                    {'profile': safe_name},
+                )
+            with migration_lock(safe_name):
+                return _migrate_existing_profile(
+                    pm, target_mode, current_password, new_password
+                )
 
 
 def _migrate_existing_profile(
@@ -125,11 +131,20 @@ def _migrate_existing_profile(
         )
 
     current_mode = pm.get_security_mode()
+    journal_path, staged_path, backup_path = migration_paths(safe_name)
+    if journal_path.exists():
+        # Profile construction already attempted post-commit recovery under its lock.
+        # Never overwrite that journal with a new transition while cleanup is pending.
+        return _cleanup_pending(safe_name, current_mode)
     if current_mode is target_mode:
         return ProfileOperationResult(
             True,
             ProfileOperationType.SECURITY_MODE_UNCHANGED,
-            {'profile': safe_name, 'security_mode': current_mode.value},
+            {
+                'profile': safe_name,
+                'security_mode': current_mode.value,
+                'cleanup_complete': True,
+            },
         )
 
     old_password = (
@@ -139,7 +154,6 @@ def _migrate_existing_profile(
         new_password if target_mode is ProfileSecurityMode.ENCRYPTED else None
     )
     db_path = pm.paths.get_db_file()
-    journal_path, staged_path, backup_path = migration_paths(safe_name)
     key_manager = KeyManager(pm, old_password)
 
     if current_mode is ProfileSecurityMode.ENCRYPTED and (
@@ -188,27 +202,6 @@ def _migrate_existing_profile(
                 target_password,
                 _migration_checkpoint,
             )
-            source_blob_key = (
-                key_manager.get_blob_key()
-                if current_mode is ProfileSecurityMode.ENCRYPTED
-                else None
-            )
-            target_blob_key = (
-                staged_key_manager.get_blob_key()
-                if target_mode is ProfileSecurityMode.ENCRYPTED
-                else None
-            )
-            _migration_checkpoint('before_blob_migration')
-            migrated_blob_ids = migrate_persistent_blobs(
-                pm,
-                staged_pm,
-                current_mode,
-                target_mode,
-                source_blob_key,
-                target_blob_key,
-                _migration_checkpoint,
-            )
-            _migration_checkpoint('after_blob_migration')
             if db_path.exists():
                 _migration_checkpoint('during_db_copy')
                 SqlManager.export_database_copy(
@@ -217,8 +210,22 @@ def _migrate_existing_profile(
                     current_key=current_db_key,
                     target_key=target_db_key,
                 )
-            SqlManager.close_connection(staged_db_path)
+            try:
+                staged_sql = SqlManager(staged_db_path, staged_pm.config, target_db_key)
+                durable_segments = required_voice_segments(staged_sql)
+            finally:
+                SqlManager.close_connection(staged_db_path)
             _migration_checkpoint('after_target_db_creation')
+            _migration_checkpoint('before_blob_migration')
+            migrated_blob_ids = migrate_persistent_blobs(
+                pm,
+                staged_pm,
+                key_manager.get_blob_key,
+                staged_key_manager.get_blob_key,
+                durable_segments,
+                _migration_checkpoint,
+            )
+            _migration_checkpoint('after_blob_migration')
             _validate_staged_generation(
                 staged_pm,
                 staged_db_path,
@@ -243,6 +250,8 @@ def _migrate_existing_profile(
         return _migration_failure(safe_name, 'Security migration failed.')
 
     key_manager.clear_sensitive_state()
+    if journal_path.exists():
+        return _cleanup_pending(safe_name, target_mode)
     return ProfileOperationResult(
         True,
         ProfileOperationType.SECURITY_MODE_MIGRATED,
@@ -337,15 +346,8 @@ def _validate_staged_generation(
             SqlManager.close_connection(staged_db_path)
         if validation_key_manager.has_metor_key():
             validation_key_manager.get_metor_key()
-        validation_blob_key = (
-            validation_key_manager.get_blob_key()
-            if target_mode is ProfileSecurityMode.ENCRYPTED
-            else None
-        )
         validation_blob_store = open_blob_store(
-            staged_pm,
-            target_mode,
-            validation_blob_key,
+            staged_pm, validation_key_manager.get_blob_key
         )
         try:
             for index, blob_id in enumerate(migrated_blob_ids):
@@ -356,6 +358,21 @@ def _validate_staged_generation(
         staged_pm.validate_integrity()
     finally:
         validation_key_manager.clear_sensitive_state()
+
+
+def _cleanup_pending(
+    profile_name: str, mode: ProfileSecurityMode
+) -> ProfileOperationResult:
+    """Report the activated mode and the outstanding prior generation separately."""
+    return ProfileOperationResult(
+        False,
+        ProfileOperationType.SECURITY_CLEANUP_PENDING,
+        {
+            'profile': profile_name,
+            'security_mode': mode.value,
+            'cleanup_pending': True,
+        },
+    )
 
 
 def _migration_failure(profile_name: str, reason: str) -> ProfileOperationResult:

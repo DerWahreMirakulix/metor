@@ -25,34 +25,32 @@ class Crypto:
         """
         self._km: KeyManager = km
 
-    def sign_challenge(self, challenge_hex: str) -> Optional[str]:
+    def sign_challenge(self, proof: bytes) -> Optional[str]:
         """
         Signs a cryptographic challenge using the local Ed25519 secret key.
 
         Args:
-            challenge_hex (str): The random challenge string in hexadecimal format.
+            proof: Canonical, domain-separated peer handshake transcript.
 
         Returns:
             Optional[str]: The resulting signature in hex format, or None if signing fails.
         """
         try:
             pynacl_secret_key: bytes = self._km.get_metor_key()
-            signed_message: bytes = nacl.bindings.crypto_sign(
-                challenge_hex.encode('utf-8'), pynacl_secret_key
-            )
-            return signed_message[:64].hex()
+            signed_message: bytes = nacl.bindings.crypto_sign(proof, pynacl_secret_key)
+            return signed_message[: nacl.bindings.crypto_sign_BYTES].hex()
         except Exception:
             return None
 
     def verify_signature(
-        self, remote_onion: str, challenge_hex: str, signature_hex: str
+        self, remote_onion: str, proof: bytes, signature_hex: str
     ) -> bool:
         """
         Verifies a signature payload received from a remote peer against their onion address.
 
         Args:
             remote_onion (str): The public .onion address of the remote peer.
-            challenge_hex (str): The original challenge string that was sent.
+            proof: Locally reconstructed, domain-separated peer handshake transcript.
             signature_hex (str): The signature provided by the remote peer.
 
         Returns:
@@ -60,11 +58,13 @@ class Crypto:
         """
         try:
             public_key: bytes = decode_tor_v3_onion_public_key(remote_onion)
+            if len(signature_hex) != nacl.bindings.crypto_sign_BYTES * 2:
+                return False
             signature: bytes = bytes.fromhex(signature_hex)
+            if len(signature) != nacl.bindings.crypto_sign_BYTES:
+                return False
 
-            nacl.bindings.crypto_sign_open(
-                signature + challenge_hex.encode('utf-8'), public_key
-            )
+            nacl.bindings.crypto_sign_open(signature + proof, public_key)
             return True
 
         except Exception:

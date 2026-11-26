@@ -26,7 +26,8 @@ py-modules = [
     "metor.core.profile_destruction",
     "metor.core.profile_keys",
     "metor.core.tor",
-    "metor.core.tor_windows",
+    "metor.core.tor_process",
+    "metor.core.tor_control",
 ]
 
 [tool.setuptools.dynamic]
@@ -84,8 +85,6 @@ module = [
     "pysqlcipher3",
     "pysqlcipher3.*",
     "socks",
-    "stem",
-    "stem.*",
 ]
 ignore_missing_imports = true
 

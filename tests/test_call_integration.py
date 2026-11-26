@@ -119,6 +119,7 @@ class CallIntegrationTests(unittest.TestCase):
         assert port is not None
         client = MetorClient(
             port,
+            daemon_certificate=daemon._pm.get_daemon_certificate(),
             auth_provider=provider,
             timeout=Constants.DEFAULT_IPC_TIMEOUT,
             on_event=(lambda event: self._observe(side, event)) if side else None,

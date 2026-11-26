@@ -1,54 +1,26 @@
 """Blob transformation and database-reference validation for profile migrations."""
 
+from contextlib import closing
+import json
 from pathlib import Path
-from typing import Optional, cast
+from typing import TYPE_CHECKING, Callable
 
 from metor.data import SqlManager
 from metor.data.blob import (
-    BlobStore,
+    BlobLifecycle,
+    open_blob_store,
     EncryptedBlobStore,
     InvalidBlobIdError,
-    PlaintextBlobStore,
 )
-from metor.utils import secure_remove_path
+from metor.utils import Constants, secure_remove_path
 
 # Local Package Imports
 from metor.data.profile.migration.journal import MigrationCheckpoint
-from metor.data.profile.models import ProfileSecurityMode
 
-_BLOB_FILE_SUFFIX = '.blob'
-
-
-def open_blob_store(
-    profile_manager: object,
-    mode: ProfileSecurityMode,
-    blob_key: Optional[bytes],
-) -> BlobStore:
-    """Creates the mode-appropriate logical blob store for one profile generation.
-
-    Args:
-        profile_manager (object): Profile manager exposing storage paths.
-        mode (ProfileSecurityMode): Profile storage security mode.
-        blob_key (Optional[bytes]): PMK-derived key for encrypted storage.
-
-    Returns:
-        BlobStore: Mode-appropriate external-object store.
-    """
+if TYPE_CHECKING:
     from metor.data.profile.manager import ProfileManager
 
-    typed_manager = cast(ProfileManager, profile_manager)
-    if mode is ProfileSecurityMode.ENCRYPTED:
-        if blob_key is None:
-            raise ValueError('Encrypted blob migration requires a blob key.')
-        return EncryptedBlobStore(
-            typed_manager.paths.get_persistent_blob_dir(),
-            typed_manager.paths.get_temporary_blob_dir(),
-            blob_key,
-        )
-    return PlaintextBlobStore(
-        typed_manager.paths.get_persistent_blob_dir(),
-        typed_manager.paths.get_temporary_blob_dir(),
-    )
+_BLOB_FILE_SUFFIX = '.blob'
 
 
 def _persistent_blob_ids(persistent_dir: Path) -> list[str]:
@@ -78,61 +50,112 @@ def _persistent_blob_ids(persistent_dir: Path) -> list[str]:
     return sorted(blob_ids)
 
 
+def required_voice_segments(sql: SqlManager) -> dict[str, int]:
+    """Read finalized DROP ownership from the current archive and delivery spools."""
+    rows = sql.fetchall(
+        'SELECT DISTINCT COALESCE(a.payload, i.payload, o.payload) '
+        'FROM message_receipts r '
+        'LEFT JOIN message_archive a ON a.receipt_id = r.id '
+        'LEFT JOIN inbound_spool i ON i.receipt_id = r.id '
+        'LEFT JOIN outbox_spool o ON o.receipt_id = r.id '
+        "WHERE r.delivery = 'drop' AND r.content_type = 'voice' "
+        "AND r.status <> 'draft' AND COALESCE(a.payload,i.payload,o.payload) IS NOT NULL"
+    )
+    segments: dict[str, int] = {}
+    for (payload,) in rows:
+        if (
+            not isinstance(payload, str)
+            or len(payload.encode('utf-8')) > Constants.VOICE_METADATA_MAX_BYTES
+        ):
+            raise ValueError('Invalid retained Voice metadata.')
+        metadata = json.loads(payload)
+        if metadata['finalized'] is False:
+            continue
+        ids, sizes = metadata['chunk_ids'], metadata['chunk_sizes']
+        if (
+            metadata['finalized'] is not True
+            or not isinstance(ids, list)
+            or not isinstance(sizes, list)
+            or len(ids) != len(sizes)
+            or len(ids) > Constants.VOICE_MAX_SEGMENTS
+            or any(
+                type(size) is not int or not 0 < size <= Constants.VOICE_CHUNK_MAX_BYTES
+                for size in sizes
+            )
+            or type(metadata['size_bytes']) is not int
+            or not 0 <= metadata['size_bytes'] <= Constants.VOICE_TURN_HARD_MAX_BYTES
+            or sum(sizes) != metadata['size_bytes']
+        ):
+            raise ValueError('Invalid finalized Voice manifest.')
+        for blob_id, size in zip([metadata['blob_id'], *ids], [0, *sizes], strict=True):
+            if not isinstance(blob_id, str):
+                raise InvalidBlobIdError('Invalid Voice object identifier.')
+            EncryptedBlobStore._validate_blob_id(blob_id)
+            if blob_id in segments and segments[blob_id] != size:
+                raise ValueError('Conflicting Voice object lengths.')
+            segments[blob_id] = size
+    return segments
+
+
 def migrate_persistent_blobs(
-    source_pm: object,
-    staged_pm: object,
-    source_mode: ProfileSecurityMode,
-    target_mode: ProfileSecurityMode,
-    source_blob_key: Optional[bytes],
-    target_blob_key: Optional[bytes],
+    source_pm: 'ProfileManager',
+    staged_pm: 'ProfileManager',
+    load_source_key: Callable[[], bytes],
+    load_target_key: Callable[[], bytes],
+    required_segments: dict[str, int],
     checkpoint: MigrationCheckpoint,
 ) -> list[str]:
     """Transforms persistent blobs while explicitly closing both logical stores.
 
-    Temporary blobs are non-durable runtime spool state and are intentionally
-    discarded while the profile is offline.
+    Finalized DROP receipts can already own segments in the temporary namespace.
+    Other temporary spool objects are discarded while the profile is offline.
 
     Args:
-        source_pm (object): Active source profile manager.
-        staged_pm (object): Prepared target profile manager.
-        source_mode (ProfileSecurityMode): Active source storage mode.
-        target_mode (ProfileSecurityMode): Prepared target storage mode.
-        source_blob_key (Optional[bytes): Source PMK-derived blob key.
-        target_blob_key (Optional[bytes): Target PMK-derived blob key.
+        source_pm: Active source profile manager.
+        staged_pm: Prepared target profile manager.
+        load_source_key: Read the source blob key if its store is encrypted.
+        load_target_key: Read the target blob key if its store is encrypted.
+        required_segments: Sizes of every anchor and segment owned by a finalized DROP.
         checkpoint (MigrationCheckpoint): Internal deterministic fault-test hook.
 
     Returns:
         list[str]: Migrated logical blob identifiers.
     """
-    from metor.data.profile.manager import ProfileManager
-
-    typed_source = cast(ProfileManager, source_pm)
-    typed_target = cast(ProfileManager, staged_pm)
-    blob_ids = _persistent_blob_ids(typed_source.paths.get_persistent_blob_dir())
-    secure_remove_path(typed_target.paths.get_persistent_blob_dir())
-    secure_remove_path(typed_target.paths.get_temporary_blob_dir())
-    source_store = open_blob_store(typed_source, source_mode, source_blob_key)
-    target_store = open_blob_store(typed_target, target_mode, target_blob_key)
-    try:
+    persistent_ids = set(
+        _persistent_blob_ids(source_pm.paths.get_persistent_blob_dir())
+    )
+    blob_ids = sorted(persistent_ids | required_segments.keys())
+    secure_remove_path(staged_pm.paths.get_persistent_blob_dir())
+    secure_remove_path(staged_pm.paths.get_temporary_blob_dir())
+    with (
+        closing(open_blob_store(source_pm, load_source_key)) as source_store,
+        closing(open_blob_store(staged_pm, load_target_key)) as target_store,
+    ):
         for index, blob_id in enumerate(blob_ids):
             checkpoint(f'before_blob_read:{index}')
-            plaintext = source_store.read(blob_id)
+            lifecycle = (
+                BlobLifecycle.PERSISTENT
+                if blob_id in persistent_ids
+                else BlobLifecycle.TEMPORARY
+            )
+            plaintext = source_store.read(blob_id, lifecycle)
+            if (
+                blob_id in required_segments
+                and len(plaintext) != required_segments[blob_id]
+            ):
+                raise ValueError(
+                    'Finalized Voice object length does not match the receipt.'
+                )
             checkpoint(f'before_blob_write:{index}')
             target_store.put_with_id(blob_id, plaintext)
             checkpoint(f'after_blob_write:{index}')
             if target_store.read(blob_id) != plaintext:
                 raise ValueError('Migrated blob validation failed.')
             checkpoint(f'after_blob_validation:{index}')
-        if (
-            _persistent_blob_ids(typed_target.paths.get_persistent_blob_dir())
-            != blob_ids
-        ):
+        if _persistent_blob_ids(staged_pm.paths.get_persistent_blob_dir()) != blob_ids:
             raise ValueError('Migrated persistent blob set is incomplete.')
         checkpoint('after_all_blob_writes')
         return blob_ids
-    finally:
-        source_store.close()
-        target_store.close()
 
 
 def _quote_sql_identifier(identifier: str) -> str:

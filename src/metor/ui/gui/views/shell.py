@@ -13,7 +13,7 @@ from metor.core.api import Delivery
 from metor.ui.gui.constants import Geometry
 from metor.ui.gui.runtime import GuiController, conversation_rows
 from metor.ui.gui.state import Route
-from metor.ui.gui.widgets import Action, Label, PointerTooltip, TextField
+from metor.ui.gui.widgets import Action, Label, PointerTooltip, SecretInput, TextField
 from metor.ui.gui.theme import color
 
 # Local Package Imports
@@ -83,6 +83,13 @@ class Shell(BoxLayout):
         self._background.pos = self.pos
         self._background.size = self.size
 
+    def _clear_rendered_widgets(self) -> None:
+        """Revoke native credential buffers before removing the form that owns them."""
+        for widget in self.walk(restrict=True):
+            if isinstance(widget, SecretInput):
+                widget.clear_secret()
+        self.clear_widgets()
+
     def render(self) -> None:
         """Recomposes foreground panels from current authorized state.
 
@@ -110,7 +117,7 @@ class Shell(BoxLayout):
             self._master = None
             self.controller.voice.depart()
             self.controller.playback.stop()
-            self.clear_widgets()
+            self._clear_rendered_widgets()
             self.add_widget(Label('Increase the window size or reduce display scaling'))
             return
         state = self.controller.state
@@ -392,7 +399,7 @@ class Shell(BoxLayout):
                     widget.cancel_input()
                 elif isinstance(widget, TextField):
                     widget.focus = False
-        self.clear_widgets()
+        self._clear_rendered_widgets()
         self._peer_key = None
         self._peer_panel = None
         self._contacts_panel = None

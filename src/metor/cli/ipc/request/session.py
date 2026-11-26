@@ -12,6 +12,7 @@ from metor.core.api import (
 )
 from metor.data import ProfileManager, SettingKey
 from metor.client import BufferedIpcEventReader, IpcAuthExchange
+from metor.shared.ipc_tls import authenticate_daemon
 
 # Local Package Imports
 from metor.cli.prompt import PromptOutputSpacer
@@ -107,7 +108,9 @@ class IpcRequestSession:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.settimeout(self._pm.config.get_float(SettingKey.IPC_TIMEOUT))
             sock.connect(('127.0.0.1', port))
-            return self.execute_socket_result(sock, cmd, wait_for_response)
+            certificate = self._pm.get_daemon_certificate()
+            with authenticate_daemon(sock, certificate) as channel:
+                return self.execute_socket_result(channel, cmd, wait_for_response)
 
     def execute_socket_result(
         self,

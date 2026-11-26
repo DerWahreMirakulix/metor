@@ -1,7 +1,7 @@
 """Message persistence service backed by the centralized SQL message store."""
 
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 
 from metor.utils import Constants
 from metor.core.api import ContentType, Delivery
@@ -160,8 +160,10 @@ class MessageManager:
         """
         return self._messages.has_inbound_message(contact_onion, msg_id)
 
-    def has_inbound_text_receipt(self, contact_onion: str, msg_id: str) -> bool:
-        """Reports whether an inbound logical identity is typed as text.
+    def matches_inbound_text(
+        self, contact_onion: str, msg_id: str, payload: str
+    ) -> bool:
+        """Reports whether an inbound logical identity matches the original text.
 
         Args:
             contact_onion (str): Authenticated peer identity.
@@ -170,7 +172,7 @@ class MessageManager:
         Returns:
             bool: True only for an existing inbound text receipt.
         """
-        return self._messages.has_inbound_text_receipt(contact_onion, msg_id)
+        return self._messages.matches_inbound_text(contact_onion, msg_id, payload)
 
     def store_inbound_drop_text(
         self,
@@ -764,6 +766,10 @@ class MessageManager:
         return self._messages.get_chat_page(
             contact_onion, limit, max_payload_bytes, before_msg_id, before_direction
         )
+
+    def finish_voice_deletions(self, remove: Callable[[str], None] | None) -> bool:
+        """Reconcile durable DROP cleanup intents with the owning external store."""
+        return self._messages.finish_voice_deletions(remove)
 
     def get_drop_voice_payloads(
         self,

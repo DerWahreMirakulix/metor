@@ -3,13 +3,14 @@
 import io
 import os
 import subprocess
+import threading
 import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
-from metor.core.tor_windows import launch_tor_without_console
+from metor.core.tor_process import launch_tor
 from metor.utils import Constants
 
 
@@ -18,8 +19,6 @@ _TOR_CONFIG = {
     'ControlPort': '10242',
     'CookieAuthentication': '1',
     'DataDirectory': 'C:/test/tor-data',
-    'HiddenServiceDir': 'C:/test/hidden-service',
-    'HiddenServicePort': '80 127.0.0.1:10243',
 }
 
 
@@ -37,10 +36,10 @@ class WindowsProcessLaunchTests(unittest.TestCase):
         with (
             patch.object(subprocess, 'CREATE_NO_WINDOW', 0x08000000, create=True),
             patch(
-                'metor.core.tor_windows.subprocess.Popen', return_value=child
+                'metor.core.tor_process.subprocess.Popen', return_value=child
             ) as spawn,
         ):
-            result = launch_tor_without_console(
+            result = launch_tor(
                 tor_cmd='C:/trusted/tor.exe',
                 config=_TOR_CONFIG,
                 init_msg_handler=updates.append,
@@ -54,6 +53,50 @@ class WindowsProcessLaunchTests(unittest.TestCase):
         self.assertNotIn('hidden-service', repr(updates))
         child.kill.assert_not_called()
 
+    def test_silent_tor_launched_by_worker_times_out_and_is_reaped(self) -> None:
+        reading, killed, finished = (
+            threading.Event(),
+            threading.Event(),
+            threading.Event(),
+        )
+        process = Mock()
+        process.stdin = io.BytesIO()
+        process.poll.return_value = None
+
+        def silent_output(_limit: int) -> bytes:
+            reading.set()
+            killed.wait(5)
+            return b''
+
+        process.stdout.readline.side_effect = silent_output
+        process.kill.side_effect = killed.set
+        failures: list[Exception] = []
+
+        def run() -> None:
+            try:
+                launch_tor(tor_cmd='tor', config=_TOR_CONFIG)
+            except OSError as exc:
+                failures.append(exc)
+            finally:
+                finished.set()
+
+        with (
+            patch('metor.core.tor_process.subprocess.Popen', return_value=process),
+            patch.object(Constants, 'TOR_BOOTSTRAP_TIMEOUT_SEC', 0.1),
+        ):
+            worker = threading.Thread(target=run, daemon=True)
+            worker.start()
+            try:
+                self.assertTrue(reading.wait(2))
+                self.assertTrue(finished.wait(2))
+                self.assertTrue(killed.is_set())
+            finally:
+                killed.set()
+                worker.join(3)
+        process.wait.assert_called_once_with(timeout=Constants.TOR_KILL_TIMEOUT_SEC)
+        self.assertEqual(len(failures), 1)
+        self.assertIn('timed out', str(failures[0]))
+
     def test_tor_failed_bootstrap_reaps_its_child(self) -> None:
         """A failed Tor bootstrap cannot leave the spawned process behind."""
         child = Mock()
@@ -62,20 +105,20 @@ class WindowsProcessLaunchTests(unittest.TestCase):
         child.poll.return_value = None
         with (
             patch.object(subprocess, 'CREATE_NO_WINDOW', 0x08000000, create=True),
-            patch('metor.core.tor_windows.subprocess.Popen', return_value=child),
+            patch('metor.core.tor_process.subprocess.Popen', return_value=child),
             self.assertRaises(OSError),
         ):
-            launch_tor_without_console(tor_cmd='C:/trusted/tor.exe', config=_TOR_CONFIG)
+            launch_tor(tor_cmd='C:/trusted/tor.exe', config=_TOR_CONFIG)
         child.kill.assert_called_once_with()
         child.wait.assert_called_once_with(timeout=Constants.TOR_KILL_TIMEOUT_SEC)
 
     def test_tor_rejects_config_injection_before_spawn(self) -> None:
         """Configuration values cannot add arbitrary Tor directives."""
         with (
-            patch('metor.core.tor_windows.subprocess.Popen') as spawn,
+            patch('metor.core.tor_process.subprocess.Popen') as spawn,
             self.assertRaises(ValueError),
         ):
-            launch_tor_without_console(
+            launch_tor(
                 tor_cmd='C:/trusted/tor.exe',
                 config={**_TOR_CONFIG, 'DataDirectory': 'C:/test\nRunAsDaemon 1'},
             )
@@ -96,9 +139,7 @@ class WindowsProcessLaunchTests(unittest.TestCase):
             )
             child_path.chmod(0o700)
             with patch.object(subprocess, 'CREATE_NO_WINDOW', 0, create=True):
-                process = launch_tor_without_console(
-                    tor_cmd=str(child_path), config=_TOR_CONFIG
-                )
+                process = launch_tor(tor_cmd=str(child_path), config=_TOR_CONFIG)
             self.assertEqual(process.wait(timeout=Constants.TOR_KILL_TIMEOUT_SEC), 0)
 
 

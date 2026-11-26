@@ -1,6 +1,7 @@
 """Profile-specific CLI dispatch mixin."""
 
 import argparse
+from pathlib import Path
 from typing import List, Optional, Protocol
 
 from metor.data import ProfileManager, ProfileSecurityMode
@@ -8,6 +9,7 @@ from metor.cli.help import Help
 from metor.cli.handlers import CommandHandlers
 from metor.cli.proxy import CliProxy
 from metor.cli.prompt import PromptAbortedError, prompt_hidden
+from metor.data.profile.ipc_identity import trust_remote_certificate
 
 
 class _ProfilesDispatcherProtocol(Protocol):
@@ -97,6 +99,23 @@ class ProfilesDispatchMixin:
                     master_password=master_password,
                 )
             )
+            return
+
+        if sub == 'trust':
+            if len(self._extra) != 2:
+                self._print_usage('profiles')
+                return
+            try:
+                trust_remote_certificate(
+                    ProfileManager(self._extra[0]), Path(self._extra[1])
+                )
+            except (OSError, ValueError):
+                print(
+                    'Could not install the public daemon certificate for this remote profile.'
+                )
+                self._exit_code = 1
+            else:
+                print('Remote daemon certificate installed.')
             return
 
         if sub == 'migrate':

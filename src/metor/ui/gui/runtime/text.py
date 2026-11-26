@@ -228,10 +228,7 @@ class TextController:
             reservation = self.reservations.get(reserved_action)
             if reservation is not None:
                 item, size = reservation
-                if (
-                    not isinstance(event_receipt, ReadReceiptEvent)
-                    or event_receipt.onion == item.peer
-                ):
+                if event_receipt.onion == item.peer:
                     status = (
                         MessageStatusCode.READ
                         if isinstance(event_receipt, ReadReceiptEvent)

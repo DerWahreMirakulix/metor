@@ -303,6 +303,28 @@ class ProcessManager:
         return identity.pid
 
     @staticmethod
+    def recorded_lifetime_ended(pid_file: Path, profile_name: str, role: str) -> bool:
+        """Require proof of an expired lifetime before discarding residual PID metadata."""
+        identity = ProcessManager._read_process_identity(pid_file)
+        if (
+            identity is None
+            or identity.role != role
+            or identity.profile_name != profile_name
+            or identity.installation_root != str(ProcessManager._installation_root())
+        ):
+            return False
+        try:
+            process = psutil.Process(identity.pid)
+            return (
+                abs(float(process.create_time()) - identity.create_time)
+                >= Constants.PROCESS_CREATE_TIME_TOLERANCE_SEC
+            )
+        except (psutil.NoSuchProcess, psutil.ZombieProcess):
+            return True
+        except (OSError, psutil.AccessDenied):
+            return False
+
+    @staticmethod
     def is_pid_running(pid: int) -> Optional[bool]:
         """
         Checks whether one process ID still belongs to a live OS process.
@@ -662,7 +684,10 @@ class ProcessManager:
         except (OSError, ValueError, psutil.AccessDenied) as exc:
             logger.warning('Process cleanup ownership check failed: %s', exc)
         finally:
-            if should_remove_pid_file:
+            if (
+                should_remove_pid_file
+                and ProcessManager._read_process_identity(pid_file) == identity
+            ):
                 pid_file.unlink(missing_ok=True)
 
         return killed

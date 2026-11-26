@@ -1,10 +1,4 @@
-"""Start the trusted Windows Tor executable without creating a console window.
-
-Stem's launch helper starts both its version probe and Tor with a bare Popen.
-Windows console executables then create a window when Metor was started through
-the graphical entry point. This small Windows path keeps Tor configuration on
-stdin and applies the process flag at the actual Tor creation boundary.
-"""
+"""Supervise the profile-owned Tor executable and its bounded bootstrap on both hosts."""
 
 import os
 import queue
@@ -24,8 +18,6 @@ _CONFIG_KEYS = frozenset(
         'ControlPort',
         'CookieAuthentication',
         'DataDirectory',
-        'HiddenServiceDir',
-        'HiddenServicePort',
     }
 )
 
@@ -47,18 +39,20 @@ def _tor_config_bytes(config: Mapping[str, str]) -> bytes:
         lines.append(f'{key} {value}\n')
     lines.append('Log NOTICE stdout\n')
     payload = ''.join(lines).encode('utf-8')
-    if len(payload) > Constants.WINDOWS_TOR_CONFIG_MAX_BYTES:
+    if len(payload) > Constants.TOR_CONFIG_MAX_BYTES:
         raise ValueError('Tor configuration exceeds its size limit.')
     return payload
 
 
-def launch_tor_without_console(
+def launch_tor(
     *,
     tor_cmd: str,
     config: Mapping[str, str],
     init_msg_handler: Callable[[str], None] | None = None,
+    cancelled: Callable[[], bool] | None = None,
+    process_owner: Callable[[subprocess.Popen[bytes]], None] | None = None,
 ) -> subprocess.Popen[bytes]:
-    """Launch and supervise Windows Tor bootstrap with a bounded wait.
+    """Launch and supervise Tor bootstrap with a bounded wait.
 
     A background reader drains the child's pipe for its whole lifetime. Only
     bootstrap percentages reach the optional diagnostics callback. The caller
@@ -73,6 +67,8 @@ def launch_tor_without_console(
     Raises:
         OSError: Spawn, configuration delivery, timeout, or bootstrap failed.
     """
+    if cancelled is not None and cancelled():
+        raise OSError('Tor bootstrap was cancelled.')
     payload = _tor_config_bytes(config)
     creation_flags: int = int(getattr(subprocess, 'CREATE_NO_WINDOW', 0))
     if os.name == 'nt' and creation_flags == 0:
@@ -85,6 +81,8 @@ def launch_tor_without_console(
         creationflags=creation_flags,
     )
     try:
+        if process_owner is not None:
+            process_owner(process)
         if process.stdin is None or process.stdout is None:
             raise OSError('Tor pipes are unavailable.')
         process.stdin.write(payload)
@@ -97,7 +95,7 @@ def launch_tor_without_console(
             assert process.stdout is not None
             try:
                 while chunk := process.stdout.readline(
-                    Constants.WINDOWS_TOR_LOG_LINE_MAX_BYTES
+                    Constants.TOR_LOG_LINE_MAX_BYTES
                 ):
                     match = _BOOTSTRAP.search(chunk)
                     if match is None:
@@ -128,8 +126,10 @@ def launch_tor_without_console(
             name='metor-tor-output',
             daemon=True,
         ).start()
-        deadline = time.monotonic() + Constants.WINDOWS_TOR_BOOTSTRAP_TIMEOUT_SEC
+        deadline = time.monotonic() + Constants.TOR_BOOTSTRAP_TIMEOUT_SEC
         while True:
+            if cancelled is not None and cancelled():
+                raise OSError('Tor bootstrap was cancelled.')
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise OSError('Tor bootstrap timed out.')

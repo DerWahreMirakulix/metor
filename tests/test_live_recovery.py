@@ -372,6 +372,40 @@ class LiveRecoveryTests(unittest.TestCase):
         self.assertFalse(self.state.has_unrevoked_live_context('peer'))
         self.assertIsNone(StateTracker().accepted_live_context_generation('peer'))
 
+    def test_pending_socket_cannot_dispatch_application_frames(self) -> None:
+        """Only an accepted socket can publish content or change delivery receipts."""
+        for frame in (
+            b'/msg id content',
+            b'/ack id',
+            b'/read id',
+            b'/drop_ack id',
+            b'/voice_begin content',
+        ):
+            with self.subTest(frame=frame):
+                local, remote = socket.socketpair()
+                self.addCleanup(remote.close)
+                self.state.add_outbound_attempt('peer')
+                self.state.bind_outbound_socket('peer', local)
+                receiver = StreamReceiver(
+                    self.contacts,
+                    self.history,
+                    self.state,
+                    self.router,
+                    self.events.append,
+                    self.controller.disconnect,
+                    self.controller.reject,
+                    self.config,
+                )
+                receiver._receiver_target('peer', local, frame + b'\n', True)
+                for method in (
+                    'process_incoming_msg',
+                    'process_incoming_ack',
+                    'process_incoming_read_receipt',
+                    'process_incoming_drop_ack',
+                    'process_voice_frame',
+                ):
+                    getattr(self.router, method).assert_not_called()
+
     def test_cancelled_outbound_socket_cannot_admit_a_late_acceptance(self) -> None:
         """A peer acceptance received after exact Cancel cannot recreate a context."""
         local, remote = socket.socketpair()

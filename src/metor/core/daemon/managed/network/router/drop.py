@@ -97,6 +97,9 @@ class DropMessageRouter:
         except ValueError:
             return False
         with self._transition_lock:
+            if not self.allows_inbound_drops():
+                self.reject_disabled_drop(conn)
+                return False
             return self._store_decoded_drop(
                 conn, onion, msg_id, content, timestamp, transport
             )
@@ -198,10 +201,9 @@ class DropMessageRouter:
         Returns:
             None
         """
-        if self._config.get_bool(SettingKey.ALLOW_DROPS):
-            self._process_inbound_drop_frame(
-                conn, onion, payload_id, b64_payload, 'session'
-            )
+        self._process_inbound_drop_frame(
+            conn, onion, payload_id, b64_payload, 'session'
+        )
 
     def allows_inbound_drops(self) -> bool:
         """Returns the shared semantic DROP admission policy.

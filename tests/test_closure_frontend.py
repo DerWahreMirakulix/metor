@@ -23,6 +23,14 @@ from metor.utils import Constants
 class ClosureFrontendTests(unittest.TestCase):
     """A failed attempt is recoverable; successful start receipts prevent duplication."""
 
+    def setUp(self) -> None:
+        # Startup is simulated and never creates a listener or sends credentials.
+        self.enterContext(
+            patch.object(
+                ProfileManager, 'get_daemon_certificate', return_value='scripted host'
+            )
+        )
+
     def test_public_missing_create_cancel_transient_start_and_retry(self) -> None:
         with (
             TemporaryDirectory() as root,
@@ -116,6 +124,46 @@ class ClosureFrontendTests(unittest.TestCase):
             self.assertEqual(endpoint.port, 37413)
             self.assertTrue(endpoint.remote)
             start.assert_not_called()
+
+    def test_remote_pairing_imports_only_the_verified_public_certificate(self) -> None:
+        from private_fixtures import PrivateTemporaryDirectory
+        from metor.data.profile.ipc_identity import (
+            daemon_tls_context,
+            read_daemon_certificate,
+            trust_remote_certificate,
+        )
+
+        with (
+            PrivateTemporaryDirectory() as root,
+            patch.object(Constants, 'DATA', Path(root)),
+        ):
+            origin = ProfileManager('server')
+            origin.initialize()
+            directory = origin.paths.get_config_dir()
+            daemon_tls_context(directory)
+            self.assertTrue(
+                ProfileManager.add_profile_folder(
+                    'forward', is_remote=True, port=50051
+                ).success
+            )
+            remote = ProfileManager('forward')
+            with self.assertRaises(FileNotFoundError):
+                read_daemon_certificate(remote.paths.get_config_dir())
+            with self.assertRaises(ValueError):
+                trust_remote_certificate(remote, directory / 'ipc-daemon.pem')
+            trust_remote_certificate(remote, directory / 'ipc-daemon.crt')
+            self.assertEqual(
+                read_daemon_certificate(remote.paths.get_config_dir()),
+                read_daemon_certificate(directory),
+            )
+            self.assertFalse(
+                (remote.paths.get_config_dir() / 'ipc-daemon.pem').exists()
+            )
+            daemon_tls_context(directory)
+            self.assertEqual(
+                read_daemon_certificate(remote.paths.get_config_dir()),
+                read_daemon_certificate(directory),
+            )
 
 
 if __name__ == '__main__':

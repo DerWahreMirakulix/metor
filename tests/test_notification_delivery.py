@@ -64,12 +64,12 @@ class NotificationDeliveryTests(unittest.TestCase):
             try:
                 service.dispatch(NotificationPayload('in-flight'))
                 self.assertTrue(started.wait(1))
+                service.dispatch(NotificationPayload('revoked-before-reenabling'))
+                service.discard_pending()
                 service.dispatch(NotificationPayload('queued-for-first'))
                 route = ''
                 service.dispatch(NotificationPayload('disabled'))
                 route = json.dumps({'type': 'second'})
-                service.dispatch(NotificationPayload('previous-configuration'))
-                service.discard_pending()
                 expected = NotificationPayload('new')
                 service.dispatch(expected)
                 release.set()

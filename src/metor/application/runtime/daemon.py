@@ -235,14 +235,7 @@ def _build_daemon_start_timeout(pm: ProfileManager, *, start_locked: bool) -> fl
         return baseline
 
     retries: int = pm.config.get_int(SettingKey.MAX_TOR_RETRIES)
-    tor_start_budget: float = (
-        retries * Constants.UNIX_TOR_TIMEOUT
-        + max(0, retries - 1) * Constants.TOR_BOOTSTRAP_RETRY_SEC
-        + Constants.TOR_HOSTNAME_POLL_RETRIES * Constants.TOR_BOOTSTRAP_POLL_SEC
-        + Constants.TOR_PROXY_READY_ATTEMPTS
-        * (Constants.TOR_PROXY_READY_TIMEOUT_SEC + Constants.TOR_PROXY_READY_RETRY_SEC)
-        + Constants.LISTENER_READY_TIMEOUT
-    )
+    tor_start_budget = Constants.tor_start_budget(retries)
     # The configured IPC wait also covers profile validation and the password KDF.
     return max(
         baseline,
@@ -543,6 +536,10 @@ def run_managed_daemon(
             if pm.is_daemon_running():
                 return
             raise
+        if not pm.exists():
+            raise DaemonProfileMissingError(
+                f"Profile '{pm.profile_name}' does not exist."
+            )
         prepared: DaemonStartPreparation = prepare_managed_daemon_start(
             pm, start_locked=start_locked
         )

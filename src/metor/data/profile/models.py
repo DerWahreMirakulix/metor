@@ -159,6 +159,7 @@ class ProfileOperationType(str, Enum):
     SECURITY_MODE_UNCHANGED = 'security_mode_unchanged'
     SECURITY_MODE_MIGRATED = 'security_mode_migrated'
     SECURITY_MIGRATION_FAILED = 'security_migration_failed'
+    SECURITY_CLEANUP_PENDING = 'security_cleanup_pending'
     PROFILE_NOT_FOUND = 'profile_not_found'
     CANNOT_REMOVE_ACTIVE = 'cannot_remove_active'
     CANNOT_REMOVE_DEFAULT = 'cannot_remove_default'

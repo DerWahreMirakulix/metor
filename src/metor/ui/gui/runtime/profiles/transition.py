@@ -48,6 +48,7 @@ class ProfileTransition:
         self.owner_loss_supported = False
         self.phase = ''
         self._cancelled = threading.Event()
+        self._candidate_lock = threading.Lock()
         self._candidate: ActivatedProfile | None = None
         self._interactions: Interactions | None = None
         self._error: ProfileSwitchError | None = None
@@ -79,7 +80,7 @@ class ProfileTransition:
         owner = controller.voice_owner.token
         capture = controller.voice.worker
         unresolved = controller.voice.press.phase is PressPhase.FAILED
-        self._cancelled.clear()
+        cancelled = self._cancelled = threading.Event()
         self._candidate = None
         self._interactions = None
         self._error = None
@@ -108,7 +109,7 @@ class ProfileTransition:
             Returns:
                 None
             """
-            if self._cancelled.is_set():
+            if cancelled.is_set():
                 raise RuntimeError('Lifecycle cancelled')
             if capture is not None:
                 capture.request_stop()
@@ -126,7 +127,7 @@ class ProfileTransition:
                 )
                 if result is None:
                     raise RuntimeError('Owner release unconfirmed')
-            if self._cancelled.is_set():
+            if cancelled.is_set():
                 raise RuntimeError('Lifecycle cancelled')
 
         def factory(name: str) -> MetorClient:
@@ -137,14 +138,14 @@ class ProfileTransition:
             Returns:
                 MetorClient: Inert candidate with its own authentication bridge.
             """
-            if self._cancelled.is_set() or state.generation != generation:
+            if cancelled.is_set() or state.generation != generation:
                 raise RuntimeError('Activation abandoned')
             selected = controller.context.host.select_profile(name)
             if not selected.exists:
                 raise RuntimeError('Selected profile no longer exists')
             interactions = Interactions(generation + 1, controller.mailbox)
             self._interactions = interactions
-            if self._cancelled.is_set() or state.generation != generation:
+            if cancelled.is_set() or state.generation != generation:
                 interactions.cancel()
                 raise RuntimeError('Activation abandoned')
             controller.interactions.cancel()
@@ -160,6 +161,7 @@ class ProfileTransition:
                 IpcEvent | None: Completion is installed by the lifecycle owner.
             """
             candidate: MetorClient | None = None
+            published = False
             try:
                 if target is None:
                     phase(ProfileSwitchPhase.CAPTURE_FINALIZATION)
@@ -175,15 +177,20 @@ class ProfileTransition:
                 else:
                     coordinator = ProfileRuntimeCoordinator(client, factory)
                     coordinator.switch(
-                        target, finalize_active_capture=finish_capture, on_phase=phase
+                        target,
+                        finalize_active_capture=finish_capture,
+                        on_phase=phase,
+                        first_page_only=True,
                     )
                     candidate = coordinator.client
                     initialized = candidate.init_event
                     if initialized is None:
                         raise RuntimeError('Candidate initialization unavailable')
-                    self._candidate = controller.activation.hydrate(
-                        candidate, initialized
-                    )
+                    hydrated = controller.activation.hydrate(candidate, initialized)
+                    with self._candidate_lock:
+                        if not cancelled.is_set():
+                            self._candidate = hydrated
+                            published = True
             except ProfileSwitchError as exc:
                 self._error = exc
             except Exception:
@@ -196,12 +203,10 @@ class ProfileTransition:
                 )
             finally:
                 if self._interactions is not None:
+                    self._interactions.release_candidate()
                     self._interactions.startup_secret(None)
-                if candidate is not None and (
-                    self._error is not None or self._cancelled.is_set()
-                ):
+                if candidate is not None and not published:
                     candidate.disconnect()
-                    self._candidate = None
             return None
 
         if not controller.submit('lifecycle:complete', run):
@@ -369,7 +374,15 @@ class ProfileTransition:
             None
         """
         if self.active:
-            self._cancelled.set()
+            with self._candidate_lock:
+                self._cancelled.set()
+                candidate, self._candidate = self._candidate, None
+            if candidate is not None:
+                threading.Thread(
+                    target=candidate.client.disconnect,
+                    name='metor-gui-abandon-candidate',
+                    daemon=True,
+                ).start()
             if self._interactions is not None:
                 self._interactions.cancel()
         self.active = False

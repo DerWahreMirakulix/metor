@@ -364,6 +364,16 @@ class ContactManager:
         """
         return self._peers.cleanup_orphans(active_onions)
 
+    def _address_or_alias(self, target: Optional[str]) -> Optional[str]:
+        """A canonical Tor identity is absolute, even when a different contact uses it as an alias."""
+        if not target:
+            return None
+        try:
+            decode_tor_v3_onion_public_key(target)
+        except ValueError:
+            return self.get_onion_by_alias(target) or clean_onion(target)
+        return clean_onion(target)
+
     def resolve_target(self, target: Optional[str]) -> Optional[Tuple[str, str]]:
         """
         Resolves a generic target string into a guaranteed alias/onion tuple.
@@ -374,9 +384,7 @@ class ContactManager:
         Returns:
             Optional[Tuple[str, str]]: A tuple containing the resolved alias and clean onion.
         """
-        onion = self.get_onion_by_alias(target)
-        if not onion and target:
-            onion = clean_onion(target)
+        onion = self._address_or_alias(target)
 
         alias = self.get_alias_by_onion(onion)
         if alias and onion:
@@ -396,9 +404,7 @@ class ContactManager:
         Returns:
             Optional[Tuple[str, str]]: A tuple containing the resolved alias and clean onion.
         """
-        onion = self.get_onion_by_alias(target)
-        if not onion and target:
-            onion = clean_onion(target)
+        onion = self._address_or_alias(target)
 
         alias = self.ensure_alias_for_onion(onion)
         if alias and onion:
@@ -503,24 +509,34 @@ class ContactManager:
             raise ValueError(f"Missing alias mapping for onion '{clean_onion(onion)}'.")
         return alias
 
-    def get_contacts_data(self) -> ContactsSnapshot:
+    def get_contacts_data(self, onions: Optional[list[str]] = None) -> ContactsSnapshot:
         """
         Retrieves typed contacts data for UI presentation.
 
         Args:
-            None
+            onions: Optional bounded set of exact identities to recheck.
 
         Returns:
             ContactsSnapshot: Typed saved/discovered contact sets.
         """
+        with self._peers.alias_mutation() as repository:
+            if onions is None:
+                saved, discovered = (
+                    repository.list_saved(),
+                    repository.list_discovered(),
+                )
+            else:
+                rows = [
+                    peer
+                    for onion in dict.fromkeys(onions)
+                    if (peer := repository.get_by_onion(onion)) is not None
+                ]
+                saved = [peer for peer in rows if peer.is_saved]
+                discovered = [peer for peer in rows if not peer.is_saved]
         return ContactsSnapshot(
-            saved=tuple(
-                ContactRecord(peer.alias, peer.onion)
-                for peer in self._peers.list_saved()
-            ),
+            saved=tuple(ContactRecord(peer.alias, peer.onion) for peer in saved),
             discovered=tuple(
-                ContactRecord(peer.alias, peer.onion)
-                for peer in self._peers.list_discovered()
+                ContactRecord(peer.alias, peer.onion) for peer in discovered
             ),
             profile=self._pm.profile_name,
         )

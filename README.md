@@ -146,6 +146,14 @@ Use the installed environment for the commands below. On Linux run
 `.venv\Scripts\metor-gui.exe` on Windows or run
 `.venv/bin/metor chat --ui gui --start-daemon` on Linux.
 
+Before extracting a public release ZIP, obtain the full commit SHA for its
+version tag from the official Metor repository and verify its GitHub build
+attestation (replace `ARCHIVE.zip` and `COMMIT_SHA` below):
+
+```console
+gh attestation verify ARCHIVE.zip --repo DerWahreMirakulix/metor --signer-workflow DerWahreMirakulix/metor/.github/workflows/release.yml --source-ref refs/heads/main --source-digest COMMIT_SHA
+```
+
 The installer first checks the exact CPython minor/ABI, OS, architecture, and
 every file listed in `SHA256SUMS.txt`, including the pinned `pip` wheel. It then
 creates a local `.venv` and installs entirely from the bundled wheelhouse. For
@@ -413,16 +421,19 @@ metor profiles migrate <name> --to <encrypted|plaintext>
 
 Migration transforms the database, private secrets, keyslot, metadata, and all
 persistent blobs in one failure-atomic staged transaction. Blob IDs and database
-references remain unchanged. Non-durable temporary blob spool state is discarded
-while the profile is offline. Password changes instead validate and rewrap the
+references remain unchanged. Finalized Voice Drops keep their audio across a
+partially completed segment promotion. Non-durable temporary spool objects
+are discarded. If removal of the old profile copy is pending, the command
+reports the active mode and the pending cleanup. Repeat the command to retry. Password changes instead validate and rewrap the
 same PMK; they do not rewrite the database, secrets, or blobs.
 
 Want to run Metor on a server and connect securely from your laptop?
 
-1. **On the Server (VPS):** Install `metor`, then run `metor -p my_server daemon --locked`.
+1. **On the server** create a profile with a static port (`metor profiles add my_server --port 50051`) and start `metor -p my_server daemon --locked`.
 2. **On your Laptop:** Run `metor profiles add remote_node --remote --port 50051`.
-3. **Establish SSH Tunnel:** `ssh -N -L 50051:127.0.0.1:50051 user@server_ip`.
-4. **Start Chatting:** Run `metor -p remote_node chat` (Your local UI now securely controls the remote daemon over the forwarded port).
+3. **Pair the profile** by copying the server profile's public certificate through SSH after verifying the SSH host key (for example, `scp user@server_ip:.metor/my_server/ipc-daemon.crt ./ipc-daemon.crt`). On the laptop run `metor profiles trust remote_node ./ipc-daemon.crt`. Keep the private `ipc-daemon.pem` on the server. Repeat pairing only after an intentional identity change.
+4. **Open the tunnel** with `ssh -o ExitOnForwardFailure=yes -N -L 127.0.0.1:50051:127.0.0.1:50051 user@server_ip`.
+5. **Start chatting** with `metor -p remote_node chat`. The client checks the selected profile's daemon certificate before sending commands or asking for the unlock password.
 
 ### 5. Emergency & Cleanup
 

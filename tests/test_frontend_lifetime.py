@@ -32,11 +32,11 @@ from metor.core.api import (
     InitEvent,
     LockCommand,
     PrepareProfileExitCommand,
-    ProfileExitPreparedEvent,
 )
 from metor.core.daemon.managed import read_frontend_lifetime_token
 from metor.core.daemon.managed.frontend_lifetime import FrontendLifetime
 from metor.data import ProfileManager
+from metor.data.profile.ipc_identity import read_daemon_certificate
 from metor.shared import Constants as SharedConstants
 from metor.utils import Constants
 from metor.versioning import IPC_PROTOCOL_MIN_SUPPORTED, IPC_PROTOCOL_VERSION
@@ -344,6 +344,9 @@ class FrontendLifetimeProcessTests(unittest.TestCase):
         assert port is not None
         client = IpcClient(
             port=port,
+            daemon_certificate=read_daemon_certificate(
+                self._profile.paths.get_config_dir()
+            ),
             timeout=Constants.FRONTEND_FINAL_RELEASE_GRACE_SEC,
             on_event=lambda _event: None,
             on_disconnect=lambda: None,
@@ -395,7 +398,7 @@ class FrontendLifetimeProcessTests(unittest.TestCase):
                     prepared = clients[first].read_event(
                         timeout=Constants.FRONTEND_FINAL_RELEASE_GRACE_SEC
                     )
-                    self.assertIsInstance(prepared, ProfileExitPreparedEvent)
+                    self.assertIsInstance(prepared, DaemonLockedEvent)
                     self.assertEqual(
                         self._lease(clients[last], ids[last], token), 'joined'
                     )
@@ -495,7 +498,7 @@ class FrontendLifetimeProcessTests(unittest.TestCase):
             'from metor.core.api import FrontendLeaseCommand; '
             'token=sys.stdin.read(); '
             'client=IpcClient(port=int(sys.argv[1]),timeout=2.0,'
-            'on_event=lambda event:None,on_disconnect=lambda:None); '
+            'daemon_certificate=sys.argv[3],on_event=lambda event:None,on_disconnect=lambda:None); '
             'assert client.connect(start_listener=False); '
             'client.send_command(FrontendLeaseCommand(frontend_id=sys.argv[2],token=token)); '
             'event=client.read_event(timeout=2.0); '
@@ -503,7 +506,15 @@ class FrontendLifetimeProcessTests(unittest.TestCase):
             'sys.stdout.write("joined"); sys.stdout.flush(); os._exit(17)'
         )
         crashed = subprocess.Popen(
-            [sys.executable, '-I', '-c', crash_code, str(port), frontend_id],
+            [
+                sys.executable,
+                '-I',
+                '-c',
+                crash_code,
+                str(port),
+                frontend_id,
+                read_daemon_certificate(self._profile.paths.get_config_dir()),
+            ],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.DEVNULL,

@@ -199,7 +199,6 @@ class LiveMessageRouter:
             return
         alias, onion = resolved
         request_id: Optional[str] = get_current_request_id()
-        self._state.remember_message_request_id(msg_id, request_id, live_peer=onion)
         conn: Optional[socket.socket] = self._state.get_connection(onion)
         timestamp: str = datetime.now(timezone.utc).isoformat()
 
@@ -223,8 +222,12 @@ class LiveMessageRouter:
                     )
                     if local_result is not None:
                         local_result(TextRejectedEvent(onion, msg_id, limit_reason))
-                elif local_result is not None:
-                    local_result(TextAcceptedEvent(onion, msg_id, Delivery.LIVE))
+                else:
+                    self._state.remember_message_request_id(
+                        onion, msg_id, request_id, Delivery.LIVE
+                    )
+                    if local_result is not None:
+                        local_result(TextAcceptedEvent(onion, msg_id, Delivery.LIVE))
                 return
             if not self._config.get_bool(SettingKey.FALLBACK_TO_DROP):
                 self._broadcast(
@@ -245,7 +248,9 @@ class LiveMessageRouter:
                 status=MessageStatus.PENDING,
                 msg_id=msg_id,
             )
-            self._state.remember_message_request_id(msg_id, request_id, drop_peer=onion)
+            self._state.remember_message_request_id(
+                onion, msg_id, request_id, Delivery.DROP
+            )
             if local_result is not None:
                 local_result(TextAcceptedEvent(onion, msg_id, Delivery.DROP))
             self._hm.log_event(
@@ -284,6 +289,9 @@ class LiveMessageRouter:
                 if local_result is not None:
                     local_result(TextRejectedEvent(onion, msg_id, limit_reason))
                 return
+            self._state.remember_message_request_id(
+                onion, msg_id, request_id, Delivery.LIVE
+            )
             if local_result is not None:
                 local_result(TextAcceptedEvent(onion, msg_id, Delivery.LIVE))
             self._state.send_frame(
@@ -324,7 +332,7 @@ class LiveMessageRouter:
 
         alias: Optional[str] = self._cm.ensure_alias_for_onion(onion)
         if self._mm.has_inbound_message(onion, msg_id):
-            if not self._mm.has_inbound_text_receipt(onion, msg_id):
+            if not self._mm.matches_inbound_text(onion, msg_id, content):
                 return FrameAdmission.MALFORMED
             self._acknowledge(conn, msg_id)
             return FrameAdmission.ACCEPTED
@@ -425,8 +433,9 @@ class LiveMessageRouter:
         self._broadcast(
             AckEvent(
                 msg_id=msg_id,
+                onion=onion,
                 timestamp=timestamp,
-                request_id=self._state.pop_message_request_id(msg_id),
+                request_id=self._state.pop_message_request_id(onion, msg_id),
             )
         )
 
@@ -449,8 +458,9 @@ class LiveMessageRouter:
         self._broadcast(
             AckEvent(
                 msg_id=msg_id,
+                onion=onion,
                 timestamp=timestamp,
-                request_id=self._state.pop_message_request_id(msg_id),
+                request_id=self._state.pop_message_request_id(onion, msg_id),
             )
         )
 

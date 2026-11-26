@@ -155,6 +155,7 @@ class StreamReceiver:
         call_lost_callback: Optional[Callable[[socket.socket], None]] = None,
         call_keeps_transport_callback: Optional[Callable[[socket.socket], bool]] = None,
         call_owns_transport_callback: Optional[Callable[[socket.socket], bool]] = None,
+        operation_lock: Optional[threading.RLock] = None,
     ) -> None:
         """
         Initializes the StreamReceiver.
@@ -177,6 +178,7 @@ class StreamReceiver:
         self._state: StateTracker = state
         self._router: MessageRouter = router
         self._broadcast: Callable[[IpcEvent], None] = broadcast_callback
+        self._operation_lock = operation_lock or threading.RLock()
         self._config: 'Config' = config
         self._call_frame = call_frame_callback
         self._call_lost = call_lost_callback
@@ -250,6 +252,150 @@ class StreamReceiver:
             daemon=True,
         ).start()
 
+    def _dispatch_content(
+        self,
+        onion: str,
+        conn: socket.socket,
+        msg: str,
+        connection_origin: ConnectionOrigin,
+    ) -> bool:
+        """Route frames only while the exact accepted LIVE connection owns the transition."""
+        drop_ack_parts = msg.split(' ')
+        if len(drop_ack_parts) == 2 and drop_ack_parts[0] == TorCommand.DROP_ACK.value:
+            self._router.process_incoming_drop_ack(onion, drop_ack_parts[1])
+            ack_msg_id = None
+        else:
+            ack_msg_id = self._parse_ack_msg_id(msg)
+        if ack_msg_id is not None:
+            self._router.process_incoming_ack(onion, ack_msg_id)
+
+        elif msg.startswith(f'{TorCommand.READ.value} '):
+            parts = msg.split(' ', 1)
+            if len(parts) == 2:
+                self._router.process_incoming_read_receipt(
+                    onion,
+                    parts[1],
+                )
+
+        elif msg.startswith(f'{TorCommand.MSG.value} '):
+            parts = msg.split(' ', 2)
+            if len(parts) == 3:
+                msg_id = parts[1]
+                content: str = parts[2]
+
+                admission = self._router.process_incoming_msg(
+                    conn, onion, msg_id, content
+                )
+                if admission is not FrameAdmission.ACCEPTED:
+                    self._disconnect_cb(
+                        onion,
+                        True,
+                        False,
+                        conn,
+                        False,
+                        connection_origin,
+                        (
+                            ConnectionReasonCode.LIVE_BACKLOG_LIMIT_REACHED
+                            if admission is FrameAdmission.RESOURCE_LIMIT
+                            else ConnectionReasonCode.INVALID_PEER_FRAME
+                        ),
+                    )
+                    return False
+
+        elif any(
+            msg.startswith(f'{command.value} ')
+            for command in (
+                TorCommand.VOICE_BEGIN,
+                TorCommand.VOICE_CHUNK,
+                TorCommand.VOICE_END,
+            )
+        ):
+            parts = msg.split(' ', 1)
+            admission = (
+                self._router.process_voice_frame(conn, onion, parts[0], parts[1])
+                if len(parts) == 2
+                else FrameAdmission.MALFORMED
+            )
+            if admission is not FrameAdmission.ACCEPTED:
+                self._disconnect_cb(
+                    onion,
+                    True,
+                    False,
+                    conn,
+                    False,
+                    connection_origin,
+                    (
+                        ConnectionReasonCode.LIVE_VOICE_LIMIT_REACHED
+                        if admission is FrameAdmission.RESOURCE_LIMIT
+                        else ConnectionReasonCode.INVALID_PEER_FRAME
+                    ),
+                )
+                return False
+
+        elif msg.startswith(f'{TorCommand.VOICE_COMMIT_ACK.value} '):
+            parts = msg.split(' ')
+            if len(parts) == 2:
+                if not self._state.acknowledge_drop_transfer(
+                    onion, conn, parts[1], msg
+                ):
+                    self._router.process_voice_commit_ack(onion, parts[1])
+
+        elif msg.startswith(f'{TorCommand.VOICE_ACK.value} '):
+            parts = msg.split(' ')
+            if len(parts) == 3:
+                try:
+                    next_offset = int(parts[2])
+                except ValueError:
+                    next_offset = -1
+                if next_offset >= 0:
+                    if not self._state.acknowledge_drop_transfer(
+                        onion, conn, parts[1], msg
+                    ):
+                        self._router.process_voice_ack(onion, parts[1], next_offset)
+
+        elif any(
+            msg.startswith(f'{command.value} ')
+            for command in (
+                TorCommand.DROP_VOICE_BEGIN,
+                TorCommand.DROP_VOICE_CHUNK,
+                TorCommand.DROP_VOICE_END,
+            )
+        ):
+            parts = msg.split(' ', 1)
+            admission = (
+                self._router.process_drop_voice_frame(conn, onion, parts[0], parts[1])
+                if len(parts) == 2
+                else FrameAdmission.MALFORMED
+            )
+            if admission is FrameAdmission.POLICY_REJECTED:
+                return True
+            if admission is not FrameAdmission.ACCEPTED:
+                self._disconnect_cb(
+                    onion,
+                    True,
+                    False,
+                    conn,
+                    False,
+                    connection_origin,
+                    (
+                        ConnectionReasonCode.LIVE_VOICE_LIMIT_REACHED
+                        if admission is FrameAdmission.RESOURCE_LIMIT
+                        else ConnectionReasonCode.INVALID_PEER_FRAME
+                    ),
+                )
+                return False
+
+        elif msg.startswith(f'{TorCommand.DROP.value} '):
+            parts = msg.split(' ', 2)
+            if len(parts) == 3:
+                self._router.process_incoming_drop_over_session(
+                    conn,
+                    onion,
+                    parts[1],
+                    parts[2],
+                )
+        return True
+
     def _receiver_target(
         self,
         onion: str,
@@ -305,15 +451,21 @@ class StreamReceiver:
                 if not msg:
                     break
 
-                self._state.touch_session_activity(onion)
-
                 if msg.startswith(Constants.CALL_FRAME_PREFIX):
-                    if (
-                        awaiting_acceptance
-                        or self._call_frame is None
-                        or not self._call_frame(onion, conn, msg)
-                    ):
-                        break
+                    with self._operation_lock:
+                        if awaiting_acceptance or self._call_frame is None:
+                            break
+                        current_chat = self._state.get_connection(onion) is conn
+                        if not current_chat and (
+                            self._call_keeps_transport is None
+                            or not self._call_keeps_transport(conn)
+                            or msg.startswith(TorCommand.CALL_OFFER.value + ' ')
+                        ):
+                            break
+                        if not self._call_frame(onion, conn, msg):
+                            break
+                        if current_chat:
+                            self._state.touch_session_activity(onion)
                     continue
 
                 if (
@@ -325,7 +477,7 @@ class StreamReceiver:
                     continue
 
                 if msg == TorCommand.ACCEPTED.value:
-                    with self._state.snapshot_barrier():
+                    with self._operation_lock, self._state.snapshot_barrier():
                         if (
                             not awaiting_acceptance
                             or not self._state.is_current_outbound_socket(onion, conn)
@@ -419,149 +571,16 @@ class StreamReceiver:
                     remote_reject_intent = self._parse_reject_intent(msg)
                     break
                 else:
-                    drop_ack_parts = msg.split(' ')
-                    if (
-                        len(drop_ack_parts) == 2
-                        and drop_ack_parts[0] == TorCommand.DROP_ACK.value
-                    ):
-                        self._router.process_incoming_drop_ack(onion, drop_ack_parts[1])
-                        ack_msg_id = None
-                    else:
-                        ack_msg_id = self._parse_ack_msg_id(msg)
-                    if ack_msg_id is not None:
-                        self._router.process_incoming_ack(onion, ack_msg_id)
-
-                    elif msg.startswith(f'{TorCommand.READ.value} '):
-                        parts = msg.split(' ', 1)
-                        if len(parts) == 2:
-                            self._router.process_incoming_read_receipt(
-                                onion,
-                                parts[1],
-                            )
-
-                    elif msg.startswith(f'{TorCommand.MSG.value} '):
-                        parts = msg.split(' ', 2)
-                        if len(parts) == 3:
-                            msg_id = parts[1]
-                            content: str = parts[2]
-
-                            admission = self._router.process_incoming_msg(
-                                conn, onion, msg_id, content
-                            )
-                            if admission is not FrameAdmission.ACCEPTED:
-                                self._disconnect_cb(
-                                    onion,
-                                    True,
-                                    False,
-                                    None,
-                                    False,
-                                    connection_origin,
-                                    (
-                                        ConnectionReasonCode.LIVE_BACKLOG_LIMIT_REACHED
-                                        if admission is FrameAdmission.RESOURCE_LIMIT
-                                        else ConnectionReasonCode.INVALID_PEER_FRAME
-                                    ),
-                                )
-                                break
-
-                    elif any(
-                        msg.startswith(f'{command.value} ')
-                        for command in (
-                            TorCommand.VOICE_BEGIN,
-                            TorCommand.VOICE_CHUNK,
-                            TorCommand.VOICE_END,
-                        )
-                    ):
-                        parts = msg.split(' ', 1)
-                        admission = (
-                            self._router.process_voice_frame(
-                                conn, onion, parts[0], parts[1]
-                            )
-                            if len(parts) == 2
-                            else FrameAdmission.MALFORMED
-                        )
-                        if admission is not FrameAdmission.ACCEPTED:
-                            self._disconnect_cb(
-                                onion,
-                                True,
-                                False,
-                                None,
-                                False,
-                                connection_origin,
-                                (
-                                    ConnectionReasonCode.LIVE_VOICE_LIMIT_REACHED
-                                    if admission is FrameAdmission.RESOURCE_LIMIT
-                                    else ConnectionReasonCode.INVALID_PEER_FRAME
-                                ),
-                            )
+                    if awaiting_acceptance:
+                        break
+                    with self._operation_lock:
+                        if self._state.get_connection(onion) is not conn:
                             break
-
-                    elif msg.startswith(f'{TorCommand.VOICE_COMMIT_ACK.value} '):
-                        parts = msg.split(' ')
-                        if len(parts) == 2:
-                            if not self._state.acknowledge_drop_transfer(
-                                onion, conn, parts[1], msg
-                            ):
-                                self._router.process_voice_commit_ack(onion, parts[1])
-
-                    elif msg.startswith(f'{TorCommand.VOICE_ACK.value} '):
-                        parts = msg.split(' ')
-                        if len(parts) == 3:
-                            try:
-                                next_offset = int(parts[2])
-                            except ValueError:
-                                next_offset = -1
-                            if next_offset >= 0:
-                                if not self._state.acknowledge_drop_transfer(
-                                    onion, conn, parts[1], msg
-                                ):
-                                    self._router.process_voice_ack(
-                                        onion, parts[1], next_offset
-                                    )
-
-                    elif any(
-                        msg.startswith(f'{command.value} ')
-                        for command in (
-                            TorCommand.DROP_VOICE_BEGIN,
-                            TorCommand.DROP_VOICE_CHUNK,
-                            TorCommand.DROP_VOICE_END,
-                        )
-                    ):
-                        parts = msg.split(' ', 1)
-                        admission = (
-                            self._router.process_drop_voice_frame(
-                                conn, onion, parts[0], parts[1]
-                            )
-                            if len(parts) == 2
-                            else FrameAdmission.MALFORMED
-                        )
-                        if admission is FrameAdmission.POLICY_REJECTED:
-                            continue
-                        if admission is not FrameAdmission.ACCEPTED:
-                            self._disconnect_cb(
-                                onion,
-                                True,
-                                False,
-                                None,
-                                False,
-                                connection_origin,
-                                (
-                                    ConnectionReasonCode.LIVE_VOICE_LIMIT_REACHED
-                                    if admission is FrameAdmission.RESOURCE_LIMIT
-                                    else ConnectionReasonCode.INVALID_PEER_FRAME
-                                ),
-                            )
+                        self._state.touch_session_activity(onion)
+                        if not self._dispatch_content(
+                            onion, conn, msg, connection_origin
+                        ):
                             break
-
-                    elif msg.startswith(f'{TorCommand.DROP.value} '):
-                        parts = msg.split(' ', 2)
-                        if len(parts) == 3:
-                            self._router.process_incoming_drop_over_session(
-                                conn,
-                                onion,
-                                parts[1],
-                                parts[2],
-                            )
         except Exception:
             pass
         finally:

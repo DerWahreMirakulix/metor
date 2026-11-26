@@ -2,9 +2,13 @@
 
 import json
 import socket
+import ssl
+from pathlib import Path
 import threading
 import unittest
 from unittest.mock import Mock
+from private_fixtures import PrivateTemporaryDirectory
+from metor.data.profile.ipc_identity import daemon_tls_context, read_daemon_certificate
 
 from metor.client import (
     FrontendProfileState,
@@ -28,6 +32,45 @@ from metor.versioning import IPC_PROTOCOL_MIN_SUPPORTED, IPC_PROTOCOL_VERSION
 class BootstrapTransportTests(unittest.TestCase):
     """Scripted peer evidence is distinct from actual Core/Tor integration."""
 
+    def test_wrong_daemon_certificate_rejects_socket_before_prompt(self) -> None:
+        """A different valid profile listener cannot obtain the selected profile's credentials."""
+        from metor.client import MetorClient
+
+        expected = Path(self.enterContext(PrivateTemporaryDirectory()))
+        other = Path(self.enterContext(PrivateTemporaryDirectory()))
+        daemon_tls_context(expected)
+        tls = daemon_tls_context(other)
+        provider = Mock()
+        listener = self.enterContext(socket.socket())
+        listener.bind(('127.0.0.1', 0))
+        listener.listen()
+        listener.settimeout(3)
+        finished = threading.Event()
+
+        def serve() -> None:
+            try:
+                raw, _ = listener.accept()
+                with raw, tls.wrap_socket(raw, server_side=True):
+                    pass
+            except ssl.SSLError:
+                pass
+            finally:
+                finished.set()
+
+        worker = threading.Thread(target=serve, daemon=True)
+        worker.start()
+        client = MetorClient(
+            listener.getsockname()[1],
+            timeout=2,
+            daemon_certificate=read_daemon_certificate(expected),
+            auth_provider=provider,
+        )
+        self.addCleanup(client.disconnect)
+        self.assertIsNone(client.bootstrap())
+        self.assertTrue(finished.wait(3))
+        worker.join(3)
+        self.assertEqual(provider.mock_calls, [])
+
     def test_password_prompt_subscription_snapshot_and_inventory_over_sdk(self) -> None:
         """Graphical interaction supplies SDK auth without terminal prompts."""
         challenge, salt = '11' * 32, '22' * 16
@@ -35,6 +78,9 @@ class BootstrapTransportTests(unittest.TestCase):
         commands: list[str] = []
         errors: list[Exception] = []
         finished = threading.Event()
+        profile = Path(self.enterContext(PrivateTemporaryDirectory()))
+        tls = daemon_tls_context(profile)
+        tls.sslsocket_class = ssl.SSLSocket
         with socket.socket() as server:
             server.bind(('127.0.0.1', 0))
             server.listen()
@@ -44,7 +90,8 @@ class BootstrapTransportTests(unittest.TestCase):
                 """Returns strict correlated DTOs for one isolated test client."""
                 authenticated = False
                 try:
-                    connection, _address = server.accept()
+                    raw, _address = server.accept()
+                    connection = tls.wrap_socket(raw, server_side=True)
                     with connection, connection.makefile('rwb') as stream:
                         connection.settimeout(5)
                         while line := stream.readline():
@@ -104,6 +151,7 @@ class BootstrapTransportTests(unittest.TestCase):
                 OneUseSecretProvider(None),
                 Mock(),
                 True,
+                daemon_certificate=read_daemon_certificate(profile),
             )
             controller = GuiController(FrontendLaunchContext('test', host))
             try:

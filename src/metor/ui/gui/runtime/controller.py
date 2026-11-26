@@ -2,6 +2,7 @@
 
 import threading
 from collections.abc import Callable
+from dataclasses import replace
 
 from metor.client import (
     FrontendLaunchContext,
@@ -229,7 +230,19 @@ class GuiController:
         existing exact call can keep its separately authorized audio streams.
         """
         self.native_departure()
-        self.security.lock()
+        if self.purge.active:
+            return
+        if (
+            self.state.covered
+            and self.state.route.view != 'V05'
+            and not self.device.active
+            and (self.state.busy or self.lifecycle.active or self.client is not None)
+        ):
+            # Startup and profile replacement may already have accepted a proof.
+            # Retire that activation, including candidates still off-thread.
+            self.close()
+            return
+        self.security.native_lock()
 
     def resume(self) -> None:
         """Retain the cover and recheck transport without reconstructing input.
@@ -451,14 +464,22 @@ class GuiController:
 
     def _poll_snapshot(self) -> None:
         """Admits one coalesced snapshot when its fair read turn becomes available."""
-        if (
-            self._refresh_needed
-            and not self.state.covered
-            and not self.state.busy
-            and self.client is not None
-        ):
-            if self.submit('snapshot', self.client.runtime_snapshot, background=True):
+        client, snapshot = self.client, self.state.snapshot
+        if self.state.covered or self.state.busy or client is None:
+            return
+        if self._refresh_needed:
+            if self.submit(
+                'snapshot',
+                lambda: client.runtime_snapshot(first_page_only=True),
+                background=True,
+            ):
                 self._refresh_needed = False
+        elif snapshot is not None and snapshot.next_offset is not None:
+            self.submit(
+                'snapshot-page',
+                lambda: client.next_runtime_snapshot_page(snapshot),
+                background=True,
+            )
 
     def _poll_archive(self) -> None:
         """Polls the current archive and its coalesced explicit-mutation refresh flag."""
@@ -553,6 +574,33 @@ class GuiController:
                 }
             ):
                 self._operations.invalidate_reads()
+            if update.operation == 'snapshot-page':
+                current, page = self.state.snapshot, update.event
+                if (
+                    not self.state.covered
+                    and current is not None
+                    and current.next_offset is not None
+                ):
+                    if (
+                        not self._refresh_needed
+                        and self.read_is_current(update)
+                        and isinstance(page, RuntimeSnapshotEvent)
+                        and page.snapshot_id == current.snapshot_id
+                        and page.page_offset == current.next_offset
+                        and page.revision == current.revision
+                        and page.epoch == current.epoch
+                    ):
+                        self.state.snapshot = replace(
+                            current,
+                            contacts=current.contacts + page.contacts,
+                            conversations=current.conversations + page.conversations,
+                            live_contexts=current.live_contexts + page.live_contexts,
+                            pending=current.pending + page.pending,
+                            next_offset=page.next_offset,
+                        )
+                    else:
+                        self._refresh_needed = True
+                continue
             if self._superseded_projection(update):
                 continue
             if self.device.install(update):

@@ -326,6 +326,9 @@ class _RequestSessionProfileManager:
 
         self.config: _RequestSessionConfig = _RequestSessionConfig()
 
+    def get_daemon_certificate(self) -> str:
+        return 'scripted byte stream'
+
     def uses_encrypted_storage(self) -> bool:
         """
         Reports whether the helper uses encrypted storage.
@@ -474,6 +477,12 @@ class UiIpcContractTests(unittest.TestCase):
 
     def test_synchronous_read_deadline_survives_frame_fragmentation(self) -> None:
         """A partial frame cannot renew the deadline or disappear from the next read."""
+        self.enterContext(
+            patch(
+                'metor.client.ipc.authenticate_daemon',
+                side_effect=lambda sock, _cert: sock,
+            )
+        )
         with socket.socket() as listener:
             listener.bind(('127.0.0.1', 0))
             listener.listen()
@@ -498,6 +507,12 @@ class UiIpcContractTests(unittest.TestCase):
         self,
     ) -> None:
         """A later valid event cannot mask a malformed authority change."""
+        self.enterContext(
+            patch(
+                'metor.client.ipc.authenticate_daemon',
+                side_effect=lambda sock, _cert: sock,
+            )
+        )
         with socket.socket() as listener:
             listener.bind(('127.0.0.1', 0))
             listener.listen()
@@ -560,6 +575,13 @@ class UiIpcContractTests(unittest.TestCase):
         )
         token_patch.start()
         self.addCleanup(token_patch.stop)
+        # CLI request routing here uses a scripted socket/context manager.
+        self.enterContext(
+            patch(
+                'metor.cli.ipc.request.session.authenticate_daemon',
+                side_effect=lambda sock, _cert: sock,
+            )
+        )
 
     def test_optional_collections_round_trip_without_accepting_wrong_shapes(
         self,

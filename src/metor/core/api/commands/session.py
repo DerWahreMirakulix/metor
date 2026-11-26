@@ -68,12 +68,24 @@ class GetChatStartupStateCommand(IpcCommand):
 @register_command(CommandType.GET_RUNTIME_SNAPSHOT)
 @dataclass
 class GetRuntimeSnapshotCommand(IpcCommand):
-    """Requests one frontend-neutral aggregate runtime projection."""
+    """Requests the first snapshot page, or a continuation of one frozen inventory."""
 
+    snapshot_id: Optional[str] = None
+    offset: int = 0
     command_type: CommandType = field(
         default=CommandType.GET_RUNTIME_SNAPSHOT,
         init=False,
     )
+
+    def __post_init__(self) -> None:
+        """Require one coherent first-page or continuation request."""
+        if type(self.offset) is not int or self.offset < 0:
+            raise ValueError('Invalid snapshot offset')
+        if self.snapshot_id is None:
+            if self.offset:
+                raise ValueError('Missing snapshot identity')
+        elif len(self.snapshot_id) != 32 or not self.offset:
+            raise ValueError('Invalid snapshot continuation')
 
 
 @register_command(CommandType.REGISTER_LIVE_CONSUMER)

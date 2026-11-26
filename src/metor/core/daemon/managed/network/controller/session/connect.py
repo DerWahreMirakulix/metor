@@ -182,17 +182,22 @@ def connect_to(
                 )
                 if negotiated_version is None:
                     raise ValueError('Peer protocol ranges do not overlap')
-                signature: Optional[str] = controller._crypto.sign_challenge(challenge)
-
-                if not signature:
-                    controller._state.retire_connection(conn)
-                    raise ConnectionError('Failed to sign live handshake challenge.')
-
                 local_onion: Optional[str] = controller._tm.onion
                 if not local_onion:
                     controller._state.retire_connection(conn)
                     raise ConnectionError('Local onion unavailable for live handshake.')
 
+                proof = HandshakeProtocol.proof(
+                    challenge,
+                    local_onion,
+                    onion,
+                    HandshakeProtocol.auth_mode(origin=origin),
+                    (PEER_PROTOCOL_VERSION, PEER_PROTOCOL_MIN_SUPPORTED),
+                    (peer_current, peer_minimum),
+                )
+                signature = controller._crypto.sign_challenge(proof)
+                if not signature:
+                    raise ConnectionError('Failed to sign live handshake challenge.')
                 controller._state.send_frame(
                     conn,
                     HandshakeProtocol.build_auth_line(

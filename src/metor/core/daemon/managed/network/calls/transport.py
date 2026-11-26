@@ -59,13 +59,24 @@ def connect(controller: 'CallController', session: CallSession) -> None:
             ):
                 controller.finish(session, CallReason.UNSUPPORTED)
                 return
-            signature = controller.crypto.sign_challenge(challenge)
-            if signature is None or controller.tm.onion is None:
+            local_onion = controller.tm.onion
+            if local_onion is None:
+                raise ConnectionError('Local onion unavailable.')
+            proof = HandshakeProtocol.proof(
+                challenge,
+                local_onion,
+                session.info.peer,
+                HandshakeProtocol.auth_mode(is_call=True),
+                (PEER_PROTOCOL_VERSION, PEER_PROTOCOL_MIN_SUPPORTED),
+                (peer_current, peer_min),
+            )
+            signature = controller.crypto.sign_challenge(proof)
+            if signature is None:
                 raise ConnectionError('Call authentication unavailable.')
             controller.transport_state.send_frame(
                 connection,
                 HandshakeProtocol.build_auth_line(
-                    controller.tm.onion, signature, is_call=True
+                    local_onion, signature, is_call=True
                 ).encode('ascii'),
             )
         with controller.lock:
@@ -105,10 +116,22 @@ def receive(
             connection, stream.get_buffer(), max_bytes=Constants.CALL_MAX_FRAME_BYTES
         )
         connection.settimeout(Constants.CALL_KEEPALIVE_SEC)
+        with controller.lock:
+            waiting_for_offer = not any(
+                s.connection is connection and s.info.state is not CallState.ENDED
+                for s in controller.sessions.values()
+            )
+        first_offer_deadline = time.monotonic() + Constants.CALL_PEER_TIMEOUT_SEC
         while not controller.closed.is_set() and not controller.stop_flag.is_set():
             try:
-                line = stream.read_line()
+                if waiting_for_offer and time.monotonic() >= first_offer_deadline:
+                    break
+                line = stream.read_line(
+                    deadline=first_offer_deadline if waiting_for_offer else None
+                )
             except socket.timeout:
+                if waiting_for_offer:
+                    continue
                 with controller.lock:
                     tracked = any(
                         s.connection is connection
@@ -118,10 +141,17 @@ def receive(
                 if not tracked:
                     break
                 continue
+            if waiting_for_offer and (
+                line is None
+                or time.monotonic() >= first_offer_deadline
+                or not line.startswith(TorCommand.CALL_OFFER.value + ' ')
+            ):
+                break
             if line is None or not controller.process_frame(
                 onion, connection, line, borrowed=False
             ):
                 break
+            waiting_for_offer = False
             with controller.lock:
                 if any(
                     s.connection is connection and s.info.state is CallState.ENDED

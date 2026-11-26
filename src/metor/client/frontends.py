@@ -167,6 +167,7 @@ class FrontendBootstrapResult:
     encrypted: bool
     unlock_timeout: float = Constants.MAX_UNLOCK_INITIALIZATION_WAIT_SEC
     lifetime_token: str | None = field(default=None, repr=False)
+    daemon_certificate: str = ''
 
     def get_daemon_port(self) -> int:
         """Returns the endpoint resolved by base bootstrap.

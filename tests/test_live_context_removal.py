@@ -63,7 +63,10 @@ class LiveContextRemovalTests(unittest.TestCase):
         other_generation = state.live_generation(self.other_peer, 'same')
         state.add_unacked_message(self.peer, 'same', 'fixture', 'timestamp')
         state.remember_message_request_id(
-            'same', 'other-request', live_peer=self.other_peer
+            self.peer, 'same', 'first-request', Delivery.LIVE
+        )
+        state.remember_message_request_id(
+            self.other_peer, 'same', 'other-request', Delivery.LIVE
         )
         legacy = self.h.client.request(DismissLiveContextCommand(self.peer), IpcEvent)
         self.assertIsInstance(legacy, LiveContextDismissRejectedEvent)
@@ -77,7 +80,10 @@ class LiveContextRemovalTests(unittest.TestCase):
         self.assertTrue(
             state.is_live_generation(self.other_peer, 'same', other_generation)
         )
-        self.assertEqual(state.pop_message_request_id('same'), 'other-request')
+        self.assertIsNone(state.pop_message_request_id(self.peer, 'same'))
+        self.assertEqual(
+            state.pop_message_request_id(self.other_peer, 'same'), 'other-request'
+        )
         self.assertEqual(self.h.messages.get_pending_live_outbox(self.peer), [])
         self.assertEqual(self.h.messages.get_unread_live_count(self.peer), 0)
         self.assertEqual(

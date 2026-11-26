@@ -199,13 +199,13 @@ class CommandDispatcher:
             else:
                 self._print_system(Help.show_command_help(cmd).strip())
         elif cmd == '/fallback':
-            target = arg if arg else self._session.focused_alias
+            target = arg if arg else self._session.focused_onion
             if target:
                 self._ipc.send_command(FallbackCommand(target=target))
             else:
                 self._print_system(Help.show_command_help(cmd).strip())
         elif cmd == '/retunnel':
-            target = arg if arg else self._session.focused_alias
+            target = arg if arg else self._session.focused_onion
             if target:
                 self._ipc.send_command(RetunnelCommand(target=target))
             else:

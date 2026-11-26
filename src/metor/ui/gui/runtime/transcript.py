@@ -234,10 +234,7 @@ class Transcript:
             return True
         if isinstance(event, (AckEvent, ReadReceiptEvent)):
             turn = self.controller.voice.live_turns.get(event.msg_id)
-            if turn is not None and (
-                not isinstance(event, ReadReceiptEvent)
-                or turn.binding.peer == event.onion
-            ):
+            if turn is not None and turn.binding.peer == event.onion:
                 turn.status = advanced_status(
                     turn.status,
                     MessageStatusCode.READ
@@ -248,10 +245,7 @@ class Transcript:
                 if (
                     item.msg_id == event.msg_id
                     and item.direction is MessageDirectionCode.OUT
-                    and (
-                        not isinstance(event, ReadReceiptEvent)
-                        or item.peer == event.onion
-                    )
+                    and item.peer == event.onion
                 ):
                     self.admit(
                         replace(

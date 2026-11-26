@@ -136,6 +136,7 @@ class FallbackRouter:
                 record.msg_id: (record.payload, record.timestamp) for record in records
             }
             for record in records:
+                self._state.promote_message_request(onion, record.msg_id)
                 self._state.remove_unacked_message(onion, record.msg_id)
                 self._hm.log_event(
                     HistoryEvent.QUEUED,
@@ -279,6 +280,7 @@ class FallbackRouter:
                     },
                 )
             for record in records:
+                self._state.promote_message_request(onion, record.msg_id)
                 self._state.remove_unacked_message(onion, record.msg_id)
                 self._hm.log_event(
                     HistoryEvent.QUEUED,

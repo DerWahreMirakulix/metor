@@ -345,6 +345,7 @@ class CaptureIntegrationTests(unittest.TestCase):
 
         gui_client = MetorClient(
             self.h.daemon._ipc.port,
+            daemon_certificate=self.h.daemon._pm.get_daemon_certificate(),
             auth_provider=provider,
             on_event=on_event,
         )

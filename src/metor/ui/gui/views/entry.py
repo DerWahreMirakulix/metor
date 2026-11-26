@@ -37,6 +37,7 @@ def entry_view(controller: GuiController, refresh: Callable[[], None]) -> Anchor
         Returns:
             None
         """
+        SecretInput.revoke_all()
         state.route = Route(view)
         if view == 'V02':
             controller.profiles.reload()
@@ -75,6 +76,7 @@ def entry_view(controller: GuiController, refresh: Callable[[], None]) -> Anchor
             Returns:
                 None
             """
+            SecretInput.revoke_all()
             controller.interactions.answer(value)
             refresh()
 

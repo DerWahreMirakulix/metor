@@ -270,6 +270,19 @@ class CallProtocolTests(unittest.TestCase):
         )
         self.assertIs(self.state.get_connection(self.peer), self.local)
 
+    def test_call_transport_requires_timely_first_offer(self) -> None:
+        """The authentication-to-offer deadline covers the entire first frame."""
+        from metor.core.daemon.managed.network.stream import TcpStreamReader
+
+        for pending in (b'CALL_PING fixture 0\n', b'CALL_OFFER fixture'):
+            local, remote = socket.socketpair()
+            self.addCleanup(remote.close)
+            remote.sendall(pending)
+            with patch.object(Constants, 'CALL_PEER_TIMEOUT_SEC', 0.05):
+                self.calls.accept_transport(self.peer, local, TcpStreamReader(local))
+            self.assertFalse(self.calls.sessions)
+            self.assertEqual(remote.recv(1), b'')
+
     def test_expired_incoming_request_cannot_be_accepted(self) -> None:
         """Exact identity remains stale after timeout; the same peer gains no permission."""
         self._incoming()

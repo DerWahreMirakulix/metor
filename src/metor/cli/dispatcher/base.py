@@ -229,7 +229,9 @@ class CliDispatcher(ProfilesDispatchMixin, MessagesDispatchMixin, HistoryDispatc
             if sub or self._extra:
                 self._print_usage(cmd)
             else:
-                CommandHandlers.handle_purge(getattr(self._args, 'nuke_remote', False))
+                self._exit_code = CommandHandlers.handle_purge(
+                    getattr(self._args, 'nuke_remote', False)
+                )
 
         elif cmd == 'send':
             if not sub or not self._extra:

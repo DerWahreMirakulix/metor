@@ -155,7 +155,10 @@ class DropCoreTests(unittest.TestCase):
             build_session_auth_proof('test-password', challenge, salt)
         )
         observer = MetorClient(
-            self.h.daemon._ipc.port, auth_provider=provider, on_event=observe
+            self.h.daemon._ipc.port,
+            daemon_certificate=self.h.daemon._pm.get_daemon_certificate(),
+            auth_provider=provider,
+            on_event=observe,
         )
         self.addCleanup(observer.disconnect)
         self.assertIsNotNone(observer.bootstrap())
@@ -731,12 +734,24 @@ class DropCoreTests(unittest.TestCase):
         self.item('other-peer', MessageDirection.OUT, MessageStatus.PENDING)
         self.item('exact-shared', MessageDirection.OUT, MessageStatus.PENDING)
         self.item('exact-shared', MessageDirection.IN, MessageStatus.UNREAD)
-        state.remember_message_request_id('outgoing', 'drop-request', self.h.onion)
-        state.remember_message_request_id('incoming', 'keep-live')
-        state.remember_message_request_id('live-shared', 'drop-old', self.h.onion)
-        state.remember_message_request_id('live-shared', 'keep-new-live')
-        state.remember_message_request_id('other-peer', 'keep-other-peer', other_peer)
-        state.remember_message_request_id('exact-shared', 'keep-outbound', self.h.onion)
+        state.remember_message_request_id(
+            self.h.onion, 'outgoing', 'drop-request', Delivery.DROP
+        )
+        state.remember_message_request_id(
+            self.h.onion, 'incoming', 'keep-live', Delivery.LIVE
+        )
+        state.remember_message_request_id(
+            self.h.onion, 'live-shared', 'drop-old', Delivery.DROP
+        )
+        state.remember_message_request_id(
+            self.h.onion, 'live-shared', 'keep-new-live', Delivery.LIVE
+        )
+        state.remember_message_request_id(
+            other_peer, 'other-peer', 'keep-other-peer', Delivery.DROP
+        )
+        state.remember_message_request_id(
+            self.h.onion, 'exact-shared', 'keep-outbound', Delivery.DROP
+        )
         self.h.client.request(
             DeleteMessageCommand(
                 self.h.onion,
@@ -746,16 +761,25 @@ class DropCoreTests(unittest.TestCase):
             ),
             MessageDeletedEvent,
         )
-        self.assertEqual(state._message_request_ids['exact-shared'], 'keep-outbound')
+        self.assertEqual(
+            state._message_request_ids[(self.h.onion, 'exact-shared')],
+            (Delivery.DROP, 'keep-outbound'),
+        )
         self.h.client.request(
             ClearMessagesCommand(self.h.onion, cancel_pending=True), IpcEvent
         )
-        self.assertIsNone(state.pop_message_request_id('outgoing'))
-        self.assertIsNone(state.pop_message_request_id('exact-shared'))
-        self.assertEqual(state.pop_message_request_id('incoming'), 'keep-live')
-        self.assertEqual(state.pop_message_request_id('live-shared'), 'keep-new-live')
-        self.assertEqual(state.pop_message_request_id('other-peer'), 'keep-other-peer')
-        self.assertEqual(state._drop_message_request_peers, {})
+        self.assertIsNone(state.pop_message_request_id(self.h.onion, 'outgoing'))
+        self.assertIsNone(state.pop_message_request_id(self.h.onion, 'exact-shared'))
+        self.assertEqual(
+            state.pop_message_request_id(self.h.onion, 'incoming'), 'keep-live'
+        )
+        self.assertEqual(
+            state.pop_message_request_id(self.h.onion, 'live-shared'), 'keep-new-live'
+        )
+        self.assertEqual(
+            state.pop_message_request_id(other_peer, 'other-peer'), 'keep-other-peer'
+        )
+        self.assertEqual(state._message_request_ids, {})
 
 
 class DropCancellationContractTests(unittest.TestCase):

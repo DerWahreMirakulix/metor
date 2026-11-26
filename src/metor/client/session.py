@@ -136,6 +136,7 @@ class MetorClient(CallClientMixin):
         client_version: str = APP_VERSION,
         lifetime_token: str | None = None,
         local_lifetime: bool = False,
+        daemon_certificate: str = '',
     ) -> None:
         """
         Initializes one MetorClient.
@@ -143,6 +144,8 @@ class MetorClient(CallClientMixin):
         Args:
             endpoint (str | int): Daemon endpoint (e.g. "127.0.0.1:50051" or 50051).
             auth_provider (Optional[AuthProvider]): Credential provider for unlock and session auth.
+            daemon_certificate: Independently provisioned public PEM certificate
+                for the selected daemon. Connections require this trust anchor.
             on_event (Optional[Callable[[IpcEvent], None]]): Callback for incoming async events.
             on_disconnect (Optional[Callable[[], None]]): Callback fired if socket connection drops.
             timeout (float): Socket connect and read timeout.
@@ -174,6 +177,7 @@ class MetorClient(CallClientMixin):
             on_event=self._handle_async_event,
             on_disconnect=self._handle_disconnect,
             host=self._host,
+            daemon_certificate=daemon_certificate,
         )
         self._init_event: Optional[InitEvent] = None
 
@@ -205,7 +209,7 @@ class MetorClient(CallClientMixin):
 
     def connect(self) -> bool:
         """
-        Establishes the raw TCP connection to the daemon endpoint.
+        Establishes the pinned TLS connection to the daemon endpoint.
 
         Args:
             None
@@ -458,16 +462,54 @@ class MetorClient(CallClientMixin):
         """
         return self.request(LockCommand(), DaemonLockedEvent) is not None
 
-    def runtime_snapshot(self) -> Optional[RuntimeSnapshotEvent]:
-        """Returns the authoritative aggregate snapshot for the active runtime.
+    def runtime_snapshot(
+        self, *, first_page_only: bool = False
+    ) -> Optional[RuntimeSnapshotEvent]:
+        """Return one coherent metadata inventory, optionally as its first bounded page.
 
         Args:
-            None
+            first_page_only: Allow the caller to schedule continuation reads.
 
         Returns:
-            Optional[RuntimeSnapshotEvent]: The resulting value.
+            Optional[RuntimeSnapshotEvent]: A coherent inventory or first page, if available.
         """
-        return self.request(GetRuntimeSnapshotCommand(), RuntimeSnapshotEvent)
+        first = self.request(GetRuntimeSnapshotCommand(), RuntimeSnapshotEvent)
+        if first is None or first_page_only:
+            return first
+        page = first
+        while page.next_offset is not None:
+            following = self.next_runtime_snapshot_page(page)
+            if following is None:
+                return None
+            first.pending.extend(following.pending)
+            first.live_contexts.extend(following.live_contexts)
+            first.conversations.extend(following.conversations)
+            first.contacts.extend(following.contacts)
+            page = following
+        first.next_offset = None
+        return first
+
+    def next_runtime_snapshot_page(
+        self, snapshot: RuntimeSnapshotEvent
+    ) -> Optional[RuntimeSnapshotEvent]:
+        """Fetch one page of the same frozen inventory, or signal that a restart is needed."""
+        offset, identity = snapshot.next_offset, snapshot.snapshot_id
+        if offset is None or identity is None:
+            return None
+        page = self.request(
+            GetRuntimeSnapshotCommand(identity, offset), RuntimeSnapshotEvent
+        )
+        if (
+            page is None
+            or page.snapshot_id != identity
+            or page.page_offset != offset
+            or page.revision != snapshot.revision
+            or page.profile_instance_id != snapshot.profile_instance_id
+            or page.epoch != snapshot.epoch
+            or (page.next_offset is not None and page.next_offset <= offset)
+        ):
+            return None
+        return page
 
     def list_retained_messages(
         self,

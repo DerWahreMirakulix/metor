@@ -13,16 +13,26 @@ from unittest.mock import Mock, patch
 
 from private_fixtures import PrivateTemporaryDirectory
 
-from metor.client import FrontendProfileState
+from metor.client import (
+    FrontendBootstrapResult,
+    FrontendProfileState,
+    OneUseSecretProvider,
+)
 from metor.client import FrontendLaunchContext, MetorClient, build_session_auth_proof
 from metor.client.platform import PlatformBindings
 from metor.core.api import (
     ClientAccessRestrictedEvent,
     ClientRestrictedEvent,
+    ConnectedEvent,
+    InboxNotificationEvent,
+    NotificationPrivacy,
+    RestrictClientCommand,
     ClientReauthorizedEvent,
     ClientUnlockMethod,
     Delivery,
     GetMessageOutcomeCommand,
+    GetContactsListCommand,
+    ContactsDataEvent,
     MessageOutcomeEvent,
     SendMessageCommand,
     GetGuiPreferencesCommand,
@@ -41,6 +51,7 @@ from metor.core.daemon.managed.local_auth import create_session_auth_context
 from metor.core.key import KeyManager
 from metor.data import ContactManager, HistoryManager, MessageManager, SettingKey
 from metor.data.profile import ProfileManager
+from metor.data.profile.ipc_identity import read_daemon_certificate
 from metor.data.sql import SqlManager
 from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.runtime.device import DeviceLifecycle
@@ -151,7 +162,9 @@ class GuiSecurityIntegrationTests(unittest.TestCase):
         self.controller.state.route = Route('V06')
         self.addCleanup(self.controller.close)
 
-    def make_client(self) -> MetorClient:
+    def make_client(
+        self, on_event: Callable[[IpcEvent], None] | None = None
+    ) -> MetorClient:
         """Authenticates using public one-use password proofs."""
         provider = Mock()
         provider.get_session_auth_proof.side_effect = lambda challenge, salt: (
@@ -160,6 +173,10 @@ class GuiSecurityIntegrationTests(unittest.TestCase):
         client = MetorClient(
             self.daemon._ipc.port,
             auth_provider=provider,
+            on_event=on_event,
+            daemon_certificate=read_daemon_certificate(
+                self.daemon._pm.paths.get_config_dir()
+            ),
             timeout=Constants.DEFAULT_IPC_TIMEOUT,
         )
         self.addCleanup(client.disconnect)
@@ -222,6 +239,118 @@ class GuiSecurityIntegrationTests(unittest.TestCase):
         self.assertEqual(state.snapshot.profile_instance_id, identity)
         self.assertEqual(state.route.view, 'V06')
 
+    def test_locked_privacy_events_preserve_the_actual_sdk_stream(self) -> None:
+        """A real locked TLS client stays connected across ordinary transport broadcasts."""
+        for privacy in NotificationPrivacy:
+            with self.subTest(privacy=privacy):
+                observed: list[IpcEvent] = []
+                received = threading.Event()
+
+                def record(event: IpcEvent) -> None:
+                    if isinstance(event, (ConnectedEvent, InboxNotificationEvent)):
+                        observed.append(event)
+                    if isinstance(event, InboxNotificationEvent):
+                        received.set()
+
+                reader = self.make_client(record)
+                self.assertIsNotNone(
+                    reader.request(
+                        RestrictClientCommand(notification_privacy=privacy),
+                        ClientRestrictedEvent,
+                    )
+                )
+                self.daemon._broadcast_ipc_event(
+                    ConnectedEvent('synthetic alias', 'a' * 56)
+                )
+                self.daemon._broadcast_ipc_event(
+                    InboxNotificationEvent('synthetic alias', 'a' * 56)
+                )
+                self.assertIsInstance(
+                    reader.request(GetRuntimeSnapshotCommand(), IpcEvent),
+                    ClientAccessRestrictedEvent,
+                )
+                if privacy is NotificationPrivacy.OFF:
+                    self.assertFalse(observed)
+                else:
+                    self.assertTrue(received.wait(_SECURITY_WORKER_TIMEOUT_SEC))
+                    if privacy is NotificationPrivacy.ANONYMIZE:
+                        self.assertEqual(len(observed), 1)
+                        self.assertNotIn('synthetic alias', observed[0].to_json())
+                        self.assertNotIn('a' * 56, observed[0].to_json())
+                    else:
+                        self.assertEqual(
+                            [type(event) for event in observed],
+                            [ConnectedEvent, InboxNotificationEvent],
+                        )
+                self.assertTrue(reader.is_connected)
+                reader.disconnect()
+
+    def test_large_contact_snapshot_is_browsable_across_identity_changes(self) -> None:
+        """Real SQL, IPC and the GUI mailbox admit a book larger than one IPC frame."""
+        import base64
+        import hashlib
+
+        manager = self.daemon._cm
+        expected = {}
+        # Populate current-format peer rows in one fixture transaction.
+        with manager._peers.alias_mutation() as peers:
+            for index in range(1400):
+                public = hashlib.sha256(str(index).encode()).digest()
+                suffix = b'\x03'
+                checksum = hashlib.sha3_256(
+                    b'.onion checksum' + public + suffix
+                ).digest()[:2]
+                onion = (
+                    base64.b32encode(public + checksum + suffix).decode('ascii').lower()
+                )
+                alias = f'{index:04d}-' + ('a' * 3900)
+                peers.insert(onion, alias, index % 2 == 0)
+                expected[onion] = alias
+        first = self.client.runtime_snapshot(first_page_only=True)
+        assert first is not None and first.next_offset is not None
+        self.assertLess(len(first.to_json().encode()), Constants.SNAPSHOT_PAGE_BYTES)
+        changed = next(iter(expected))
+        manager.rename_contact(expected[changed], 'Renamed', expected_onion=changed)
+        # The frozen pages never mix the old and the new name.
+        self.controller.state.snapshot = first
+        self.controller._refresh_needed = False
+        self.controller._messages_needed = False
+        deadline = time.monotonic() + 60
+        while self.controller.state.snapshot.next_offset is not None:
+            self.assertLess(time.monotonic(), deadline)
+            self.controller._poll_snapshot()
+            worker = self.controller._worker
+            assert worker is not None
+            worker.join(_SECURITY_WORKER_TIMEOUT_SEC)
+            self.controller.poll()
+        contacts = self.controller.state.snapshot.contacts
+        self.assertEqual(len(contacts), len(expected))
+        self.assertEqual({row.onion: row.alias for row in contacts}, expected)
+        fresh = self.client.runtime_snapshot(first_page_only=True)
+        assert fresh is not None
+        observed = list(fresh.contacts)
+        while fresh.next_offset is not None:
+            fresh = self.client.next_runtime_snapshot_page(fresh)
+            assert fresh is not None
+            self.assertLess(
+                len(fresh.to_json().encode()), Constants.SNAPSHOT_PAGE_BYTES
+            )
+            observed.extend(fresh.contacts)
+        exact = self.client.request(
+            GetContactsListCommand(onions=[changed]), ContactsDataEvent
+        )
+        assert exact is not None
+        self.assertEqual(
+            [(entry.onion, entry.alias) for entry in exact.saved],
+            [(changed, 'Renamed')],
+        )
+        self.assertEqual(exact.checked_onions, [changed])
+        expected[changed] = 'Renamed'
+        self.assertEqual({row.onion: row.alias for row in observed}, expected)
+        complete = self.client.runtime_snapshot()
+        assert complete is not None
+        self.assertEqual({row.onion: row.alias for row in complete.contacts}, expected)
+
     def test_device_menu_screen_lock_restricts_real_core_session(self) -> None:
         """A reversible hardware overlay cannot stand in for Core authorization."""
         controller = self.controller
@@ -255,8 +384,134 @@ class GuiSecurityIntegrationTests(unittest.TestCase):
         """A real fresh snapshot and preferences cannot remove the failure cover."""
         self._assert_native_failure_fences_completion(GetGuiPreferencesCommand)
 
+    def test_os_lock_disconnects_candidate_while_hydration_is_still_blocked(
+        self,
+    ) -> None:
+        """An already-authenticated connection cannot survive behind a slow startup read."""
+        host = Mock()
+        host.profile_state.return_value = FrontendProfileState(
+            'gui-secured', True, False, True
+        )
+        host.bootstrap.return_value = FrontendBootstrapResult(
+            'gui-secured',
+            True,
+            self.daemon._ipc.port,
+            False,
+            OneUseSecretProvider('test-password'),
+            Mock(),
+            True,
+            daemon_certificate=read_daemon_certificate(
+                self.daemon._pm.paths.get_config_dir()
+            ),
+        )
+        gui = GuiController(FrontendLaunchContext('gui-secured', host))
+        self.addCleanup(gui.close)
+        reached, disconnected, release = (
+            threading.Event(),
+            threading.Event(),
+            threading.Event(),
+        )
+        candidates: list[MetorClient] = []
+        original = MetorClient.disconnect
+
+        def hold(client: MetorClient, _initialized: object) -> None:
+            candidates.append(client)
+            reached.set()
+            release.wait(_SECURITY_WORKER_TIMEOUT_SEC)
+            raise RuntimeError('Hydration retired')
+
+        def disconnect(client: MetorClient) -> None:
+            original(client)
+            if candidates and client is candidates[0]:
+                disconnected.set()
+
+        with (
+            patch.object(MetorClient, 'disconnect', disconnect),
+            patch.object(gui.activation, 'hydrate', side_effect=hold),
+        ):
+            self.assertTrue(gui.open_profile())
+            worker = gui._worker
+            assert worker is not None
+            try:
+                self.assertTrue(reached.wait(_SECURITY_WORKER_TIMEOUT_SEC))
+                self.assertTrue(candidates[0].is_connected)
+                gui.screen_lock()
+                self.assertTrue(disconnected.wait(_SECURITY_WORKER_TIMEOUT_SEC))
+                self.assertFalse(candidates[0].is_connected)
+                self.assertTrue(gui.state.covered)
+                self.assertTrue(worker.is_alive())
+            finally:
+                release.set()
+                worker.join(_SECURITY_WORKER_TIMEOUT_SEC)
+        gui.poll()
+        self.assertIsNone(gui.client)
+        self.assertTrue(gui.state.covered)
+        self.assertIsNotNone(self.other.runtime_snapshot())
+
+    def test_os_lock_abandons_startup_and_switch_candidates(self) -> None:
+        """An authenticated candidate cannot publish a queued startup or switch after lock."""
+        for switching in (False, True):
+            with self.subTest(switching=switching):
+                gui = GuiController(self.controller.context)
+                self.addCleanup(gui.close)
+                candidate = self.make_client()
+                original = candidate.disconnect
+                released = threading.Event()
+
+                def release() -> None:
+                    original()
+                    released.set()
+
+                with patch.object(candidate, 'disconnect', side_effect=release):
+                    if switching:
+                        gui.client = self.make_client()
+                        gui.state.covered = False
+                        gui.state.route = Route('V06')
+                        with patch(
+                            'metor.ui.gui.runtime.profiles.transition.ProfileRuntimeCoordinator'
+                        ) as coordinator:
+                            coordinator.return_value.client = candidate
+                            self.assertTrue(gui.lifecycle.start('selected'))
+                            worker = gui._worker
+                            assert worker is not None
+                            worker.join(_SECURITY_WORKER_TIMEOUT_SEC)
+                        self.assertIsNotNone(gui.lifecycle._candidate)
+                    else:
+                        with (
+                            patch.object(
+                                gui.activation, 'connect', return_value=candidate
+                            ),
+                            patch.object(
+                                candidate,
+                                'bootstrap',
+                                return_value=candidate.init_event,
+                            ),
+                        ):
+                            self.assertTrue(gui.open_profile())
+                            worker = gui._worker
+                            assert worker is not None
+                            worker.join(_SECURITY_WORKER_TIMEOUT_SEC)
+                        self.assertIs(gui.client, candidate)
+                    self.assertFalse(worker.is_alive())
+                    gui.screen_lock()
+                    gui.poll()
+                    self.assertTrue(released.wait(_SECURITY_WORKER_TIMEOUT_SEC))
+                    self.assertIsNone(gui.client)
+                    self.assertTrue(gui.state.covered)
+                    self.assertIsNone(gui.state.snapshot)
+                    self.assertFalse(candidate.is_connected)
+                    self.assertIsNotNone(self.other.runtime_snapshot())
+
+    def test_os_lock_fences_accepted_unlock_and_restore(self) -> None:
+        """A second screen lock supersedes either stage of a valid proof."""
+        for command in (ReauthorizeClientCommand, GetGuiPreferencesCommand):
+            with self.subTest(command=command):
+                self._assert_native_failure_fences_completion(
+                    command, ordinary_lock=True
+                )
+
     def _assert_native_failure_fences_completion(
-        self, gate_command: type[IpcCommand]
+        self, gate_command: type[IpcCommand], *, ordinary_lock: bool = False
     ) -> None:
         """Holds one successful Core response until the GUI loses native monitoring.
 
@@ -311,11 +566,15 @@ class GuiSecurityIntegrationTests(unittest.TestCase):
                     else GuiPreferencesEvent,
                 )
                 old_generation = controller.state.generation
-                controller.fail_native_lifecycle()
-                self.assertTrue(controller.native_lifecycle_failed)
-                self.assertGreater(controller.state.generation, old_generation)
+                if ordinary_lock:
+                    controller.screen_lock()
+                else:
+                    controller.fail_native_lifecycle()
+                    self.assertTrue(controller.native_lifecycle_failed)
+                    self.assertGreater(controller.state.generation, old_generation)
                 self.assertTrue(controller.state.covered)
-                self.assertIsNone(controller.client)
+                if not ordinary_lock:
+                    self.assertIsNone(controller.client)
                 self.assertEqual(
                     self.other.runtime_snapshot().profile_instance_id, identity
                 )
@@ -325,6 +584,19 @@ class GuiSecurityIntegrationTests(unittest.TestCase):
                 self.assertFalse(worker.is_alive())
             controller.poll()
 
+        if ordinary_lock:
+            self.settle()
+            self.assertTrue(controller.state.covered)
+            self.assertIsNone(controller.state.snapshot)
+            self.assertIsNone(controller.state.preferences)
+            self.assertIsInstance(
+                self.client.request(GetRuntimeSnapshotCommand(), IpcEvent),
+                ClientAccessRestrictedEvent,
+            )
+            self.assertTrue(controller.security.unlock('test-password'))
+            self.settle()
+            self.assertFalse(controller.state.covered)
+            return
         self.assertTrue(controller.native_lifecycle_failed)
         self.assertTrue(controller.state.covered)
         self.assertIsNone(controller.state.snapshot)

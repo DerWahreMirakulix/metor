@@ -64,17 +64,17 @@ class DatabaseCommandContactsMixin(DatabaseCommandHandlerSupportMixin):
         params: dict[str, JsonValue] = dict(result.params)
         return create_event(CONTACT_EVENT_TYPES[result.operation_type], params)
 
-    def _handle_get_contacts(self, _: GetContactsListCommand) -> IpcEvent:
+    def _handle_get_contacts(self, cmd: GetContactsListCommand) -> IpcEvent:
         """
         Returns the structured saved and discovered contact lists.
 
         Args:
-            _ (GetContactsListCommand): The incoming contacts-list command.
+            cmd (GetContactsListCommand): The incoming contacts-list command.
 
         Returns:
             IpcEvent: The contact list event DTO.
         """
-        snapshot = self._cm.get_contacts_data()
+        snapshot = self._cm.get_contacts_data(cmd.onions)
         return ContactsDataEvent(
             saved=[
                 ContactEntry(alias=entry.alias, onion=entry.onion)
@@ -85,6 +85,7 @@ class DatabaseCommandContactsMixin(DatabaseCommandHandlerSupportMixin):
                 for entry in snapshot.discovered
             ],
             profile=snapshot.profile,
+            checked_onions=cmd.onions,
         )
 
     def _handle_add_contact(self, cmd: AddContactCommand) -> IpcEvent:

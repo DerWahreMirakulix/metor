@@ -1,6 +1,7 @@
 """Helpers for chat content, data, and inbox event handling."""
 
 import dataclasses
+from metor.shared import clean_onion
 from typing import Dict, List, Optional
 
 from metor.core.api import (
@@ -107,12 +108,20 @@ def handle_content_event(handler: EventHandlerProtocol, event: IpcEvent) -> bool
             fresh_messages: List[UnreadMessageEntry] = []
             pushed_msg_ids: List[str] = []
             for message in event.messages:
-                if message.msg_id and handler._was_pushed_live_msg_id(message.msg_id):
+                if (
+                    event.onion
+                    and message.msg_id
+                    and handler._was_pushed_live_msg_id(
+                        clean_onion(event.onion), message.msg_id
+                    )
+                ):
                     pushed_msg_ids.append(message.msg_id)
                 else:
                     fresh_messages.append(message)
-            if pushed_msg_ids:
-                handler._consume_pushed_live_msg_ids(pushed_msg_ids)
+            if event.onion and pushed_msg_ids:
+                handler._consume_pushed_live_msg_ids(
+                    clean_onion(event.onion), pushed_msg_ids
+                )
             if fresh_messages:
                 messages_data: List[Dict[str, JsonValue]] = [
                     {
@@ -138,7 +147,8 @@ def handle_content_event(handler: EventHandlerProtocol, event: IpcEvent) -> bool
             fallback_msg_ids = [event.msg_id]
         else:
             fallback_msg_ids = event.msg_ids
-        handler._renderer.apply_fallback_to_drop(fallback_msg_ids)
+        if event.onion:
+            handler._renderer.apply_fallback_to_drop(event.onion, fallback_msg_ids)
         params_raw = dataclasses.asdict(event)
         params: Dict[str, JsonValue] = {
             key: value
@@ -167,9 +177,11 @@ def handle_content_event(handler: EventHandlerProtocol, event: IpcEvent) -> bool
                 )
             return True
         handler._remember_peer(event.alias, event.onion)
-        if event.alias and event.alias == handler._session.focused_alias:
+        if event.onion and clean_onion(event.onion) == handler._session.focused_onion:
             if event.msg_id:
-                handler._remember_pushed_live_msg_id(event.msg_id)
+                handler._remember_pushed_live_msg_id(
+                    clean_onion(event.onion), event.msg_id
+                )
             handler._renderer.print_message(
                 render_content(event.content),
                 msg_type=ChatMessageType.REMOTE,
@@ -181,7 +193,7 @@ def handle_content_event(handler: EventHandlerProtocol, event: IpcEvent) -> bool
                 timestamp=event.timestamp,
                 is_drop=False,
             )
-            handler._ipc.send_command(MarkReadCommand(target=event.alias))
+            handler._ipc.send_command(MarkReadCommand(target=event.onion))
         else:
             handler._queue_buffered_notification(event.alias, event.onion, 1)
         return True
@@ -204,14 +216,14 @@ def handle_content_event(handler: EventHandlerProtocol, event: IpcEvent) -> bool
 
     if isinstance(event, AckEvent):
         handler._renderer.mark_acked(
+            peer=event.onion,
             msg_id=event.msg_id,
-            text=None,
             timestamp=event.timestamp,
         )
         return True
 
     if isinstance(event, DropFailedEvent):
-        handler._renderer.mark_failed(msg_id=event.msg_id)
+        handler._renderer.mark_failed(event.onion, event.msg_id)
         return True
 
     if isinstance(event, DropQueuedEvent):
@@ -223,10 +235,10 @@ def handle_content_event(handler: EventHandlerProtocol, event: IpcEvent) -> bool
         ):
             return True
         handler._remember_peer(event.alias, event.onion)
-        if event.alias and event.alias == handler._session.focused_alias:
+        if event.onion and clean_onion(event.onion) == handler._session.focused_onion:
             handler._cancel_buffered_notification(event.alias, event.onion)
             handler._ipc.send_command(
-                handler._mark_read_command_type(target=event.alias)
+                handler._mark_read_command_type(target=event.onion)
             )
         elif event.alias:
             handler._queue_buffered_notification(

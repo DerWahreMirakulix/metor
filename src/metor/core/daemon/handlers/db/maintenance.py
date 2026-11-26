@@ -1,5 +1,7 @@
 """Maintenance-oriented database command handling."""
 
+from typing import Callable
+
 from metor.core.api import ClearProfileDbCommand, EventType, IpcEvent, create_event
 
 # Local Package Imports
@@ -8,6 +10,8 @@ from metor.core.daemon.handlers.db.support import DatabaseCommandHandlerSupportM
 
 class DatabaseCommandMaintenanceMixin(DatabaseCommandHandlerSupportMixin):
     """Handles cross-domain database maintenance commands."""
+
+    _delete_persistent_blob_cb: Callable[[str], None] | None
 
     def _handle_clear_profile_db(self, _: ClearProfileDbCommand) -> IpcEvent:
         """
@@ -34,6 +38,7 @@ class DatabaseCommandMaintenanceMixin(DatabaseCommandHandlerSupportMixin):
             contacts_result.success
             and history_result.success
             and messages_result.success
+            and self._mm.finish_voice_deletions(self._delete_persistent_blob_cb)
         )
         if success:
             preserved_peers_raw: str | int = contacts_result.params.get(

@@ -215,9 +215,10 @@ class ContactBook:
             or self.pending
         ):
             return False
+        command = GetContactsListCommand(onions=sorted(self.selected))
         if not controller.submit(
             'contact-batch:check:' + str(self._serial),
-            lambda: client.request(GetContactsListCommand(), ContactsDataEvent),
+            lambda: client.request(command, ContactsDataEvent),
             background=True,
         ):
             return False

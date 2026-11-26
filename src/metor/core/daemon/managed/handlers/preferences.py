@@ -102,6 +102,11 @@ class ProfileMetadataCommandHandler:
                     or command.preferences.setup_complete != preferences.setup_complete
                     or command.preferences.accept_calls_locked
                     != preferences.accept_calls_locked
+                    or command.preferences.notifications_locked
+                    != preferences.notifications_locked
+                    or command.preferences.show_profile_locked
+                    != preferences.show_profile_locked
+                    or command.preferences.idle_seconds != preferences.idle_seconds
                 ) and not self._full_auth(connection):
                     return GuiPreferencesRejectedEvent(
                         GuiPreferenceFailure.FULL_AUTH_REQUIRED

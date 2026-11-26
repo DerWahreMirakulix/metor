@@ -33,7 +33,7 @@ from metor.ui.gui.views.feedback import FeedbackOverlay
 from metor.ui.gui.views.input import InputDock
 from metor.ui.gui.views.live_invitation import LiveInvitationOverlay
 from metor.ui.gui.views.profiles import request_exit
-from metor.ui.gui.widgets import Label, PointerTooltip, TextField
+from metor.ui.gui.widgets import Label, PointerTooltip, SecretInput, TextField
 from metor.ui.gui.widgets.sheet import ActionSheet
 
 
@@ -503,6 +503,7 @@ class MetorApp(App):
         Returns:
             None
         """
+        SecretInput.revoke_all()
         if self.accessibility is not None:
             self.accessibility.native.focus(False)
             self.accessibility.revoke()
@@ -580,6 +581,7 @@ class MetorApp(App):
         if self._stopped:
             return
         self._stopped = True
+        SecretInput.revoke_all()
         with ExitStack() as cleanup:
             cleanup.callback(ActionSheet.reconcile)
             cleanup.callback(self.controller.close)

@@ -50,6 +50,11 @@ def project_contact(state: GuiState, event: IpcEvent | None) -> bool:
         ]
         aliases = {item.onion: item.alias for item in contacts}
         saved = {item.onion: item.saved for item in contacts}
+        if event.checked_onions is not None:
+            checked = set(event.checked_onions)
+            contacts = [
+                item for item in snapshot.contacts if item.onion not in checked
+            ] + contacts
     else:
         peer: str | None
         status: bool | None = None

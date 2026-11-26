@@ -6,6 +6,7 @@ from functools import partial
 from kivy.metrics import dp
 from kivy.uix.boxlayout import BoxLayout
 
+from metor.client.contact_qr import fits_contact_input
 from metor.ui.gui.constants import GuiLimits
 from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.widgets import Action, Label, TextField
@@ -65,7 +66,7 @@ def contact_form(
         Returns:
             None
         """
-        if len(value.encode('utf-8')) <= GuiLimits.CONTACT_BYTES:
+        if fits_contact_input(value, GuiLimits.CONTACT_BYTES):
             setattr(form, field, value)
         else:
             widget.text = getattr(form, field)

@@ -60,6 +60,7 @@ class ContactsDataEvent(NestedEntryCastingMixin, IpcEvent):
     saved: List[ContactEntry]
     discovered: List[ContactEntry]
     profile: str
+    checked_onions: Optional[List[str]] = None
     _nested_entry_types: ClassVar[Mapping[str, type[object]]] = {
         'saved': ContactEntry,
         'discovered': ContactEntry,
@@ -149,6 +150,9 @@ class RuntimeSnapshotEvent(NestedEntryCastingMixin, IpcEvent):
     settings_version: str = '1'
     profile_instance_id: Optional[str] = None
     authenticated_client_count: Optional[int] = None
+    snapshot_id: Optional[str] = None
+    page_offset: int = 0
+    next_offset: Optional[int] = None
     _nested_entry_types: ClassVar[Mapping[str, type[object]]] = {
         'contacts': ContactEntry,
         'conversations': DropConversationSummaryEntry,

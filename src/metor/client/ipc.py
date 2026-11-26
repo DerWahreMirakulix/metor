@@ -11,6 +11,7 @@ from typing import Callable, Optional
 from metor.client.stream import BufferedIpcEventReader
 from metor.core.api import ensure_request_id, IpcCommand, IpcEvent
 from metor.shared.constants import Constants
+from metor.shared.ipc_tls import authenticate_daemon
 
 
 class IpcClientError(ConnectionError):
@@ -43,7 +44,7 @@ class RequestLease:
 
 
 class IpcClient:
-    """Handles the raw TCP socket connection to the background Daemon."""
+    """Handles the pinned TLS connection to a managed Metor daemon."""
 
     def __init__(
         self,
@@ -52,6 +53,7 @@ class IpcClient:
         on_event: Callable[[IpcEvent], None],
         on_disconnect: Callable[[], None],
         host: str = Constants.LOCALHOST,
+        daemon_certificate: str = '',
     ) -> None:
         """
         Initializes the IPC Client.
@@ -62,6 +64,7 @@ class IpcClient:
             on_event (Callable[[IpcEvent], None]): Callback fired when a valid event arrives.
             on_disconnect (Callable[[], None]): Callback fired if the connection drops.
             host (str): Host address to connect to (defaults to 127.0.0.1).
+            daemon_certificate: Public PEM certificate enrolled for this daemon.
 
         Returns:
             None
@@ -69,6 +72,7 @@ class IpcClient:
         self._host: str = host
         self._port: int = port
         self._timeout: float = timeout
+        self._daemon_certificate = daemon_certificate
         self._on_event: Callable[[IpcEvent], None] = on_event
         self._on_disconnect: Callable[[], None] = on_disconnect
 
@@ -131,8 +135,8 @@ class IpcClient:
             start_listener (bool): Whether to start asynchronous event delivery.
 
         Returns:
-            bool: Whether this call installed a TCP connection. Authentication is
-                performed separately by the higher-level client bootstrap.
+            bool: Whether this call authenticated the daemon and installed its TLS
+                stream. User authorization follows in the higher-level bootstrap.
         """
         if not self._connect_lock.acquire(blocking=False):
             return False
@@ -160,6 +164,7 @@ class IpcClient:
             candidate.settimeout(self._timeout)
             try:
                 candidate.connect((self._host, self._port))
+                candidate = authenticate_daemon(candidate, self._daemon_certificate)
             except Exception:
                 candidate.close()
                 raise

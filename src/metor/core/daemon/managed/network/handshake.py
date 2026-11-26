@@ -2,7 +2,10 @@
 Module encapsulating the Tor peer authentication protocol tie-breaker algorithms.
 """
 
+import json
 from typing import Optional, Tuple
+
+from metor.shared import clean_onion
 
 from metor.core.api import ConnectionOrigin
 from metor.core.daemon.managed.models import TorCommand
@@ -21,6 +24,48 @@ _RECOVERY_HINT_ORIGINS: tuple[ConnectionOrigin, ...] = (
 
 class HandshakeProtocol:
     """Handles deterministic tie-breaking for mutual peer connections."""
+
+    @staticmethod
+    def auth_mode(
+        *,
+        is_async: bool = False,
+        is_call: bool = False,
+        origin: Optional[ConnectionOrigin] = None,
+    ) -> str:
+        """Returns the authenticated transport intent also carried by AUTH."""
+        if is_call:
+            return Constants.CALL_AUTH_FLAG
+        if is_async:
+            return _AUTH_ASYNC_FLAG
+        if origin in _RECOVERY_HINT_ORIGINS:
+            return _AUTH_RECOVERY_FLAG
+        return 'LIVE'
+
+    @staticmethod
+    def proof(
+        challenge: str,
+        initiator: str,
+        responder: str,
+        mode: str,
+        initiator_range: tuple[int, int],
+        responder_range: tuple[int, int],
+    ) -> bytes:
+        """Binds AUTH to both ordered roles, advertised generations and transport intent."""
+        return json.dumps(
+            [
+                'metor/peer-auth',
+                'initiator',
+                clean_onion(initiator),
+                initiator_range,
+                'responder',
+                clean_onion(responder),
+                responder_range,
+                mode,
+                challenge,
+            ],
+            separators=(',', ':'),
+            ensure_ascii=True,
+        ).encode('ascii')
 
     @staticmethod
     def build_auth_line(
@@ -51,12 +96,11 @@ class HandshakeProtocol:
             str(PEER_PROTOCOL_VERSION),
             str(PEER_PROTOCOL_MIN_SUPPORTED),
         ]
-        if is_call:
-            parts.append(Constants.CALL_AUTH_FLAG)
-        elif is_async:
-            parts.append(_AUTH_ASYNC_FLAG)
-        elif origin in _RECOVERY_HINT_ORIGINS:
-            parts.append(_AUTH_RECOVERY_FLAG)
+        mode = HandshakeProtocol.auth_mode(
+            is_async=is_async, is_call=is_call, origin=origin
+        )
+        if mode != 'LIVE':
+            parts.append(mode)
 
         return ' '.join(parts) + '\n'
 

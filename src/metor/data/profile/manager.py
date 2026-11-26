@@ -61,7 +61,9 @@ class ProfileManager:
         )
         self.paths: Paths = Paths(self.profile_name)
         self.config: Config = Config(self.paths)
-        from metor.data.profile.lifecycle import recover_profile_security_migration
+        from metor.data.profile.migration.journal import (
+            recover_profile_security_migration,
+        )
 
         recover_profile_security_migration(self.profile_name)
 
@@ -290,6 +292,12 @@ class ProfileManager:
             Constants.PROCESS_ROLE_DAEMON,
         )
 
+    def get_daemon_certificate(self) -> str:
+        """Reads the selected profile's locally provisioned public IPC certificate."""
+        from metor.data.profile.ipc_identity import read_daemon_certificate
+
+        return read_daemon_certificate(self.paths.get_config_dir())
+
     def get_daemon_port(self) -> Optional[int]:
         """
         Reads the active daemon port.
@@ -486,7 +494,7 @@ class ProfileManager:
         Returns:
             ProfileOperationResult: Structured local outcome for the CLI layer.
         """
-        from metor.data.profile.lifecycle import migrate_profile_security
+        from metor.data.profile.migration.orchestrator import migrate_profile_security
 
         return migrate_profile_security(
             name,

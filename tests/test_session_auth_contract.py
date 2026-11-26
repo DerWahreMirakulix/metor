@@ -3,6 +3,7 @@
 # ruff: noqa: E402
 
 import socket
+import json
 import os
 import sys
 import unittest
@@ -27,6 +28,8 @@ from metor.core.api import (
     IpcEvent,
     BeginVoiceCommand,
     ClientReauthorizedEvent,
+    ConnectedEvent,
+    InboxNotificationEvent,
     ClientUnlockMethod,
     ConfigureQuickUnlockCommand,
     Delivery,
@@ -35,6 +38,9 @@ from metor.core.api import (
     IncomingConnectionEvent,
     PendingConnectionExpiredEvent,
     PrepareProfileExitCommand,
+    SetSettingCommand,
+    SetConfigCommand,
+    SyncConfigCommand,
     NotificationPrivacy,
     QuickUnlockFailedEvent,
     QuickUnlockAction,
@@ -62,9 +68,81 @@ from metor.utils import Constants
 
 
 class SessionAuthContractTests(unittest.TestCase):
+    def test_password_strength_for_protected_policy_and_neutral_locked_exit(
+        self,
+    ) -> None:
+        sent: list[IpcEvent] = []
+        conn = cast(socket.socket, object())
+        controller = SessionAccessController(
+            require_auth=False,
+            send_callback=lambda _conn, event: sent.append(event),
+            lockout_timeout_callback=lambda: 30.0,
+            failure_limit_callback=lambda: 3,
+            live_consumer_available_callback=lambda: None,
+        )
+        self.assertFalse(controller.authorize(PrepareProfileExitCommand(), conn, False))
+        self.assertNotIn('profile', sent[-1].to_json())
+        controller.install_context(create_session_auth_context('profile-password'))
+        controller.mark_authenticated(conn, full_password=False)
+        commands = (
+            SetConfigCommand('daemon.require_local_auth', False),
+            SetSettingCommand('daemon.require_local_auth', False),
+            SyncConfigCommand(),
+        )
+        for command in commands:
+            self.assertFalse(controller.authorize(command, conn, True))
+            self.assertIsInstance(sent[-1], AuthRequiredEvent)
+        self.assertTrue(controller.authorize(GetContactsListCommand(), conn, True))
+        prompt = cast(AuthRequiredEvent, sent[-1])
+        assert prompt.challenge and prompt.salt
+        proof = build_session_auth_proof(
+            'profile-password', prompt.challenge, prompt.salt
+        )
+        self.assertFalse(
+            controller.authorize(AuthenticateSessionCommand(proof), conn, True)
+        )
+        self.assertIsInstance(sent[-1], SessionAuthenticatedEvent)
+        for command in commands:
+            self.assertTrue(controller.authorize(command, conn, True))
+
     """
     Covers session auth contract regression scenarios.
     """
+
+    def test_locked_connection_events_remain_decodable_for_every_privacy_level(
+        self,
+    ) -> None:
+        """Masking a peer must never invalidate the receiving client's SDK stream."""
+        controller = SessionAccessController(
+            require_auth=False,
+            send_callback=lambda _conn, _event: None,
+            lockout_timeout_callback=lambda: 30.0,
+            failure_limit_callback=lambda: 3,
+            live_consumer_available_callback=lambda: None,
+        )
+        for privacy in NotificationPrivacy:
+            conn = cast(socket.socket, object())
+            controller.mark_authenticated(conn)
+            controller.restrict(
+                conn, RestrictClientCommand(notification_privacy=privacy)
+            )
+            for source in (
+                ConnectedEvent('alice', 'peer'),
+                InboxNotificationEvent('alice', 'peer'),
+            ):
+                projected = controller.filter_restricted_event(conn, source)
+                if privacy is NotificationPrivacy.OFF or (
+                    isinstance(source, ConnectedEvent)
+                    and privacy is NotificationPrivacy.ANONYMIZE
+                ):
+                    self.assertIsNone(projected)
+                    continue
+                assert projected is not None
+                decoded = IpcEvent.from_dict(json.loads(projected.to_json()))
+                self.assertIsInstance(decoded, type(source))
+                if privacy is NotificationPrivacy.ANONYMIZE:
+                    self.assertNotIn('alice', projected.to_json())
+                    self.assertNotIn('peer', projected.to_json())
 
     def test_non_ascii_password_proofs_count_toward_lockout(self) -> None:
         """Malformed Unicode cannot bypass failure accounting by raising."""

@@ -418,6 +418,18 @@ class ChatContractTests(unittest.TestCase):
         self.assertIn('Startup summary:', renderer.print_message.call_args.args[0])
         self.assertIsNone(chat._startup_state)
 
+    def test_composer_does_not_follow_reassigned_alias(self) -> None:
+        """Changing the selected label's mapping cannot redirect pending text."""
+        renderer = Mock()
+        chat = self._build_chat(renderer)
+        chat._ipc = Mock()
+        chat._session.remember_peer('first', 'original')
+        chat._session.focused_alias = 'first'
+        chat._session.remember_peer('first', 'replacement')
+        chat._send_chat_message('stay with the selected contact')
+        chat._ipc.send_command.assert_not_called()
+        renderer.print_message.assert_called_once()
+
     def test_send_chat_message_buffers_while_retunneling(self) -> None:
         """
         Verifies that send chat message defers via the daemon while retunneling.
@@ -644,7 +656,9 @@ class ChatContractTests(unittest.TestCase):
         sent_cmd = ipc.send_command.call_args.args[0]
         self.assertIsInstance(sent_cmd, SendMessageCommand)
         self.assertIs(sent_cmd.delivery, Delivery.DROP)
-        renderer.apply_fallback_to_drop.assert_called_once_with(['msg-1'])
+        renderer.apply_fallback_to_drop.assert_called_once_with(
+            'aliceonion1234567890', ['msg-1']
+        )
         self.assertEqual(session.get_transport_state('alice'), ChatTransportState.DROP)
 
     def test_auto_reconnect_schedule_updates_prompt_state(self) -> None:
@@ -773,9 +787,13 @@ class ChatContractTests(unittest.TestCase):
             )
         )
 
-        renderer.apply_fallback_to_drop.assert_called_once_with(['msg-1'])
+        renderer.apply_fallback_to_drop.assert_called_once_with(
+            'aliceonion1234567890', ['msg-1']
+        )
 
-        renderer.apply_fallback_to_drop.assert_called_once_with(['msg-1'])
+        renderer.apply_fallback_to_drop.assert_called_once_with(
+            'aliceonion1234567890', ['msg-1']
+        )
 
     def test_local_disconnect_of_focused_session_clears_focus(self) -> None:
         """
@@ -1039,7 +1057,9 @@ class ChatContractTests(unittest.TestCase):
         sent_cmd = ipc.send_command.call_args.args[0]
         self.assertIsInstance(sent_cmd, SendMessageCommand)
         self.assertIs(sent_cmd.delivery, Delivery.DROP)
-        renderer.apply_fallback_to_drop.assert_called_once_with(['msg-1'])
+        renderer.apply_fallback_to_drop.assert_called_once_with(
+            'aliceonion1234567890', ['msg-1']
+        )
 
     def test_rename_during_reconnect_preserves_focus_and_updates_alias_lists(
         self,
@@ -1179,6 +1199,7 @@ class LivePushContentTests(unittest.TestCase):
         """
         session = Mock()
         session.focused_alias = focused_alias
+        session.focused_onion = focused_alias
         return EventHandler(
             ipc=Mock(),
             session=session,
@@ -1240,7 +1261,7 @@ class LivePushContentTests(unittest.TestCase):
         cast(Mock, handler._ipc).send_command.assert_called_once()
         command = cast(Mock, handler._ipc).send_command.call_args.args[0]
         self.assertIsInstance(command, MarkReadCommand)
-        self.assertEqual(command.target, 'alice')
+        self.assertEqual(command.target, 'alice.onion')
 
     def test_unfocused_push_then_consume_still_renders_message(self) -> None:
         """

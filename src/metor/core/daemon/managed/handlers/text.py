@@ -72,7 +72,8 @@ class TextCommandHandler:
             return
         if cmd.delivery is Delivery.LIVE:
             if cmd.local_acceptance:
-                if self._cm.resolve_target(cmd.target) is None:
+                resolved_live = self._cm.resolve_target(cmd.target)
+                if resolved_live is None:
                     self._send_event(
                         conn,
                         create_event(EventType.INVALID_TARGET, {'target': cmd.target}),
@@ -90,7 +91,7 @@ class TextCommandHandler:
                     self._send_event(conn, event)
 
                 self._network.send_message(
-                    cmd.target, cmd.content.text, cmd.msg_id, local_result
+                    resolved_live[1], cmd.content.text, cmd.msg_id, local_result
                 )
             else:
                 self._network.send_message(cmd.target, cmd.content.text, cmd.msg_id)
@@ -108,11 +109,6 @@ class TextCommandHandler:
 
             if resolved:
                 alias, onion = resolved
-                self._outbox.remember_message_request_id(
-                    cmd.msg_id,
-                    cmd.request_id,
-                    onion,
-                )
                 self._mm.queue_message(
                     contact_onion=str(onion),
                     direction=MessageDirection.OUT,
@@ -121,6 +117,11 @@ class TextCommandHandler:
                     payload=cmd.content.text,
                     status=MessageStatus.PENDING,
                     msg_id=cmd.msg_id,
+                )
+                self._outbox.remember_message_request_id(
+                    cmd.msg_id,
+                    cmd.request_id,
+                    onion,
                 )
                 if self._config.get_bool(SettingKey.RECORD_DROP_HISTORY):
                     self._hm.log_event(

@@ -258,6 +258,8 @@ class SessionAccessController(SessionEventMixin):
             self._authenticated_clients.add(conn)
             if full_password:
                 self._full_auth_clients.add(conn)
+            else:
+                self._full_auth_clients.discard(conn)
 
     def clear_connection_auth(self, conn: socket.socket) -> None:
         """Clears pending authentication state for one IPC connection.

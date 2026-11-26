@@ -6,11 +6,12 @@ Enforces strict timeouts to prevent socket blockades and uses robust UTF-8 decod
 
 import os
 import socket
+import ssl
 import threading
 import json
 import secrets
 import time
-from typing import List, Callable, Dict, Optional, Iterable
+from typing import List, Callable, Dict, Optional, Iterable, cast
 
 from metor.core.api import (
     EventType,
@@ -23,7 +24,9 @@ from metor.core.api import (
 )
 from metor.data import SettingKey
 from metor.data.profile import ProfileManager
+from metor.data.profile.ipc_identity import daemon_tls_context
 from metor.shared import recv_before
+from metor.shared.ipc_tls import IpcTlsSocket
 from metor.utils import Constants
 from metor.core.daemon.managed.writer import BoundedSocketWriter, FrameQueueFull
 
@@ -94,6 +97,9 @@ class IpcServer:
         self._error_callback: Optional[Callable[[str], None]] = error_callback
 
         self._clients: List[socket.socket] = []
+        self._negotiating: set[socket.socket] = set()
+        self._limit_socket: socket.socket | None = None
+        self._tls: ssl.SSLContext | None = None
         self._lock: threading.Lock = threading.Lock()
         self._client_write_locks: Dict[socket.socket, threading.Lock] = {}
         self._client_writers: Dict[socket.socket, BoundedSocketWriter] = {}
@@ -174,12 +180,18 @@ class IpcServer:
             self._stop_flag.clear()
             server: socket.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             try:
-                server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                bind_option = (
+                    socket.SO_EXCLUSIVEADDRUSE
+                    if os.name == 'nt'
+                    else socket.SO_REUSEADDR
+                )
+                server.setsockopt(socket.SOL_SOCKET, bind_option, 1)
 
                 static_port: Optional[int] = self._pm.get_static_port()
                 bind_port: int = static_port if static_port else 0
 
                 server.bind((Constants.LOCALHOST, bind_port))
+                self._tls = daemon_tls_context(self._pm.paths.get_config_dir())
                 server.listen(Constants.SERVER_BACKLOG)
 
                 self._server = server
@@ -191,6 +203,7 @@ class IpcServer:
                 acceptor.start()
             except BaseException:
                 self._stop_flag.set()
+                self._tls = None
                 failed_port = self.port
                 try:
                     server.close()
@@ -228,6 +241,7 @@ class IpcServer:
             self._stop_flag.set()
             server = self._server
             self._server = None
+            self._tls = None
             acceptor = self._acceptor_thread
         try:
             self._stop_listener(server, acceptor)
@@ -264,6 +278,9 @@ class IpcServer:
                         self._acceptor_thread = None
         with self._lock:
             clients: List[socket.socket] = list(self._clients)
+            clients.extend(self._negotiating)
+            self._negotiating.clear()
+            self._limit_socket = None
             self._clients.clear()
             self._client_write_locks.clear()
             writers = list(self._client_writers.values())
@@ -271,6 +288,10 @@ class IpcServer:
         for writer in writers:
             writer.close()
         for client in clients:
+            try:
+                client.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
             try:
                 client.close()
             except Exception:
@@ -526,7 +547,8 @@ class IpcServer:
             None
         """
         server: Optional[socket.socket] = self._server
-        if not server:
+        tls = self._tls
+        if not server or tls is None:
             return
 
         daemon_ipc_timeout: float = self._pm.config.get_float(
@@ -536,31 +558,40 @@ class IpcServer:
         while not self._stop_flag.is_set():
             try:
                 server.settimeout(Constants.THREAD_POLL_TIMEOUT)
-                conn, _ = server.accept()
-                conn.settimeout(daemon_ipc_timeout)
+                raw, _ = server.accept()
+                try:
+                    raw.settimeout(daemon_ipc_timeout)
+                    conn = cast(
+                        IpcTlsSocket,
+                        tls.wrap_socket(
+                            raw, server_side=True, do_handshake_on_connect=False
+                        ),
+                    )
+                finally:
+                    raw.close()
                 max_clients: int = self._pm.config.get_int(SettingKey.MAX_IPC_CLIENTS)
 
                 with self._lock:
-                    if len(self._clients) >= max_clients:
-                        reject_conn: Optional[socket.socket] = conn
-                    else:
-                        reject_conn = None
-
-                if reject_conn is not None:
-                    self._reject_client_limit(reject_conn, max_clients)
-                    continue
+                    reject = len(self._clients) + len(self._negotiating) >= max_clients
+                    if reject and self._limit_socket is not None:
+                        conn.close()
+                        continue
+                    if reject:
+                        self._limit_socket = conn
+                    self._negotiating.add(conn)
 
                 try:
                     handler_thread: threading.Thread = threading.Thread(
-                        target=self._handler,
-                        args=(conn, time.monotonic()),
+                        target=self._secure_handler,
+                        args=(conn, time.monotonic(), max_clients if reject else None),
                         daemon=True,
                     )
-                    with self._lock:
-                        self._clients.append(conn)
                     handler_thread.start()
                 except Exception:
                     with self._lock:
+                        self._negotiating.discard(conn)
+                        if self._limit_socket is conn:
+                            self._limit_socket = None
                         if conn in self._clients:
                             self._clients.remove(conn)
                         self._client_write_locks.pop(conn, None)
@@ -589,6 +620,30 @@ class IpcServer:
                     'IPC acceptor hit an unexpected runtime error. Continuing.'
                 )
                 continue
+
+    def _secure_handler(
+        self, conn: IpcTlsSocket, accepted_at: float, limit: int | None
+    ) -> None:
+        """Completes TLS in a bounded admission slot before publication or dispatch."""
+        try:
+            conn.activate()
+            if limit is not None:
+                self._reject_client_limit(conn, limit)
+                return
+            with self._lock:
+                if self._stop_flag.is_set() or conn not in self._negotiating:
+                    return
+                self._negotiating.remove(conn)
+                self._clients.append(conn)
+            self._handler(conn, accepted_at)
+        except (OSError, ValueError):
+            pass
+        finally:
+            with self._lock:
+                self._negotiating.discard(conn)
+                if self._limit_socket is conn:
+                    self._limit_socket = None
+            conn.close()
 
     def _handler(self, conn: socket.socket, accepted_at: float | None = None) -> None:
         """

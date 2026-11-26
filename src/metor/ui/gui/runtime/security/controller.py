@@ -51,6 +51,9 @@ class SecurityController:
         self.restriction: ClientRestrictedEvent | None = None
         self.pending = False
         self.restoring = False
+        self._unlock_pending = False
+        self._restoration_active = False
+        self._native_relock = False
         self.retry_at = 0.0
         self._retry_display_seconds = 0
         self.profile_label = ''
@@ -148,6 +151,22 @@ class SecurityController:
         self.restoring = False
         return True
 
+    def native_lock(self) -> None:
+        """Fence earlier authorization while retaining any independently owned call."""
+        if self.controller.state.route.view == 'V05' and (
+            self._unlock_pending or self._restoration_active
+        ):
+            self._native_relock = True
+            self.controller.state.snapshot = None
+            self.controller.state.status = 'Locking…'
+            if self.restoring:
+                self.restoring = False
+                self._restoration_active = False
+                self._native_relock = False
+                self.pending = True
+            return
+        self.lock()
+
     def unlock(self, secret: str = '', *, password: bool = False) -> bool:
         """Submits one proof to the current Core-issued challenge.
 
@@ -187,7 +206,10 @@ class SecurityController:
                 )
             return client.request(ReauthorizeClientCommand(method, proof), IpcEvent)
 
-        return self.controller.submit('security:unlock', request)
+        admitted = self.controller.submit('security:unlock', request)
+        if admitted:
+            self._unlock_pending = True
+        return admitted
 
     @property
     def retry_seconds(self) -> int:
@@ -273,6 +295,20 @@ class SecurityController:
         if not operation.startswith('security:'):
             return False
         state = self.controller.state
+        if operation == 'security:unlock':
+            self._unlock_pending = False
+        if self._native_relock:
+            if operation == 'security:snapshot':
+                return True
+            if operation in {'security:restore', 'security:unlock'}:
+                self._native_relock = False
+                self._restoration_active = False
+                if operation == 'security:restore' or isinstance(
+                    event, ClientReauthorizedEvent
+                ):
+                    self.restriction = None
+                    self.pending = True
+                    return True
         if isinstance(event, RuntimeSnapshotEvent) and operation == 'security:snapshot':
             if event.profile_instance_id != self._profile_instance:
                 self.controller.close()
@@ -306,6 +342,7 @@ class SecurityController:
             self.retry_at = 0.0
             self.restriction = None
             self.restoring = True
+            self._restoration_active = True
             state.status = 'Opening Metor…'
         elif isinstance(event, GuiPreferencesEvent) and operation == 'security:restore':
             if (
@@ -319,6 +356,7 @@ class SecurityController:
             state.covered = False
             state.status = ''
             self.restoring = False
+            self._restoration_active = False
             self.profile_label = ''
             self.activity()
         else:
@@ -371,7 +409,7 @@ class SecurityController:
                 Returns:
                     IpcEvent | None: Validated profile metadata after the snapshot.
                 """
-                snapshot = client.runtime_snapshot()
+                snapshot = client.runtime_snapshot(first_page_only=True)
                 preferences = client.request(
                     GetGuiPreferencesCommand(), GuiPreferencesEvent
                 )

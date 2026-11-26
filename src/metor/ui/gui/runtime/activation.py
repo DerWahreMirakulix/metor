@@ -80,6 +80,7 @@ class ProfileActivation:
                 self.publish(activation, generation)
                 return activation.snapshot
             finally:
+                interactions.release_candidate()
                 interactions.startup_secret(None)
                 if not installed:
                     client.disconnect()
@@ -108,7 +109,10 @@ class ProfileActivation:
             Returns:
                 None
             """
-            if not controller.purge.observe(generation, event):
+            if (
+                not controller.purge.observe(generation, event)
+                and not interactions.cancelled
+            ):
                 controller.mailbox.put(Update(generation, 'event', event))
 
         def on_disconnect() -> None:
@@ -119,13 +123,14 @@ class ProfileActivation:
             Returns:
                 None
             """
-            if not controller.purge.lost(generation):
+            if not controller.purge.lost(generation) and not interactions.cancelled:
                 controller.mailbox.put(
                     Update(generation, 'lost', status='Connection lost')
                 )
 
-        return MetorClient(
+        client = MetorClient(
             result.port,
+            daemon_certificate=result.daemon_certificate,
             auth_provider=interactions,
             unlock_timeout=result.unlock_timeout,
             lifetime_token=result.lifetime_token,
@@ -133,6 +138,9 @@ class ProfileActivation:
             on_event=on_event,
             on_disconnect=on_disconnect,
         )
+        if not interactions.watch_candidate(client.disconnect):
+            raise RuntimeError('Profile activation abandoned')
+        return client
 
     def hydrate(
         self, client: MetorClient, initialized: InitEvent
@@ -147,7 +155,7 @@ class ProfileActivation:
         """
         if not client.register_live_consumer():
             raise RuntimeError('Consumer registration failed')
-        snapshot = client.runtime_snapshot()
+        snapshot = client.runtime_snapshot(first_page_only=True)
         owner = None
         if 'protected_voice_owner' in initialized.capabilities:
             owner = VoiceOwnerLease.register(client)

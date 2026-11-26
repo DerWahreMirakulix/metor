@@ -353,6 +353,10 @@ class Help:
                 ),
                 SubCommandDef('rename <old> <new>', 'Rename an existing profile.'),
                 SubCommandDef('set-default <name>', 'Set the default startup profile.'),
+                SubCommandDef(
+                    'trust <name> <certificate>',
+                    'Trust a remote daemon certificate obtained over a verified channel.',
+                ),
                 SubCommandDef('clear <name>', 'Wipe the SQLite database of a profile.'),
             ],
             options=(

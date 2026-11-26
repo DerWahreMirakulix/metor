@@ -96,6 +96,7 @@ class DatabaseCommandHandler(
         self._delete_persistent_blob_cb = delete_persistent_blob_cb
         self._operation_lock = operation_lock or threading.RLock()
         self._cancel_drop_requests_cb = cancel_drop_requests_cb
+        self._mm.finish_voice_deletions(self._delete_persistent_blob_cb)
 
     def handle(self, cmd: IpcCommand) -> IpcEvent:
         """
@@ -123,7 +124,8 @@ class DatabaseCommandHandler(
             return self._handle_clear_contacts(cmd)
 
         if isinstance(cmd, ClearProfileDbCommand):
-            return self._handle_clear_profile_db(cmd)
+            with self._operation_lock:
+                return self._handle_clear_profile_db(cmd)
 
         if isinstance(cmd, (GetHistoryCommand, GetRawHistoryCommand)):
             return self._handle_get_history(cmd)

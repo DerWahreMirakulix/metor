@@ -12,7 +12,7 @@ import os
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, cast
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 os.environ['KIVY_NO_ARGS'] = '1'
 os.environ['KIVY_NO_CONFIG'] = '1'
@@ -22,6 +22,7 @@ os.environ['MESA_SHADER_CACHE_DISABLE'] = 'true'
 from kivy.app import App
 from kivy.base import EventLoop
 from kivy.clock import Clock
+from kivy.cache import Cache
 from kivy.core.window import Window
 from kivy.input.providers.mouse import MouseMotionEvent
 from kivy.uix.boxlayout import BoxLayout
@@ -29,6 +30,8 @@ from kivy.uix.widget import Widget
 
 from metor.client import FrontendLaunchContext, FrontendProfileState
 from metor.core.api import Delivery, DropQueuedEvent
+from metor.ui.gui.accessibility.projection import Projection
+from metor.ui.gui.constants import GuiLimits
 from metor.ui.gui.runtime import GuiController
 from metor.ui.gui.state import Route
 from metor.ui.gui.state.mailbox import Update
@@ -37,6 +40,7 @@ from metor.ui.gui.views.input import InputDock
 from metor.ui.gui.views.peer.composer import Composer
 from metor.ui.gui.widgets import Action, SecretInput, TextField
 from metor.ui.gui.widgets.keyboard import KeyboardKey
+from metor.ui.gui.widgets.message import MessageBubble
 
 if TYPE_CHECKING:
     from metor.ui.gui.app import MetorApp
@@ -209,7 +213,47 @@ class TextInputHarness(App):
             """Confirm reverse visibility and record only the non-secret test results."""
             assert_visible(secret)
             assert secret.text == 'synthetic'
+            secret.text = ''
+            marker = 'native-field-fixture'
+            secret.insert_text(marker)
+            assert marker not in repr(Projection().capture(secret))
+            with patch('kivy.core.clipboard.Clipboard.copy') as copy:
+                secret.copy(marker)
+                secret._cut(marker)
+                copy.assert_not_called()
+            assert secret.cursor_offset() > 0
+            assert all(
+                marker not in str(key) for key in Cache._objects['textinput.width']
+            )
+            secret.do_backspace()
+            secret.select_all()
+            secret.delete_selection()
+            assert not secret._undo and not secret._redo
+            secret.insert_text(marker)
+            secret._ime_composition = marker
+            secret._command = marker
+            SecretInput.revoke_all()
+            assert not (secret.text or secret._command or secret._ime_composition)
+            assert not secret._undo and not secret._redo
             confirm.assert_not_called()
+            text = ('Wide glyphs and short lines.\n' * 64) + ('w' * 3000)
+            bubble = MessageBubble(text, '', True, width=180)
+            bubble._body.font_size = 42
+            chunks = []
+            while True:
+                assert (
+                    max(bubble._body.texture_size) <= GuiLimits.MESSAGE_TEXTURE_PIXELS
+                )
+                chunks.append(bubble._body.text)
+                if bubble._end == len(text):
+                    break
+                assert chunks[-1] and len(chunks) < len(text)
+                bubble._turn(True)
+            assert len(chunks) > 1 and ''.join(chunks) == text
+            bubble._turn(False)
+            assert bubble._body.text == chunks[-2]
+            bubble.revoke()
+            assert not (bubble._source or bubble._body.text)
             self.finish()
 
         Clock.schedule_once(forward, 0.2)
@@ -219,6 +263,8 @@ class TextInputHarness(App):
         self.result.write_text(
             json.dumps(
                 {
+                    'secret_geometry_history_and_composition': 'pass',
+                    'narrow_large_font_message_sections_fit_and_reassemble': 'pass',
                     'physical_enter_sends_once_until_release': 'pass',
                     'physical_shift_enter_newline': 'pass',
                     'local_shift_enter_newline_then_enter_sends': 'pass',

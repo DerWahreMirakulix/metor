@@ -46,6 +46,7 @@ CREATE TABLE IF NOT EXISTS message_receipts (
     direction TEXT NOT NULL CHECK (direction IN ('in', 'out')),
     delivery TEXT NOT NULL CHECK (delivery IN ('live', 'drop')),
     content_type TEXT NOT NULL CHECK (content_type IN ('text', 'voice')),
+    content_tag TEXT,
     retained_bytes INTEGER NOT NULL DEFAULT 0 CHECK (retained_bytes >= 0),
     status TEXT NOT NULL CHECK (status IN ('pending', 'delivered', 'unread', 'read', 'draft')),
     visible_in_history INTEGER NOT NULL DEFAULT 0 CHECK (visible_in_history IN (0, 1)),
@@ -77,7 +78,7 @@ CREATE TABLE IF NOT EXISTS message_archive (
 
 PROFILE_METADATA_TABLE_QUERY: str = """
 CREATE TABLE IF NOT EXISTS profile_metadata (
-    name TEXT PRIMARY KEY NOT NULL CHECK (name IN ('instance_id', 'ui.gui')),
+    name TEXT PRIMARY KEY NOT NULL CHECK (name IN ('instance_id', 'ui.gui', 'text_receipt_key')),
     revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),
     value TEXT NOT NULL
 )
@@ -96,6 +97,10 @@ def create_profile_metadata(cursor: SqlCipherCursor) -> None:
     cursor.execute(
         'INSERT OR IGNORE INTO profile_metadata (name, value) VALUES (?, ?)',
         ('instance_id', secrets.token_hex(Constants.PROFILE_INSTANCE_BYTES)),
+    )
+    cursor.execute(
+        'INSERT OR IGNORE INTO profile_metadata (name, value) VALUES (?, ?)',
+        ('text_receipt_key', secrets.token_hex(Constants.TEXT_RECEIPT_KEY_BYTES)),
     )
 
 
@@ -153,6 +158,9 @@ def create_core_schema(cursor: SqlCipherCursor) -> None:
     cursor.execute(MESSAGE_ARCHIVE_TABLE_QUERY)
     create_profile_metadata(cursor)
     create_voice_producers(cursor)
+    cursor.execute(
+        'CREATE TABLE IF NOT EXISTS voice_blob_deletions (object_id TEXT PRIMARY KEY NOT NULL)'
+    )
     for index_query in INDEX_QUERIES:
         cursor.execute(index_query)
 

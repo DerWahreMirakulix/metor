@@ -789,3 +789,25 @@ uses background `#101619`, surface `#171F22`, primary text `#F3F7F6`, DROP
 Components may use related surface and outline tokens, but privacy, delivery,
 and authorization meaning must stay legible in native rendering, with keyboard
 focus and accessible names. Reduced motion preserves all state and safety cues.
+
+### Bounded startup and private native state
+
+The GUI opens on the first Core metadata page and loads remaining rows on its
+background read lane. Each page identifies one frozen runtime revision and
+profile instance. An expired cursor restarts the inventory. Pending and live
+rows precede conversations and contacts. The SDK's default snapshot operation
+collects all pages from that same view or reports an unavailable result. A caller
+can request the first page explicitly and use the continuation operation.
+
+An OS screen lock during startup or profile switching retires that activation.
+A screen lock during an unlock proof or restoration keeps the native cover in
+place and reestablishes the restriction on the same IPC client. Restricted
+anonymous clients receive no established-connection event carrying a required
+peer address.
+
+Native credential fields measure only masking glyphs and disable input history.
+Submitting, abandoning or covering a credential form clears pending editing
+state. Contact QR import accepts a UTF-8 version-one object up to 4096 bytes,
+with unique recognized fields. Long message bodies use previous/next sections
+measured at the actual wrapped width and font size, with a 1024-pixel body
+texture budget for each displayed section.

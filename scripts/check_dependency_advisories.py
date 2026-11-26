@@ -1,5 +1,6 @@
 """Check every public release and development pin on both platforms against OSV."""
 
+from datetime import UTC, datetime
 import json
 from pathlib import Path
 import re
@@ -8,7 +9,7 @@ import time
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from scripts.release.bundle import PIP_VERSION
+from scripts.release.inputs import PIP_VERSION
 from scripts.release.paths import PROJECT_ROOT
 
 
@@ -88,6 +89,9 @@ def main() -> int:
     """Return failure for reported advisories, unreadable locks or an unavailable database."""
     try:
         pins = public_pins(PROJECT_ROOT)
+        print(f'OSV query at {datetime.now(UTC).isoformat()}:')
+        for ecosystem, name, version in pins:
+            print(f'  {ecosystem} {name}=={version}')
         issues = findings(pins, query_osv(pins))
     except (OSError, ValueError, KeyError, TypeError) as exc:
         print(f'Dependency advisory check incomplete: {exc}', file=sys.stderr)

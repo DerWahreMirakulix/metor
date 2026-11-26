@@ -1,85 +1,46 @@
-"""Atomically publish the already-created release branch and annotated tag refs."""
+"""Publish an annotated release tag for the approved main commit without writing a branch."""
 
 import argparse
 from pathlib import Path
+import re
 import subprocess
 
-
-def _validate_ref_component(value: str, namespace: str, cwd: Path) -> None:
-    """Rejects malformed or option-like ref components through Git's own rules.
-
-    Args:
-        value: Short branch or tag name supplied by the controlled release job.
-        namespace: Exact Git namespace containing the short name.
-        cwd: Repository whose Git implementation validates the ref.
-    Returns:
-        None
-    """
-    if not value or value.startswith('-'):
-        raise ValueError('Invalid release ref name.')
-    subprocess.run(
-        ['git', 'check-ref-format', f'{namespace}/{value}'],
-        cwd=cwd,
-        check=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
+from scripts.release.semver import SemVer
 
 
-def push_atomic_release_refs(
-    repository: Path, remote: str, branch: str, tag: str
-) -> None:
-    """Updates the release branch and tag in one required atomic Git push.
-
-    Args:
-        repository: Checked-out repository containing HEAD and the annotated tag.
-        remote: Configured Git remote name.
-        branch: Destination branch short name.
-        tag: Existing local release tag short name.
-    Returns:
-        None
-    """
+def publish_tag(repository: Path, remote: str, tag: str, revision: str) -> None:
+    """Create or verify the tag without replacing any existing remote ref."""
+    if not re.fullmatch(r'[a-f0-9]{40}', revision) or tag != f'v{SemVer.parse(tag)}':
+        raise ValueError(
+            'Expected an immutable candidate SHA and canonical release tag.'
+        )
     if not remote or remote.startswith('-'):
-        raise ValueError('Invalid release remote.')
-    root = repository.resolve(strict=True)
-    _validate_ref_component(branch, 'refs/heads', root)
-    _validate_ref_component(tag, 'refs/tags', root)
-    subprocess.run(
-        [
-            'git',
-            'push',
-            '--atomic',
-            '--porcelain',
-            remote,
-            f'HEAD:refs/heads/{branch}',
-            f'refs/tags/{tag}:refs/tags/{tag}',
-        ],
-        cwd=root,
-        check=True,
-    )
+        raise ValueError('Invalid Git remote.')
 
+    def git(*args: str) -> str:
+        return subprocess.check_output(
+            ['git', *args], cwd=repository, text=True
+        ).strip()
 
-def main() -> None:
-    """Parses the controlled release ref targets and performs the atomic push.
-
-    Args:
-        None
-    Returns:
-        None
-    """
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--repository', type=Path, default=Path.cwd())
-    parser.add_argument('--remote', default='origin')
-    parser.add_argument('--branch', required=True)
-    parser.add_argument('--tag', required=True)
-    args = parser.parse_args()
-    push_atomic_release_refs(
-        args.repository,
-        args.remote,
-        args.branch,
-        args.tag,
-    )
+    if git('rev-parse', 'HEAD') != revision:
+        raise ValueError('Checkout is not the requested release candidate.')
+    ref = f'refs/tags/{tag}'
+    rows = git('ls-remote', remote, 'refs/heads/main', ref, ref + '^{}')
+    refs = {name: sha for sha, name in (line.split() for line in rows.splitlines())}
+    if refs.get('refs/heads/main') != revision:
+        raise ValueError('main moved after release validation.')
+    if ref in refs:
+        if refs.get(ref + '^{}', refs[ref]) != revision:
+            raise ValueError('Existing release tag has another target.')
+        return
+    git('tag', '-a', tag, revision, '-m', f'Metor {tag}')
+    git('push', remote, f'{ref}:{ref}')
 
 
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--remote', default='origin')
+    parser.add_argument('--tag', required=True)
+    parser.add_argument('--revision', required=True)
+    args = parser.parse_args()
+    publish_tag(Path.cwd(), args.remote, args.tag, args.revision)

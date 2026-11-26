@@ -7,6 +7,7 @@ from typing import Callable, Optional
 
 from metor.core.profile_keys import KeyProtector, PasswordKeyProtector
 from metor.data.profile import ProfileManager
+from metor.data.profile.migration.journal import migration_lock, migration_paths
 from metor.data.sql import SqlManager
 from metor.utils import secure_remove_path
 
@@ -94,7 +95,18 @@ def destroy_profile_storage(
         active_protector = protector or PasswordKeyProtector(
             pm.paths.get_keyslot_file()
         )
-        active_protector.destroy()
+        # A committed mode change can leave its previous generation available
+        # for deferred cleanup. It may contain another keyslot or plaintext.
+        try:
+            journal, staged, backup = migration_paths(pm.profile_name)
+            if any(
+                path.is_symlink() or path.exists() for path in (journal, staged, backup)
+            ):
+                with migration_lock(pm.profile_name):
+                    for path in (staged, backup, journal):
+                        secure_remove_path(path)
+        finally:
+            active_protector.destroy()
     except Exception as exc:
         errors[DestructionPhase.KEY_DESTRUCTION] = exc
     else:

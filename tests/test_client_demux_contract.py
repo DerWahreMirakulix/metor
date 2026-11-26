@@ -69,8 +69,8 @@ class ClientDemuxContractTests(unittest.TestCase):
         )
         client.begin_request('left')
         client.begin_request('right')
-        right = AckEvent(msg_id='right-message', request_id='right')
-        left = AckEvent(msg_id='left-message', request_id='left')
+        right = AckEvent(onion='peer', msg_id='right-message', request_id='right')
+        left = AckEvent(onion='peer', msg_id='left-message', request_id='left')
         client._dispatch_event(right)
         client._dispatch_event(left)
 
@@ -155,7 +155,7 @@ class ClientDemuxContractTests(unittest.TestCase):
             client._response_waiters.clear()
             client._responses.clear()
         client.begin_request('new-stream')
-        response = AckEvent(msg_id='new', request_id='new-stream')
+        response = AckEvent(onion='peer', msg_id='new', request_id='new-stream')
         client._dispatch_event(response)
         self.assertIs(client.wait_for_response('new-stream'), response)
 
@@ -163,6 +163,12 @@ class ClientDemuxContractTests(unittest.TestCase):
         self,
     ) -> None:
         """C07: callback reconnect cannot reuse the reader, queue, or old workers."""
+        self.enterContext(
+            patch(
+                'metor.client.ipc.authenticate_daemon',
+                side_effect=lambda sock, _cert: sock,
+            )
+        )
         reconnected = threading.Event()
         delivered = threading.Event()
         socket_two = Mock()
@@ -194,7 +200,7 @@ class ClientDemuxContractTests(unittest.TestCase):
         self.assertEqual(client._listener_generation, 2)
         self.assertIsNot(client._reader, old_reader)
         self.assertIsNot(client._event_queue, old_queue)
-        client._dispatch_event(AckEvent(msg_id='new-generation'), 2)
+        client._dispatch_event(AckEvent(onion='peer', msg_id='new-generation'), 2)
         self.assertTrue(delivered.wait(timeout=1.0))
         client.stop()
 
@@ -219,7 +225,11 @@ class ClientDemuxContractTests(unittest.TestCase):
                         lease = client.begin_request('pending')
                         daemon_socket.sendall(
                             malformed
-                            + AckEvent(msg_id='must-not-arrive', request_id='pending')
+                            + AckEvent(
+                                onion='peer',
+                                msg_id='must-not-arrive',
+                                request_id='pending',
+                            )
                             .to_json()
                             .encode('utf-8')
                             + b'\n'

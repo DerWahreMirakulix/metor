@@ -6,6 +6,7 @@ from enum import Enum
 from typing import Optional, cast
 
 from metor.core.api import JsonValue
+from metor.shared.constants import Constants
 from metor.shared.network import decode_tor_v3_onion_public_key, ensure_onion_format
 
 
@@ -48,6 +49,24 @@ class ContactQrValidationResult:
         return self.payload is not None
 
 
+def _unique_fields(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    """Reject ambiguous duplicate fields instead of accepting the final value."""
+    fields = dict(pairs)
+    if len(fields) != len(pairs):
+        raise ValueError('Duplicate contact field')
+    return fields
+
+
+def fits_contact_input(value: str, byte_limit: int) -> bool:
+    """Check the byte budget and encoding before updating native form state."""
+    if len(value) > byte_limit:
+        return False
+    try:
+        return len(value.encode('utf-8')) <= byte_limit
+    except UnicodeEncodeError:
+        return False
+
+
 def validate_contact_qr(raw: bytes | str) -> ContactQrValidationResult:
     """Validates a version-one JSON contact QR payload.
 
@@ -57,21 +76,29 @@ def validate_contact_qr(raw: bytes | str) -> ContactQrValidationResult:
     Returns:
         ContactQrValidationResult: Typed payload or stable failure code.
     """
+    if len(raw) > Constants.CONTACT_QR_MAX_BYTES:
+        return ContactQrValidationResult(error=ContactQrError.MALFORMED)
     try:
-        raw_text: str = raw.decode('utf-8') if isinstance(raw, bytes) else raw
-        decoded: object = json.loads(raw_text)
-    except (UnicodeDecodeError, json.JSONDecodeError):
+        encoded = raw.encode('utf-8') if isinstance(raw, str) else raw
+        if len(encoded) > Constants.CONTACT_QR_MAX_BYTES:
+            return ContactQrValidationResult(error=ContactQrError.MALFORMED)
+        decoded: object = json.loads(
+            encoded.decode('utf-8'), object_pairs_hook=_unique_fields
+        )
+    except (UnicodeError, ValueError, RecursionError):
         return ContactQrValidationResult(error=ContactQrError.MALFORMED)
     if not isinstance(decoded, dict):
         return ContactQrValidationResult(error=ContactQrError.MALFORMED)
     data: dict[str, JsonValue] = cast(dict[str, JsonValue], decoded)
     if set(data) - {'version', 'onion', 'alias'}:
         return ContactQrValidationResult(error=ContactQrError.INVALID_FIELDS)
-    if data.get('version') != 1:
+    if type(data.get('version')) is not int or data.get('version') != 1:
         return ContactQrValidationResult(error=ContactQrError.UNSUPPORTED_VERSION)
     alias_value = data.get('alias')
     if alias_value is not None and (
-        not isinstance(alias_value, str) or not alias_value.strip()
+        not isinstance(alias_value, str)
+        or not alias_value.strip()
+        or any(0xD800 <= ord(character) <= 0xDFFF for character in alias_value)
     ):
         return ContactQrValidationResult(error=ContactQrError.INVALID_ALIAS)
     onion_value = data.get('onion')

@@ -56,9 +56,18 @@ def _format_profile_result_by_code(
     if operation_code is ProfileOperationCode.CANNOT_MIGRATE_RUNNING:
         return f"Cannot migrate security mode for '{params['profile']}' while its daemon is running."
     if operation_code is ProfileOperationCode.SECURITY_MODE_UNCHANGED:
-        return f"Profile '{params['profile']}' is already using {params['security_mode']} storage."
+        message = f"Profile '{params['profile']}' is already using {params['security_mode']} storage."
+        if params.get('cleanup_complete'):
+            return message + ' Previous storage cleanup is complete.'
+        return message
     if operation_code is ProfileOperationCode.SECURITY_MODE_MIGRATED:
         return f"Profile '{params['profile']}' successfully migrated to {params['security_mode']} storage."
+    if operation_code is ProfileOperationCode.SECURITY_CLEANUP_PENDING:
+        return (
+            f"Profile '{params['profile']}' now uses {params['security_mode']} storage. "
+            'The previous profile copy is still on disk. Release any open files and retry '
+            f'metor profiles migrate {params["profile"]} --to {params["security_mode"]}.'
+        )
     if operation_code is ProfileOperationCode.SECURITY_MIGRATION_FAILED:
         reason: str = str(params.get('reason') or 'Security migration failed.')
         return reason

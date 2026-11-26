@@ -155,6 +155,7 @@ class NetworkManager:
             call_lost_callback=self.calls.transport_lost,
             call_keeps_transport_callback=self.calls.keeps_transport,
             call_owns_transport_callback=self.calls.owns_transport,
+            operation_lock=self._operation_lock,
         )
 
         self._controller.set_receiver(self._receiver)

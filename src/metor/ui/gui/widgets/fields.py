@@ -1,6 +1,7 @@
 """Native text and credential fields with local editing and deliberate focus feedback."""
 
-from typing import ClassVar, Literal, Protocol, cast
+from typing import Any, ClassVar, Literal, Protocol, cast
+from weakref import WeakSet
 
 from kivy.graphics import Canvas, Color, InstructionGroup, RoundedRectangle
 from kivy.metrics import dp
@@ -237,6 +238,8 @@ class TextField(TextInput):
 class SecretInput(TextField):
     """Masked local credential input with clipboard export disabled."""
 
+    _fields: ClassVar[WeakSet['SecretInput']] = WeakSet()
+
     def __init__(self, *, accessible_name: str = '', **kwargs: object) -> None:
         """Builds a password field with the bundled font.
 
@@ -263,6 +266,46 @@ class SecretInput(TextField):
         )
         self.use_bubble = False
         self.use_handles = False
+        self._fields.add(self)
+        self.bind(text=self._discard_empty_buffers)
+
+    def _get_text_width(self, text: str, tab_width: int, _label_cached: Any) -> float:
+        """Keep Kivy's global geometry cache free of actual credential strings."""
+        return float(
+            super()._get_text_width(
+                self.password_mask * len(text), tab_width, _label_cached
+            )
+        )
+
+    def _set_unredo_insert(self, *_args: object, **_kwargs: object) -> None:
+        """Do not store inserted credentials in Kivy's redo records."""
+
+    def _set_unredo_bkspc(self, *_args: object, **_kwargs: object) -> None:
+        """Do not retain deleted credentials for undo."""
+
+    def _set_unredo_delsel(self, *_args: object, **_kwargs: object) -> None:
+        """Do not retain removed selections for undo."""
+
+    def _discard_empty_buffers(self, _field: object, value: str) -> None:
+        """Forget pending composition and editing state when the owner clears input."""
+        if not value:
+            self.reset_undo()
+            self._ime_composition = ''
+            self._ime_cursor = None
+            self._command = ''
+            self._command_mode = False
+            self.cancel_selection()
+
+    def clear_secret(self) -> None:
+        """Clear field text and pending editing state whenever its owner detaches it."""
+        self.text = ''
+        self._discard_empty_buffers(self, '')
+
+    @classmethod
+    def revoke_all(cls) -> None:
+        """Remove pending input even from fields retained by a detached form."""
+        for field in tuple(cls._fields):
+            field.clear_secret()
 
     def paste(self) -> None:
         """Keeps credential and PIN input outside clipboard conveniences.

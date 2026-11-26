@@ -301,6 +301,7 @@ class PurgeObservationCoreTests(unittest.TestCase):
 
         client = MetorClient(
             port,
+            daemon_certificate=fixture.daemon._pm.get_daemon_certificate(),
             auth_provider=provider,
             on_event=event_received,
             on_disconnect=on_disconnect,

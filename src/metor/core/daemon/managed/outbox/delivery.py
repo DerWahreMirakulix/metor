@@ -465,7 +465,7 @@ class DropDelivery:
                 return True
             _, onion, _, _, msg_id, _ = row
             reason: Optional[str] = parse_reject_reason(response_line)
-            self._broadcast(DropFailedEvent(msg_id=msg_id, reason=reason))
+            self._broadcast(DropFailedEvent(msg_id=msg_id, onion=onion, reason=reason))
             self._log_delivery_failure(
                 onion,
                 'Drop rejected by peer: ' + reason
@@ -530,8 +530,9 @@ class DropDelivery:
             self._broadcast(
                 AckEvent(
                     msg_id=msg_id,
+                    onion=onion,
                     timestamp=timestamp,
-                    request_id=self._state.pop_message_request_id(msg_id),
+                    request_id=self._state.pop_message_request_id(onion, msg_id),
                 )
             )
 

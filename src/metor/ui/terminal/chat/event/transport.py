@@ -52,26 +52,6 @@ def _refresh_focus_prompt(handler: EventHandlerProtocol, alias: str) -> None:
     handler._renderer.set_focus(alias, handler._session.get_transport_state(alias))
 
 
-def _resolve_outgoing_target(
-    handler: EventHandlerProtocol,
-    alias: str,
-    onion: str | None,
-) -> str:
-    """
-    Resolves the freshest alias to use for one buffered outgoing send.
-
-    Args:
-        handler (EventHandlerProtocol): The owning EventHandler instance.
-        alias (str): The buffered alias fallback.
-        onion (str | None): The stable peer onion identity.
-
-    Returns:
-        str: The current alias to address.
-    """
-    resolved_alias: str | None = handler._session.get_peer_alias(onion, alias)
-    return resolved_alias or alias
-
-
 def _flush_buffered_outgoing_live(
     handler: EventHandlerProtocol,
     alias: str,
@@ -90,13 +70,12 @@ def _flush_buffered_outgoing_live(
     """
     buffered_messages = handler._session.pop_buffered_outgoing_messages(alias, onion)
     for buffered_message in buffered_messages:
+        if not buffered_message.onion:
+            handler._renderer.mark_failed(None, buffered_message.msg_id)
+            continue
         handler._ipc.send_command(
             SendMessageCommand(
-                target=_resolve_outgoing_target(
-                    handler,
-                    buffered_message.alias,
-                    buffered_message.onion,
-                ),
+                target=buffered_message.onion,
                 delivery=Delivery.LIVE,
                 content=TextContent(buffered_message.text),
                 msg_id=buffered_message.msg_id,
@@ -126,21 +105,21 @@ def _flush_buffered_outgoing_drop(
 
     buffered_msg_ids: List[str] = []
     for buffered_message in buffered_messages:
+        if not buffered_message.onion:
+            handler._renderer.mark_failed(None, buffered_message.msg_id)
+            continue
         buffered_msg_ids.append(buffered_message.msg_id)
         handler._ipc.send_command(
             SendMessageCommand(
-                target=_resolve_outgoing_target(
-                    handler,
-                    buffered_message.alias,
-                    buffered_message.onion,
-                ),
+                target=buffered_message.onion,
                 delivery=Delivery.DROP,
                 content=TextContent(buffered_message.text),
                 msg_id=buffered_message.msg_id,
             )
         )
 
-    handler._renderer.apply_fallback_to_drop(buffered_msg_ids)
+    if onion and buffered_msg_ids:
+        handler._renderer.apply_fallback_to_drop(onion, buffered_msg_ids)
 
 
 def handle_transport_event(handler: EventHandlerProtocol, event: IpcEvent) -> bool:

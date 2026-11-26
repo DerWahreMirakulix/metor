@@ -107,6 +107,7 @@ class GuiProducerTests(unittest.TestCase):
         )
         client = MetorClient(
             self.daemon._ipc.port,
+            daemon_certificate=self.daemon._pm.get_daemon_certificate(),
             auth_provider=provider,
             timeout=Constants.DEFAULT_IPC_TIMEOUT,
         )

@@ -109,7 +109,7 @@ class TerminalRenderingSecurityTests(unittest.TestCase):
         )
         renderer = Mock()
         handler = SimpleNamespace(
-            _session=SimpleNamespace(focused_alias='alice'),
+            _session=SimpleNamespace(focused_alias='alice', focused_onion='alice'),
             _renderer=renderer,
             _ipc=Mock(),
             _remember_peer=Mock(),
@@ -426,7 +426,9 @@ class TerminalRenderingSecurityTests(unittest.TestCase):
         """A DROP label changing line wraps must repaint from a known screen origin."""
         renderer = object.__new__(Renderer)
         renderer._display = Display()
-        line = ChatLine('payload', ChatMessageType.SELF, msg_id='message')
+        line = ChatLine(
+            'payload', ChatMessageType.SELF, peer_onion='peer', msg_id='message'
+        )
         renderer._display.all_msgs.append(line)
         lock_observations: list[bool] = []
 
@@ -436,7 +438,7 @@ class TerminalRenderingSecurityTests(unittest.TestCase):
             self.assertTrue(line.is_drop)
 
         with patch.object(renderer, '_full_redraw_locked', side_effect=observe_redraw):
-            renderer.apply_fallback_to_drop(['message'])
+            renderer.apply_fallback_to_drop('peer', ['message'])
         self.assertEqual(lock_observations, [True])
 
     def test_first_append_uses_current_alias_and_sanitized_prompt(self) -> None:

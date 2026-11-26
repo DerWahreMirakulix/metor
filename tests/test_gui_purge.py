@@ -3,7 +3,9 @@
 import threading
 import unittest
 from pathlib import Path
-from tempfile import TemporaryDirectory
+from private_fixtures import PrivateTemporaryDirectory
+from metor.data.profile import ProfileManager
+from metor.utils import Constants
 from unittest.mock import Mock, patch
 
 import test_gui_producers as support
@@ -36,16 +38,15 @@ class CombinedDestructionTests(unittest.TestCase):
         Returns:
             None
         """
-        root = Path(self.enterContext(TemporaryDirectory()))
-        db_path = root / 'profile.db'
+        root = Path(self.enterContext(PrivateTemporaryDirectory()))
+        self.enterContext(patch.object(Constants, 'DATA', root))
+        pm = ProfileManager('purge')
+        db_path = pm.paths.get_db_file()
         path_key = str(db_path)
         connection = Mock()
         connection.close.side_effect = [OSError('injected close failure'), None]
         metadata = Mock()
         producers = Mock()
-        pm = Mock()
-        pm.paths.get_db_file.return_value = db_path
-        pm.paths.get_config_dir.return_value = root
         protector = Mock()
         events: list[str] = []
         failures: list[tuple[str, bool]] = []
@@ -103,12 +104,12 @@ class CombinedDestructionTests(unittest.TestCase):
         Returns:
             None
         """
+        root = Path(self.enterContext(PrivateTemporaryDirectory()))
+        self.enterContext(patch.object(Constants, 'DATA', root))
+        pm = ProfileManager('purge')
         for failure in ('none', 'runtime', 'database', 'memory', 'key', 'cleanup'):
             with self.subTest(failure=failure):
                 order = []
-                pm = Mock()
-                pm.paths.get_db_file.return_value = Path('/tmp/unused-purge-fixture.db')
-                pm.paths.get_config_dir.return_value = Path('/tmp/unused-purge-fixture')
 
                 def step(name: str) -> None:
                     """Records ordered synthetic release and injects one selected phase failure.
@@ -202,7 +203,10 @@ class PurgeCoreTests(unittest.TestCase):
             build_session_auth_proof('test-password', challenge, salt)
         )
         self.client = MetorClient(
-            self.h.daemon._ipc.port, auth_provider=provider, on_event=self.receive
+            self.h.daemon._ipc.port,
+            daemon_certificate=self.h.daemon._pm.get_daemon_certificate(),
+            auth_provider=provider,
+            on_event=self.receive,
         )
         self.addCleanup(self.client.disconnect)
         initialized = self.client.bootstrap()

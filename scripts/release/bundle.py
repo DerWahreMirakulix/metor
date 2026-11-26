@@ -2,6 +2,7 @@
 
 import argparse
 import json
+from importlib.metadata import version
 import platform
 import shutil
 import subprocess
@@ -11,11 +12,12 @@ from pathlib import Path
 from textwrap import dedent
 from typing import Sequence
 
+from scripts.release.inputs import PIP_VERSION, hashed_requirements
+from scripts.release.native_inventory import inventory
 from scripts.release.paths import PROJECT_ROOT
 from scripts.release.verify_bundle import bundle_payloads, file_digest
 
 
-PIP_VERSION: str = '26.2.1'
 DEFAULT_OUTPUT_DIR: Path = Path('dist') / 'release'
 WHEELHOUSE_DIRNAME: str = 'wheelhouse'
 INSTALL_GUIDE_NAME: str = 'INSTALL.txt'
@@ -470,6 +472,7 @@ def build_release_wheelhouse(
     skip_pip_upgrade: bool = False,
     variant: str = 'base',
     prebuilt_wheels: dict[str, Path] | None = None,
+    revision: str | None = None,
 ) -> Path:
     """
     Builds the platform-specific runtime wheel bundle in the target directory.
@@ -510,17 +513,18 @@ def build_release_wheelhouse(
             repo_root,
         )
 
-    run_command(
-        [
-            *pip_prefix,
-            'download',
-            '--dest',
-            str(wheelhouse_dir),
-            '--only-binary=:all:',
-            f'pip=={PIP_VERSION}',
-        ],
-        repo_root,
-    )
+    if not revision:
+        run_command(
+            [
+                *pip_prefix,
+                'download',
+                '--dest',
+                str(wheelhouse_dir),
+                '--only-binary=:all:',
+                f'pip=={PIP_VERSION}',
+            ],
+            repo_root,
+        )
 
     wheel_sources: tuple[str, ...]
     if variant == 'sdk':
@@ -540,17 +544,26 @@ def build_release_wheelhouse(
         package_name = 'metor'
         wheel_sources = ('packaging/sdk', '.')
 
-    run_command(
-        [
-            *pip_prefix,
-            'wheel',
-            '--wheel-dir',
-            str(wheelhouse_dir),
-            '-r',
-            req_lock,
-        ],
-        repo_root,
-    )
+    wheel_command = [*pip_prefix, 'wheel', '--wheel-dir', str(wheelhouse_dir)]
+    if revision:
+        with tempfile.TemporaryDirectory() as directory:
+            pins = Path(directory) / 'verified.txt'
+            pins.write_text(
+                hashed_requirements((repo_root / req_lock,), include_pip=True),
+                encoding='utf-8',
+            )
+            run_command(
+                [
+                    *wheel_command,
+                    '--require-hashes',
+                    '--only-binary=:all:',
+                    '-r',
+                    str(pins),
+                ],
+                repo_root,
+            )
+    else:
+        run_command([*wheel_command, '-r', req_lock], repo_root)
     for wheel_src in wheel_sources:
         if prebuilt_wheels is not None:
             shutil.copy2(prebuilt_wheels[wheel_src], wheelhouse_dir)
@@ -562,6 +575,7 @@ def build_release_wheelhouse(
                     '--wheel-dir',
                     str(wheelhouse_dir),
                     '--no-deps',
+                    *(['--no-build-isolation'] if revision else []),
                     wheel_src,
                 ],
                 repo_root,
@@ -579,9 +593,17 @@ def build_release_wheelhouse(
         bundle_dir / INSTALL_WINDOWS_NAME,
         build_install_windows_script(package_name),
     )
+    metadata = json.loads(build_bundle_metadata(variant, package_name))
+    if revision:
+        from metor.versioning import APP_VERSION
+
+        metadata.update(source_revision=revision, application_version=APP_VERSION)
+        write_text_file(
+            bundle_dir / 'NATIVE-COMPONENTS.json', inventory(wheelhouse_dir)
+        )
     write_text_file(
         bundle_dir / BUNDLE_METADATA_NAME,
-        build_bundle_metadata(variant, package_name),
+        json.dumps(metadata, indent=2, sort_keys=True) + '\n',
     )
     shutil.copyfile(
         repo_root / 'scripts' / 'release' / BUNDLE_VERIFIER_NAME,
@@ -615,6 +637,10 @@ def parse_args() -> argparse.Namespace:
         help='Directory that will receive the bundle folder and zip archive.',
     )
     parser.add_argument(
+        '--revision',
+        help='Build with reviewed release input hashes for this checked-out commit.',
+    )
+    parser.add_argument(
         '--skip-pip-upgrade',
         action='store_true',
         help='Skip upgrading pip before building wheels.',
@@ -639,6 +665,27 @@ def main() -> None:
         None
     """
     args = parse_args()
+    if args.revision:
+        actual = subprocess.check_output(
+            ['git', 'rev-parse', 'HEAD'], cwd=PROJECT_ROOT, text=True
+        ).strip()
+        changes = subprocess.check_output(
+            ['git', 'status', '--porcelain', '--untracked-files=normal'],
+            cwd=PROJECT_ROOT,
+            text=True,
+        )
+        if changes:
+            raise ValueError(
+                'A verified release build requires a clean candidate checkout.'
+            )
+        if (
+            actual != args.revision
+            or not args.skip_pip_upgrade
+            or version('pip') != PIP_VERSION
+        ):
+            raise ValueError(
+                'Verified builds require checkout SHA and the preinstalled pinned pip.'
+            )
     args.output_dir = validate_output_directory(args.output_dir, PROJECT_ROOT)
     if args.variant == 'all':
         with tempfile.TemporaryDirectory(prefix='metor-local-wheels-') as directory:
@@ -654,6 +701,7 @@ def main() -> None:
                         '--wheel-dir',
                         str(wheel_dir),
                         '--no-deps',
+                        *(['--no-build-isolation'] if args.revision else []),
                         source,
                     ],
                     PROJECT_ROOT,
@@ -670,10 +718,12 @@ def main() -> None:
                     skip_pip_upgrade=args.skip_pip_upgrade,
                     variant=variant,
                     prebuilt_wheels=prebuilt,
+                    revision=args.revision,
                 )
     else:
         build_release_wheelhouse(
             args.output_dir,
             skip_pip_upgrade=args.skip_pip_upgrade,
             variant=args.variant,
+            revision=args.revision,
         )

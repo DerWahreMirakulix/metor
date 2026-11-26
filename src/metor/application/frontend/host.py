@@ -678,18 +678,17 @@ class LocalFrontendHost:
             Constants.MAX_UNLOCK_INITIALIZATION_WAIT_SEC,
             max(
                 profile.config.get_float(SettingKey.IPC_TIMEOUT),
-                retries * Constants.UNIX_TOR_TIMEOUT
-                + max(0, retries - 1) * Constants.TOR_BOOTSTRAP_RETRY_SEC
-                + Constants.TOR_HOSTNAME_POLL_RETRIES * Constants.TOR_BOOTSTRAP_POLL_SEC
-                + Constants.TOR_PROXY_READY_ATTEMPTS
-                * (
-                    Constants.TOR_PROXY_READY_TIMEOUT_SEC
-                    + Constants.TOR_PROXY_READY_RETRY_SEC
-                )
-                + Constants.LISTENER_READY_TIMEOUT,
+                Constants.tor_start_budget(retries),
             ),
         )
         self._require_open()
+        try:
+            certificate = profile.get_daemon_certificate()
+        except (OSError, ValueError) as exc:
+            raise FrontendBootstrapError(
+                'Trusted daemon certificate unavailable. For remote profiles, pair using metor profiles trust.',
+                reason=FrontendBootstrapReason.UNREACHABLE,
+            ) from exc
         return FrontendBootstrapResult(
             profile=profile.profile_name,
             remote=profile.is_remote(),
@@ -698,6 +697,7 @@ class LocalFrontendHost:
             session_auth=OneUseSecretProvider(startup_secret),
             config=LocalFrontendSettings(profile.config),
             encrypted=profile.uses_encrypted_storage(),
+            daemon_certificate=certificate,
             unlock_timeout=unlock_timeout,
             lifetime_token=(
                 read_frontend_lifetime_token(profile.paths.get_config_dir())

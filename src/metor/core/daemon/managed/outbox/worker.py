@@ -5,6 +5,7 @@ import time
 from typing import TYPE_CHECKING, Callable, Dict, Optional
 
 from metor.core.api import (
+    Delivery,
     EventType,
     IpcEvent,
     JsonValue,
@@ -90,7 +91,7 @@ class OutboxWorker:
         self._worker_thread: Optional[threading.Thread] = None
 
     def remember_message_request_id(
-        self, msg_id: str, request_id: Optional[str], peer: Optional[str] = None
+        self, msg_id: str, request_id: Optional[str], peer: str
     ) -> None:
         """Stores request correlation for one queued drop message.
 
@@ -102,7 +103,7 @@ class OutboxWorker:
         Returns:
             None
         """
-        self._state.remember_message_request_id(msg_id, request_id, drop_peer=peer)
+        self._state.remember_message_request_id(peer, msg_id, request_id, Delivery.DROP)
 
     def forget_cancelled_requests(
         self, identities: tuple[tuple[str, str], ...]

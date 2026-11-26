@@ -48,7 +48,7 @@ from metor.cli.theme import Theme
 from metor.cli.translations import Translator
 from metor.cli.errors import format_safe_local_runtime_error
 from metor.cli.models import CliCommandResult
-from metor.utils import Constants, ProcessManager
+from metor.utils import Constants
 from metor.cli.proxy import CliProxy
 
 
@@ -568,7 +568,7 @@ class CommandHandlers:
         )
 
     @staticmethod
-    def handle_purge(is_nuke_remote: bool) -> None:
+    def handle_purge(is_nuke_remote: bool) -> int:
         """
         Permanently destroys all local data and optionally sends self-destruct commands to remote daemons.
 
@@ -576,7 +576,7 @@ class CommandHandlers:
             is_nuke_remote (bool): Flag indicating if remote profiles should be signaled to self-destruct.
 
         Returns:
-            None
+            int: Zero after completion or operator cancellation, one on failure.
         """
         message: str = (
             f'You are about to {Theme.RED}PERMANENTLY WIPE{Theme.RESET} '
@@ -594,7 +594,7 @@ class CommandHandlers:
             confirmation: str = prompt_text("Type 'yes' to proceed: ")
         except PromptAbortedError:
             print(f'{Theme.YELLOW}Purge aborted.{Theme.RESET}')
-            return
+            return 0
 
         if confirmation.strip().lower() == 'yes':
             if is_nuke_remote:
@@ -605,14 +605,22 @@ class CommandHandlers:
                 ]
                 if not CommandHandlers._nuke_remote_profiles(remotes):
                     print('Purge aborted.')
-                    return
+                    return 1
 
-            ProcessManager.cleanup_processes()
             if Constants.DATA.exists():
-                ProfileManager.purge_all_data()
-                print(f'{Theme.GREEN}Purge complete. All data destroyed.{Theme.RESET}')
+                try:
+                    ProfileManager.purge_all_data()
+                except (OSError, ValueError):
+                    print(
+                        'Purge incomplete. Check local process and storage availability, then retry.'
+                    )
+                    return 1
+                print(
+                    f'{Theme.GREEN}Purge complete. Local profile data removed.{Theme.RESET}'
+                )
         else:
             print(f'{Theme.YELLOW}Purge aborted.{Theme.RESET}')
+        return 0
 
     @staticmethod
     def _nuke_remote_profiles(profile_names: List[str]) -> bool:

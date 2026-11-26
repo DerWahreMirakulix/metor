@@ -8,6 +8,7 @@ import sys
 import threading
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
@@ -321,6 +322,13 @@ class RawClientContractTests(unittest.TestCase):
         Returns:
             None
         """
+        # This scripted byte-stream fixture exercises the application handshake.
+        self.enterContext(
+            patch(
+                'metor.client.ipc.authenticate_daemon',
+                side_effect=lambda sock, _cert: sock,
+            )
+        )
         salt = create_session_auth_salt().hex()
         challenge = create_session_auth_challenge()
         password = 'test-password'

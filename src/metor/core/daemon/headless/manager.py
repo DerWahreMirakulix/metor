@@ -18,10 +18,9 @@ from metor.data import (
     SqlManager,
 )
 from metor.data.blob import (
-    BlobLifecycle,
+    delete_owned_blob,
     BlobStore,
-    EncryptedBlobStore,
-    PlaintextBlobStore,
+    open_blob_store,
 )
 from metor.data.profile import ProfileManager, offline_profile_guard
 from metor.utils import Constants
@@ -142,16 +141,7 @@ class HeadlessDaemon:
         Returns:
             BlobStore: The resulting value.
         """
-        if self._pm.uses_encrypted_storage():
-            return EncryptedBlobStore(
-                self._pm.paths.get_persistent_blob_dir(),
-                self._pm.paths.get_temporary_blob_dir(),
-                self._km.get_blob_key(),
-            )
-        return PlaintextBlobStore(
-            self._pm.paths.get_persistent_blob_dir(),
-            self._pm.paths.get_temporary_blob_dir(),
-        )
+        return open_blob_store(self._pm, lambda: self._km.get_blob_key())
 
     @cached_property
     def _config_handler(self) -> ConfigCommandHandler:
@@ -184,8 +174,8 @@ class HeadlessDaemon:
             self._mm,
             lambda: [],
             lambda e: None,
-            delete_persistent_blob_cb=lambda blob_id: self._blobs.delete(
-                blob_id, BlobLifecycle.PERSISTENT
+            delete_persistent_blob_cb=lambda blob_id: delete_owned_blob(
+                self._blobs, blob_id
             ),
         )
 

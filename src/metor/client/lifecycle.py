@@ -95,6 +95,7 @@ class ProfileRuntimeCoordinator:
         *,
         finalize_active_capture: Optional[Callable[[], None]] = None,
         on_phase: Optional[Callable[[ProfileSwitchPhase], None]] = None,
+        first_page_only: bool = False,
     ) -> ProfileSwitchResult:
         """Performs the canonical reliability-preserving profile transition.
 
@@ -104,6 +105,7 @@ class ProfileRuntimeCoordinator:
 
         Args:
             target_profile (str): Profile to start/select through the factory.
+            first_page_only: Return bounded metadata for clients that hydrate incrementally.
             finalize_active_capture (Optional[Callable[[], None]]): Frontend
                 capture-finalization hook.
             on_phase (Optional[Callable[[ProfileSwitchPhase], None]]): Read-only
@@ -132,7 +134,7 @@ class ProfileRuntimeCoordinator:
 
         phase_started(ProfileSwitchPhase.SOURCE_SNAPSHOT)
         try:
-            previous = self._client.runtime_snapshot()
+            previous = self._client.runtime_snapshot(first_page_only=first_page_only)
         except Exception as exc:
             raise ProfileSwitchError(
                 ProfileSwitchPhase.SOURCE_SNAPSHOT,
@@ -219,7 +221,7 @@ class ProfileRuntimeCoordinator:
             ) from exc
         phase_started(ProfileSwitchPhase.TARGET_SNAPSHOT)
         try:
-            current = next_client.runtime_snapshot()
+            current = next_client.runtime_snapshot(first_page_only=first_page_only)
         except Exception as exc:
             dispose_candidate()
             raise ProfileSwitchError(

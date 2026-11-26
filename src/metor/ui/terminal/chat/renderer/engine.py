@@ -309,17 +309,17 @@ class Renderer:
 
     def mark_acked(
         self,
-        msg_id: Optional[str] = None,
-        text: Optional[str] = None,
+        peer: str,
+        msg_id: str,
         timestamp: Optional[str] = None,
     ) -> None:
         """
         Marks a pending message as acknowledged and redraws it in green.
-        Fallback to text matching if DB ID mapping is unavailable (e.g. Drops).
+        Only the originating outbound peer and logical identity may advance.
 
         Args:
             msg_id (Optional[str]): The unique message identifier to acknowledge.
-            text (Optional[str]): The exact payload text of the message.
+            peer: The exact authenticated peer.
             timestamp (Optional[str]): The authoritative daemon timestamp, if available.
 
         Returns:
@@ -328,8 +328,10 @@ class Renderer:
         with self._display.print_lock:
             changed = False
             for msg in self._display.all_msgs:
-                if (msg_id and msg.msg_id == msg_id) or (
-                    text and msg.text == text and msg.is_drop and msg.is_pending
+                if (
+                    msg.msg_type is ChatMessageType.SELF
+                    and msg.peer_onion == peer
+                    and msg.msg_id == msg_id
                 ):
                     msg.is_pending = False
                     if timestamp:
@@ -339,7 +341,7 @@ class Renderer:
             if changed:
                 self._redraw_changed_messages_locked()
 
-    def mark_failed(self, msg_id: str) -> None:
+    def mark_failed(self, peer: Optional[str], msg_id: str) -> None:
         """
         Marks a pending message as failed and redraws it in red.
 
@@ -352,7 +354,11 @@ class Renderer:
         with self._display.print_lock:
             changed = False
             for msg in self._display.all_msgs:
-                if msg.msg_id == msg_id:
+                if (
+                    msg.msg_type is ChatMessageType.SELF
+                    and msg.peer_onion == peer
+                    and msg.msg_id == msg_id
+                ):
                     msg.is_pending = False
                     msg.is_failed = True
                     changed = True
@@ -360,7 +366,7 @@ class Renderer:
             if changed:
                 self._redraw_changed_messages_locked()
 
-    def apply_fallback_to_drop(self, msg_ids: List[str]) -> None:
+    def apply_fallback_to_drop(self, peer: str, msg_ids: List[str]) -> None:
         """
         Converts hanging un-acked live messages into pending drops.
 
@@ -373,7 +379,11 @@ class Renderer:
         with self._display.print_lock:
             changed = False
             for msg in self._display.all_msgs:
-                if msg.msg_id in msg_ids:
+                if (
+                    msg.msg_type is ChatMessageType.SELF
+                    and msg.peer_onion == peer
+                    and msg.msg_id in msg_ids
+                ):
                     msg.is_drop = True
                     msg.is_pending = True
                     changed = True

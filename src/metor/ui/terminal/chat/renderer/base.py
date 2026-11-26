@@ -103,15 +103,15 @@ class ChatRenderer(Protocol):
 
     def mark_acked(
         self,
-        msg_id: Optional[str] = None,
-        text: Optional[str] = None,
+        peer: str,
+        msg_id: str,
         timestamp: Optional[str] = None,
     ) -> None:
         """Marks a pending message as acknowledged and redraws it.
 
         Args:
             msg_id (Optional[str]): The msg id input.
-            text (Optional[str]): The text input.
+            peer: The authenticated peer identity.
             timestamp (Optional[str]): The timestamp input.
 
         Returns:
@@ -119,7 +119,7 @@ class ChatRenderer(Protocol):
         """
         ...
 
-    def mark_failed(self, msg_id: str) -> None:
+    def mark_failed(self, peer: Optional[str], msg_id: str) -> None:
         """Marks a pending message as failed and redraws it.
 
         Args:
@@ -130,7 +130,7 @@ class ChatRenderer(Protocol):
         """
         ...
 
-    def apply_fallback_to_drop(self, msg_ids: List[str]) -> None:
+    def apply_fallback_to_drop(self, peer: str, msg_ids: List[str]) -> None:
         """Converts hanging un-acked live messages into pending drops.
 
         Args:

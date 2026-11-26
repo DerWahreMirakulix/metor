@@ -4,7 +4,6 @@ import base64
 import hmac
 import json
 import os
-import secrets
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol, cast
@@ -18,7 +17,12 @@ from nacl.encoding import RawEncoder
 
 from metor.core.api import JsonValue
 from metor.shared import secure_clear_buffer
-from metor.utils import create_private_directory_tree, secure_shred_file
+from metor.utils import (
+    FileLock,
+    create_private_directory_tree,
+    open_private_binary_file,
+    secure_shred_file,
+)
 from metor.versioning import KEYSLOT_FORMAT_VERSION, PROFILE_KEY_DERIVATION_VERSION
 
 PROFILE_MASTER_KEY_BYTES = 32
@@ -252,6 +256,19 @@ class PasswordKeyProtector:
         self._keyslot_path = keyslot_path
 
     @property
+    def _staged_path(self) -> Path:
+        """One owned replacement slot, including after interrupted activation."""
+        return self._keyslot_path.with_suffix(self._keyslot_path.suffix + '.pending')
+
+    def _discard_staged(self) -> None:
+        """Remove any pending wrapper before another rotation or destruction."""
+        try:
+            self._staged_path.lstat()
+        except FileNotFoundError:
+            return
+        secure_shred_file(self._staged_path)
+
+    @property
     def exists(self) -> bool:
         """Reports whether the keyslot exists.
 
@@ -383,13 +400,11 @@ class PasswordKeyProtector:
         """
         parent = self._keyslot_path.parent
         create_private_directory_tree(parent, ())
-        temp_path = parent / f'.keyslot-{secrets.token_hex(8)}.tmp'
+        temp_path = self._staged_path
+        self._discard_staged()
         try:
-            with temp_path.open('xb') as handle:
+            with open_private_binary_file(temp_path, exclusive=True) as handle:
                 handle.write(document)
-                handle.flush()
-                os.fsync(handle.fileno())
-            temp_path.chmod(0o600)
             if validation_credential is not None and expected_pmk is not None:
                 recovered_pmk = PasswordKeyProtector(temp_path).unprotect(
                     validation_credential
@@ -413,7 +428,7 @@ class PasswordKeyProtector:
                 except OSError:
                     pass
         finally:
-            temp_path.unlink(missing_ok=True)
+            self._discard_staged()
 
     def protect(self, pmk: bytes | bytearray, credential: str) -> None:
         """Protects a new PMK and refuses to overwrite an existing keyslot.
@@ -425,9 +440,13 @@ class PasswordKeyProtector:
         Returns:
             None
         """
-        if self.exists:
-            raise KeyProtectorError('Protected profile key material already exists.')
-        self._atomic_write(self._build_document(pmk, credential))
+        create_private_directory_tree(self._keyslot_path.parent, ())
+        with FileLock(self._keyslot_path):
+            if self.exists:
+                raise KeyProtectorError(
+                    'Protected profile key material already exists.'
+                )
+            self._atomic_write(self._build_document(pmk, credential))
 
     def _read_document(self) -> tuple[bytes, bytes, bytes, int, int]:
         """Loads and strictly validates supported keyslot metadata.
@@ -494,6 +513,22 @@ class PasswordKeyProtector:
         Returns:
             bytearray: Recovered PMK.
         """
+        try:
+            self._staged_path.lstat()
+        except FileNotFoundError:
+            return self._recover_pmk(credential)
+        # The active wrapper remains authoritative after interrupted replacement.
+        # Serialize cleanup with any concurrent activation before opening it.
+        with FileLock(self._keyslot_path):
+            pmk = self._recover_pmk(credential)
+            try:
+                self._discard_staged()
+                return pmk
+            except BaseException:
+                secure_clear_buffer(pmk)
+                raise
+
+    def _recover_pmk(self, credential: str) -> bytearray:
         salt, nonce, ciphertext, opslimit, memlimit = self._read_document()
         kek = self._derive_kek(credential, salt, opslimit, memlimit)
         try:
@@ -517,15 +552,16 @@ class PasswordKeyProtector:
         Returns:
             None
         """
-        pmk = self.unprotect(old_credential)
-        try:
-            self._atomic_write(
-                self._build_document(pmk, new_credential),
-                validation_credential=new_credential,
-                expected_pmk=pmk,
-            )
-        finally:
-            secure_clear_buffer(pmk)
+        with FileLock(self._keyslot_path):
+            pmk = self._recover_pmk(old_credential)
+            try:
+                self._atomic_write(
+                    self._build_document(pmk, new_credential),
+                    validation_credential=new_credential,
+                    expected_pmk=pmk,
+                )
+            finally:
+                secure_clear_buffer(pmk)
 
     def destroy(self) -> None:
         """Best-effort shreds, unlinks, and directory-syncs the software keyslot.
@@ -539,15 +575,18 @@ class PasswordKeyProtector:
         Returns:
             None
         """
-        if not self._keyslot_path.is_file():
+        if not self._keyslot_path.parent.exists():
             return
-        secure_shred_file(self._keyslot_path)
-        if os.name != 'nt':
+        with FileLock(self._keyslot_path):
             try:
-                directory_fd = os.open(self._keyslot_path.parent, os.O_RDONLY)
-                try:
-                    os.fsync(directory_fd)
-                finally:
-                    os.close(directory_fd)
-            except OSError:
-                pass
+                self._discard_staged()
+            finally:
+                # A locked staged wrapper must block SAFE, but cannot prevent
+                # us from destroying the separately accessible active wrapper.
+                secure_shred_file(self._keyslot_path)
+                if os.name != 'nt':
+                    directory_fd = os.open(self._keyslot_path.parent, os.O_RDONLY)
+                    try:
+                        os.fsync(directory_fd)
+                    finally:
+                        os.close(directory_fd)

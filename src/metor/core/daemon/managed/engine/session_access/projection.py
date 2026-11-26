@@ -4,13 +4,20 @@ from __future__ import annotations
 
 import socket
 import time
-import json
+from dataclasses import replace
 from typing import TYPE_CHECKING, Optional
 
 from metor.core.api import (
     ConnectionOrigin,
     NotificationPrivacy,
-    EventType,
+    ConnectedEvent,
+    ConnectionAutoAcceptedEvent,
+    ConnectionPendingEvent,
+    DisconnectedEvent,
+    InboxNotificationEvent,
+    IncomingConnectionEvent,
+    PendingConnectionExpiredEvent,
+    RuntimeStateChangedEvent,
     IpcEvent,
     CallStateEvent,
 )
@@ -61,39 +68,42 @@ def filter_restricted_event(
         return self._project_call_event(conn, event, privacy)
     if policy is None:
         return project_event(self, conn, event)
-    permitted_types = {
-        EventType.INBOX_NOTIFICATION,
-        EventType.INCOMING_CONNECTION,
-        EventType.CONNECTION_PENDING,
-        EventType.CONNECTION_AUTO_ACCEPTED,
-        EventType.CONNECTED,
-        EventType.DISCONNECTED,
-        EventType.PENDING_CONNECTION_EXPIRED,
-        EventType.RUNTIME_STATE_CHANGED,
-    }
-    if event.event_type not in permitted_types:
+    privacy = policy.notification_privacy
+    if privacy is NotificationPrivacy.OFF:
         return None
-    if policy.notification_privacy is NotificationPrivacy.OFF:
-        return None
-    changes: dict[str, object] = {}
-    if hasattr(event, 'action_handle'):
-        # A restricted session cannot act on LIVE invitations or see internal tokens.
-        changes['action_handle'] = None
-    if policy.notification_privacy is NotificationPrivacy.ANONYMIZE:
-        if hasattr(event, 'alias'):
-            changes['alias'] = 'unknown'
-        if hasattr(event, 'onion'):
-            changes['onion'] = None
-        if hasattr(event, 'source_id'):
-            changes['source_id'] = None
-        if hasattr(event, 'origin'):
-            changes['origin'] = ConnectionOrigin.INCOMING
-    if not changes:
+    anonymous = privacy is NotificationPrivacy.ANONYMIZE
+    if isinstance(event, (IncomingConnectionEvent, PendingConnectionExpiredEvent)):
+        if anonymous:
+            return replace(
+                event,
+                alias='unknown',
+                onion=None,
+                action_handle=None,
+                origin=ConnectionOrigin.INCOMING,
+            )
+        return replace(event, action_handle=None)
+    if isinstance(event, InboxNotificationEvent):
+        return (
+            replace(event, alias='unknown', onion=None, source_id=None)
+            if anonymous
+            else event
+        )
+    if isinstance(event, RuntimeStateChangedEvent):
+        return replace(event, onion=None) if anonymous else event
+    if isinstance(
+        event, (ConnectionPendingEvent, ConnectionAutoAcceptedEvent, DisconnectedEvent)
+    ):
+        return (
+            replace(
+                event, alias='unknown', onion=None, origin=ConnectionOrigin.INCOMING
+            )
+            if anonymous
+            else event
+        )
+    if isinstance(event, ConnectedEvent) and not anonymous:
+        # Established transport events require a peer address on the wire.
         return event
-    clone = IpcEvent.from_dict(json.loads(event.to_json()))
-    for field_name, value in changes.items():
-        setattr(clone, field_name, value)
-    return clone
+    return None
 
 
 def _consume_invitation_handle(

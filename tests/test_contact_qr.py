@@ -28,6 +28,15 @@ class ContactQrContractTests(unittest.TestCase):
                 ContactQrError.INVALID_FIELDS,
             ),
             ('{"version":2,"onion":"peer"}', ContactQrError.UNSUPPORTED_VERSION),
+            ('{"version":true,"onion":"peer"}', ContactQrError.UNSUPPORTED_VERSION),
+            ('{"version":1.0,"onion":"peer"}', ContactQrError.UNSUPPORTED_VERSION),
+            ('{"version":1,"version":2}', ContactQrError.MALFORMED),
+            (
+                '{"version":' + '[' * 1200 + '1' + ']' * 1200 + '}',
+                ContactQrError.MALFORMED,
+            ),
+            (' ' * 4100, ContactQrError.MALFORMED),
+            ('\ud800', ContactQrError.MALFORMED),
         )
         for raw, expected in cases:
             with self.subTest(expected=expected):

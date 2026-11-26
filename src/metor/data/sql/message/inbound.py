@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import List, Optional, Tuple, cast
+from typing import List, Optional
 
 from metor.core.api import ContentType, Delivery
 from metor.data.message.models import (
@@ -12,7 +12,6 @@ from metor.data.message.models import (
     MessageStatus,
     VoicePayloadRecord,
 )
-from metor.data.sql.backends import SqlParam
 from metor.shared import clean_onion
 
 
@@ -42,20 +41,26 @@ class MessageInboundMixin(MessageReceiptStore):
             is not None
         )
 
-    def has_inbound_text_receipt(self, contact_onion: str, msg_id: str) -> bool:
-        """Reports whether an inbound identity belongs to text content.
-
-        Args:
-            contact_onion (str): Authenticated peer identity.
-            msg_id (str): Stable logical identity.
-
-        Returns:
-            bool: True only for an existing inbound text receipt.
-        """
-        receipt = self._get_receipt(
-            clean_onion(contact_onion), MessageDirection.IN, msg_id
-        )
-        return receipt is not None and receipt.content_type is ContentType.TEXT
+    def matches_inbound_text(
+        self, contact_onion: str, msg_id: str, payload: str
+    ) -> bool:
+        """Recognize an exact text retry after the inbound spool was consumed."""
+        peer = clean_onion(contact_onion)
+        with self._sql.transaction() as cursor:
+            tag = self._inbound_text_tag(cursor, peer, msg_id, payload)
+            return bool(
+                cursor.execute(
+                    'SELECT 1 FROM message_receipts WHERE peer_onion = ? AND direction = ? '
+                    'AND msg_id = ? AND content_type = ? AND content_tag = ?',
+                    (
+                        peer,
+                        MessageDirection.IN.value,
+                        msg_id,
+                        ContentType.TEXT.value,
+                        tag,
+                    ),
+                ).fetchone()
+            )
 
     def store_inbound_drop_text(
         self,
@@ -83,10 +88,18 @@ class MessageInboundMixin(MessageReceiptStore):
             receipt = self._get_receipt(
                 normalized_onion, MessageDirection.IN, msg_id, cursor
             )
-            if receipt is not None and receipt.delivery is Delivery.DROP:
-                if receipt.content_type is not ContentType.TEXT:
+            tag = self._inbound_text_tag(cursor, normalized_onion, msg_id, payload)
+            if receipt is not None:
+                if (
+                    receipt.content_type is not ContentType.TEXT
+                    or not cursor.execute(
+                        'SELECT 1 FROM message_receipts WHERE id = ? AND content_tag = ?',
+                        (receipt.receipt_id, tag),
+                    ).fetchone()
+                ):
                     return InboundDropOutcome.CONFLICT
-                return InboundDropOutcome.DUPLICATE
+                if receipt.delivery is Delivery.DROP:
+                    return InboundDropOutcome.DUPLICATE
             if max_unread >= 0:
                 raw_count = cursor.execute(
                     'SELECT COUNT(*) FROM message_receipts WHERE peer_onion = ? AND direction = ? '
@@ -103,8 +116,8 @@ class MessageInboundMixin(MessageReceiptStore):
             if receipt is None:
                 cursor.execute(
                     'INSERT INTO message_receipts '
-                    '(msg_id, peer_onion, direction, delivery, content_type, retained_bytes, status, visible_in_history, created_at, updated_at) '
-                    'VALUES (?, ?, ?, ?, ?, 0, ?, 1, ?, ?)',
+                    '(msg_id, peer_onion, direction, delivery, content_type, retained_bytes, status, visible_in_history, created_at, updated_at, content_tag) '
+                    'VALUES (?, ?, ?, ?, ?, 0, ?, 1, ?, ?, ?)',
                     (
                         msg_id,
                         normalized_onion,
@@ -114,6 +127,7 @@ class MessageInboundMixin(MessageReceiptStore):
                         MessageStatus.UNREAD.value,
                         created_at,
                         created_at,
+                        tag,
                     ),
                 )
                 receipt_id = int(
@@ -128,17 +142,6 @@ class MessageInboundMixin(MessageReceiptStore):
                     (receipt_id, payload),
                 )
                 return InboundDropOutcome.CREATED
-            if receipt.content_type is not ContentType.TEXT:
-                return InboundDropOutcome.CONFLICT
-            existing_rows = cast(
-                List[Tuple[SqlParam, ...]],
-                cursor.execute(
-                    'SELECT payload FROM inbound_spool WHERE receipt_id = ?',
-                    (receipt.receipt_id,),
-                ).fetchall(),
-            )
-            if existing_rows and str(existing_rows[0][0]) != payload:
-                return InboundDropOutcome.CONFLICT
             cursor.execute(
                 'INSERT INTO inbound_spool (receipt_id, payload) VALUES (?, ?) '
                 'ON CONFLICT(receipt_id) DO UPDATE SET payload = excluded.payload',

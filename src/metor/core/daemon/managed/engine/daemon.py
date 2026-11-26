@@ -50,7 +50,7 @@ from metor.data import (
     SqlManager,
 )
 from metor.data.sql import ProfileMetadataRepository
-from metor.data.blob import BlobLifecycle, BlobStore
+from metor.data.blob import BlobStore, delete_owned_blob
 from metor.shared import clean_onion, secure_clear_buffer
 from metor.utils import Constants
 
@@ -206,6 +206,8 @@ class Daemon(DaemonLifecycleMixin):
         self._is_stopping: bool = False
         self._runtime_stop_flag: threading.Event = threading.Event()
         self._domain_operation_lock = threading.RLock()
+        self._bootstrap_changed = threading.Condition(self._domain_operation_lock)
+        self._bootstrap_owner: socket.socket | None = None
         self._purge_fence = threading.Event()
         self._purge_operation_id: str | None = None
         self._last_start_failure: RuntimeStartFailure | None = None
@@ -387,7 +389,7 @@ class Daemon(DaemonLifecycleMixin):
                 None
             """
             if active_blob_store is not None:
-                active_blob_store.delete(blob_id, BlobLifecycle.PERSISTENT)
+                delete_owned_blob(active_blob_store, blob_id)
 
         delete_persistent_blob: Optional[Callable[[str], None]] = (
             delete_persistent_blob_object if active_blob_store is not None else None
@@ -586,6 +588,8 @@ class Daemon(DaemonLifecycleMixin):
         with self._stop_lock:
             self._stop_flag.set()
             self._runtime_stop_flag.set()
+            if self._tm is not None:
+                self._tm.cancel_start()
 
     def run(self) -> None:
         """
@@ -651,7 +655,7 @@ class Daemon(DaemonLifecycleMixin):
         finally:
             self.stop()
 
-    def _start_subsystems(self) -> bool:
+    def _start_subsystems(self, owner: socket.socket | None = None) -> bool:
         """
         Initializes the actual Tor and Network components once unlocked.
 
@@ -681,7 +685,19 @@ class Daemon(DaemonLifecycleMixin):
             return False
 
         try:
-            success, event_type, _params = self._tm.start()
+            if owner is None:
+                success, event_type, _params = self._tm.start()
+            else:
+                # Publish the unlock owner under the domain gate. While Tor is
+                # bootstrapping, other IPC requests see only the locked surface.
+                self._bootstrap_owner = owner
+                self._domain_operation_lock.release()
+                try:
+                    success, event_type, _params = self._tm.start()
+                finally:
+                    self._domain_operation_lock.acquire()
+                    self._bootstrap_owner = None
+                    self._bootstrap_changed.notify_all()
         except Exception as error:
             self._record_start_failure('tor_start', error)
             return False
@@ -771,8 +787,13 @@ class Daemon(DaemonLifecycleMixin):
         self._frontend_lifetime.begin_shutdown()
         with self._stop_lock:
             self._stop_flag.set()
-        with self._domain_operation_lock, self._release_lock:
-            self._stop_resources()
+            if self._tm is not None:
+                self._tm.cancel_start()
+        with self._domain_operation_lock:
+            if self._bootstrap_owner is not None:
+                self._bootstrap_changed.wait_for(lambda: self._bootstrap_owner is None)
+            with self._release_lock:
+                self._stop_resources()
 
     def _stop_resources(self) -> None:
         """
@@ -826,6 +847,8 @@ class Daemon(DaemonLifecycleMixin):
         self._session_access.disconnect(conn)
         self._command_dispatcher.clear_client_focus(conn)
         with self._domain_operation_lock:
+            if conn is self._bootstrap_owner and self._tm is not None:
+                self._tm.cancel_start()
             self._command_dispatcher.disconnect_voice_producer(conn)
 
     def _get_local_auth_lockout_timeout(self) -> float:
@@ -928,6 +951,26 @@ class Daemon(DaemonLifecycleMixin):
                     self._ipc.send_to(conn, create_event(EventType.DAEMON_OFFLINE))
                 return False
             with self._domain_operation_lock:
+                if self._bootstrap_owner is not None:
+                    if isinstance(cmd, LockCommand) and conn is self._bootstrap_owner:
+                        assert self._tm is not None
+                        self._tm.cancel_start()
+                        self._bootstrap_changed.wait_for(
+                            lambda: self._bootstrap_owner is None
+                        )
+                    elif isinstance(cmd, SelfDestructCommand):
+                        if not self._session_access.authorize(
+                            cmd, conn, runtime_unlocked=False
+                        ):
+                            return False
+                        assert self._tm is not None
+                        self._tm.cancel_start()
+                        self._bootstrap_changed.wait_for(
+                            lambda: self._bootstrap_owner is None
+                        )
+                    else:
+                        self._ipc.send_to(conn, create_event(EventType.DAEMON_LOCKED))
+                        return False
                 if self._purge_fence.is_set():
                     if isinstance(cmd, SelfDestructCommand):
                         self._send_self_destruct_initiated(conn)
@@ -1108,7 +1151,7 @@ class Daemon(DaemonLifecycleMixin):
                         or RuntimeStartFailure('cancelled', 'Cancelled')
                     )
                 start_phase = 'service_start'
-                if not self._start_subsystems():
+                if not self._start_subsystems(conn):
                     raise RuntimeStartupError(
                         self._last_start_failure
                         or RuntimeStartFailure(start_phase, 'Exception')

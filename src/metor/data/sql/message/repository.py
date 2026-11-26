@@ -455,6 +455,16 @@ class MessageRepository(
             receipt_id: int = int(str(raw_receipt_id))
 
             if direction is MessageDirection.IN:
+                if content_type is ContentType.TEXT:
+                    cursor.execute(
+                        'UPDATE message_receipts SET content_tag = ? WHERE id = ?',
+                        (
+                            self._inbound_text_tag(
+                                cursor, normalized_onion, actual_msg_id, payload
+                            ),
+                            receipt_id,
+                        ),
+                    )
                 cursor.execute(
                     'INSERT INTO inbound_spool (receipt_id, payload) VALUES (?, ?)',
                     (receipt_id, payload),

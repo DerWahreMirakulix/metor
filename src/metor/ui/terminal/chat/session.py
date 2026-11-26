@@ -26,7 +26,8 @@ class Session:
         Returns:
             None
         """
-        self.focused_alias: Optional[str] = None
+        self._focused_alias: Optional[str] = None
+        self.focused_onion: Optional[str] = None
         self.pending_focus_target: Optional[str] = None
         self.pending_accept_focus_target: Optional[str] = None
         self.active_connections: List[str] = []
@@ -42,6 +43,17 @@ class Session:
         self.header_contacts: List[str] = []
 
         self.my_onion: str = 'unknown'
+
+    @property
+    def focused_alias(self) -> Optional[str]:
+        """Presentation label of the currently selected contact."""
+        return self._focused_alias
+
+    @focused_alias.setter
+    def focused_alias(self, alias: Optional[str]) -> None:
+        """Pin the peer at selection time even if its label is reassigned later."""
+        self._focused_alias = alias
+        self.focused_onion = self.get_peer_onion(alias)
 
     @staticmethod
     def _build_alias_identity(alias: str) -> str:
@@ -375,6 +387,8 @@ class Session:
         if previous_onion and previous_onion != clean_identity:
             self._peer_alias_by_onion.pop(previous_onion, None)
 
+        if self.focused_onion is None and self.focused_alias == alias:
+            self.focused_onion = clean_identity
         self._peer_alias_by_onion[clean_identity] = alias
         self._peer_onion_by_alias[alias] = clean_identity
         self._move_peer_state(self._build_alias_identity(alias), clean_identity)

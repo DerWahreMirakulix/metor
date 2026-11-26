@@ -146,7 +146,7 @@ class EventHandlerProtocol(Protocol):
         """
         ...
 
-    def _was_pushed_live_msg_id(self, msg_id: str) -> bool:
+    def _was_pushed_live_msg_id(self, peer: str, msg_id: str) -> bool:
         """Returns True when the live message id was already pushed to the UI.
 
         Args:
@@ -157,7 +157,7 @@ class EventHandlerProtocol(Protocol):
         """
         ...
 
-    def _consume_pushed_live_msg_ids(self, msg_ids: List[str]) -> None:
+    def _consume_pushed_live_msg_ids(self, peer: str, msg_ids: List[str]) -> None:
         """Consumes the given live-pushed message ids from the tracking set.
 
         Args:
@@ -168,7 +168,7 @@ class EventHandlerProtocol(Protocol):
         """
         ...
 
-    def _remember_pushed_live_msg_id(self, msg_id: str) -> None:
+    def _remember_pushed_live_msg_id(self, peer: str, msg_id: str) -> None:
         """Tracks one live-pushed message id to deduplicate inbox rendering.
 
         Args:

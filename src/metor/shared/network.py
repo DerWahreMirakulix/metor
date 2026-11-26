@@ -10,10 +10,13 @@ from contextlib import suppress
 
 # Local Package Imports
 from metor.shared.constants import Constants
+from metor.shared.ipc_tls import IpcTlsSocket
 
 
 def recv_before(sock: socket.socket, size: int, deadline: float | None) -> bytes:
     """Receive a fragment within a monotonic operation budget, restoring the socket's idle policy."""
+    if isinstance(sock, IpcTlsSocket):
+        return sock.read_before(size, deadline)
     if deadline is None:
         return sock.recv(size)
     remaining = deadline - time.monotonic()

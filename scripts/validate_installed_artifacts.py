@@ -108,7 +108,8 @@ def launch(context):
         def show_status(self, message): pass
     result = context.host.bootstrap(Interaction())
     assert type(result.port) is int and result.port > 0, result
-    client = MetorClient(result.port, timeout=2)
+    assert result.daemon_certificate, "host did not supply a trusted daemon certificate"
+    client = MetorClient(result.port, timeout=2, daemon_certificate=result.daemon_certificate)
     try:
         assert client.connect(), f"connect failed: {result.port}"
         initialized = client.bootstrap()
@@ -122,33 +123,67 @@ def launch(context):
     return 0
 launch.contract_version = FRONTEND_LAUNCH_CONTRACT_VERSION
 """
-FAKE_HARNESS = """import atexit, tempfile, sys
+FAKE_HARNESS = """import sys, tempfile
 from pathlib import Path
-from unittest.mock import Mock, patch
-from metor.utils import Constants
-from metor.data import ProfileManager, ContactManager, HistoryManager, MessageManager
-from metor.data.profile.models import ProfileConfigKey
-from metor.core.key import KeyManager
-from metor.core.daemon.managed.engine import Daemon
+from unittest.mock import patch
 from metor.cli.handlers import CommandHandlers
+from metor.core.api import (
+    CallsStateEvent, ChatStartupStateEvent, ConnectionsStateEvent,
+    GetCallsCommand, GetChatStartupStateCommand, GetConnectionsCommand,
+    GetRuntimeSnapshotCommand, InitCommand, InitEvent, ListRetainedMessagesCommand,
+    RegisterLiveConsumerCommand, RetainedMessagesEvent, RuntimeSnapshotEvent,
+)
+from metor.core.daemon.managed.ipc import IpcServer
+from metor.data import ProfileManager
+from metor.data.profile.ipc_identity import trust_remote_certificate
+from metor.data.profile.models import ProfileConfigKey
+from metor.utils import Constants
+from metor.versioning import IPC_PROTOCOL_MIN_SUPPORTED, IPC_PROTOCOL_VERSION
+
 with tempfile.TemporaryDirectory() as root:
     Constants.DATA = Path(root) / ".metor"
+    server_profile = ProfileManager("fixture-daemon")
+    server_profile.initialize()
     pm = ProfileManager("artifact")
     pm.initialize()
-    tor = Mock()
-    tor.onion = "a" * 56
-    with patch("metor.core.daemon.managed.engine.daemon.signal.signal"):
-        daemon = Daemon(pm, KeyManager(pm), tor, ContactManager(pm), HistoryManager(pm), MessageManager(pm))
-    atexit.unregister(daemon.stop)
+    onion = "a" * 56 + ".onion"
+    unexpected = []
+
+    def dispatch(command, connection):
+        if isinstance(command, InitCommand):
+            event = InitEvent(IPC_PROTOCOL_VERSION, IPC_PROTOCOL_VERSION,
+                              IPC_PROTOCOL_MIN_SUPPORTED, onion=onion, profile=pm.profile_name)
+        elif isinstance(command, GetRuntimeSnapshotCommand):
+            event = RuntimeSnapshotEvent(profile=pm.profile_name, onion=onion)
+        elif isinstance(command, GetChatStartupStateCommand):
+            event = ChatStartupStateEvent(active=[], contacts=[])
+        elif isinstance(command, GetConnectionsCommand):
+            event = ConnectionsStateEvent(active=[], pending=[], contacts=[], is_header=command.is_header)
+        elif isinstance(command, GetCallsCommand):
+            event = CallsStateEvent()
+        elif isinstance(command, ListRetainedMessagesCommand):
+            event = RetainedMessagesEvent()
+        elif isinstance(command, RegisterLiveConsumerCommand):
+            return True
+        else:
+            unexpected.append(type(command).__name__)
+            return False
+        server.send_to(connection, event)
+        return True
+
+    server = IpcServer(server_profile, dispatch)
+    server.start()
     try:
-        daemon._ipc.start()
-        pm.config.set(ProfileConfigKey.DAEMON_PORT, daemon._ipc.port)
+        pm.config.set(ProfileConfigKey.DAEMON_PORT, server.port)
         pm.config.set(ProfileConfigKey.IS_REMOTE, True, allow_mutating_structural_keys=True)
-        assert pm.get_static_port() == daemon._ipc.port
+        trust_remote_certificate(pm, server_profile.paths.get_config_dir() / "ipc-daemon.crt")
+        assert pm.get_static_port() == server.port
         assert CommandHandlers.handle_chat(pm, frontend_id="closure-fake") == 0
         assert "metor.ui.terminal" not in sys.modules
+        assert not unexpected, unexpected
+        assert not any(p.paths.get_db_file().exists() for p in (pm, server_profile))
     finally:
-        daemon.stop()
+        server.stop()
 """
 
 TERMINAL_HARNESS = FAKE_HARNESS.replace(

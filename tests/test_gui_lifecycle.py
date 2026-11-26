@@ -131,7 +131,7 @@ class NativeLifecycleTests(unittest.TestCase):
         cast(Mock, self.gui.inputs).focus_lost.assert_called_once_with()
         cast(Mock, self.gui.voice).depart.assert_called_once_with()
         cast(Mock, self.gui.playback).stop.assert_called_once_with()
-        cast(Mock, self.gui.security).lock.assert_not_called()
+        cast(Mock, self.gui.security).native_lock.assert_not_called()
 
     def test_suspend_adds_privacy_cover_without_synthesizing_resume_input(self) -> None:
         """Suspend stops all message media and locks after the lost-input barrier.
@@ -145,7 +145,7 @@ class NativeLifecycleTests(unittest.TestCase):
         cast(Mock, self.gui.inputs).focus_lost.assert_called_once_with()
         cast(Mock, self.gui.voice).depart.assert_called_once_with()
         cast(Mock, self.gui.playback).stop.assert_called_once_with()
-        cast(Mock, self.gui.security).lock.assert_called_once_with()
+        cast(Mock, self.gui.security).native_lock.assert_called_once_with()
 
     def test_resume_retains_revoked_input_and_never_unlocks_or_starts_media(
         self,
@@ -348,6 +348,7 @@ class GuiLifecycleCoreTests(unittest.TestCase):
             OneUseSecretProvider('target-password'),
             Mock(),
             True,
+            daemon_certificate=profile.get_daemon_certificate(),
         )
         generation = self.gui.state.generation
         original = self.h.client.disconnect
@@ -460,7 +461,11 @@ class GuiLifecycleCoreTests(unittest.TestCase):
         )
         port = self.h.daemon._ipc.port
         assert port is not None
-        client = MetorClient(port, auth_provider=provider)
+        client = MetorClient(
+            port,
+            daemon_certificate=self.h.daemon._pm.get_daemon_certificate(),
+            auth_provider=provider,
+        )
         self.addCleanup(client.disconnect)
         self.assertIsNotNone(client.bootstrap())
         self.gui.client = client
@@ -505,7 +510,12 @@ class GuiLifecycleCoreTests(unittest.TestCase):
             provider.get_session_auth_proof.side_effect = proof
             port = self.h.daemon._ipc.port
             assert port is not None
-            candidate = MetorClient(port, auth_provider=provider, timeout=2)
+            candidate = MetorClient(
+                port,
+                daemon_certificate=self.h.daemon._pm.get_daemon_certificate(),
+                auth_provider=provider,
+                timeout=2,
+            )
             try:
                 self.assertEqual(candidate.bootstrap() is not None, accepted)
             finally:

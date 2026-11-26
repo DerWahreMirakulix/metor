@@ -278,7 +278,8 @@ class TextAdmissionTests(unittest.TestCase):
         action = next(iter(self.gui.text.operations))
         identity = action.removeprefix('A11:')
         self.assertEqual(
-            self.gui.text.pending_status('peer', Delivery.DROP), 'Sending…'
+            self.gui.text.pending_status('peer', Delivery.DROP),
+            'Sending…',
         )
         self.assertEqual(self.gui.text.pending_status('other', Delivery.DROP), '')
         self.gui.client = Mock()
@@ -286,7 +287,8 @@ class TextAdmissionTests(unittest.TestCase):
         self.gui.state.capabilities = frozenset({'message_outcome'})
         self.gui.text.install(Update(0, action, None))
         self.assertEqual(
-            self.gui.text.pending_status('peer', Delivery.DROP), 'Checking send result…'
+            self.gui.text.pending_status('peer', Delivery.DROP),
+            'Checking send result…',
         )
         with patch('metor.ui.gui.runtime.text.time.monotonic', return_value=10.0):
             self.gui.text.poll()
@@ -362,7 +364,8 @@ class TextAdmissionTests(unittest.TestCase):
                     'frozen submission',
                 )
                 self.assertEqual(
-                    self.gui.text.pending_status('peer', delivery), 'Sending…'
+                    self.gui.text.pending_status('peer', delivery),
+                    'Sending…',
                 )
                 self.gui.send_text('peer', delivery)
         self.assertEqual(self.gui.command.call_count, 2)
@@ -429,6 +432,37 @@ class TextAdmissionTests(unittest.TestCase):
         self.assertFalse(self.gui.text.reservations)
         self.assertNotIn(('peer', Delivery.LIVE), self.gui.state.drafts)
 
+    def test_ack_is_qualified_by_peer_and_direction(self) -> None:
+        """Two outbound rows may share an SDK-chosen identity."""
+        for peer, direction in (
+            ('one', MessageDirectionCode.OUT),
+            ('two', MessageDirectionCode.OUT),
+            ('one', MessageDirectionCode.IN),
+        ):
+            self.gui.transcript.admit(
+                TranscriptItem(
+                    peer,
+                    Delivery.LIVE,
+                    direction,
+                    'shared',
+                    status=MessageStatusCode.PENDING,
+                )
+            )
+        self.gui.transcript.install(AckEvent('shared', 'one'))
+        items = self.gui.transcript.items
+        self.assertEqual(
+            items[('one', Delivery.LIVE, MessageDirectionCode.OUT, 'shared')].status,
+            MessageStatusCode.DELIVERED,
+        )
+        self.assertEqual(
+            items[('two', Delivery.LIVE, MessageDirectionCode.OUT, 'shared')].status,
+            MessageStatusCode.PENDING,
+        )
+        self.assertEqual(
+            items[('one', Delivery.LIVE, MessageDirectionCode.IN, 'shared')].status,
+            MessageStatusCode.PENDING,
+        )
+
     def test_early_read_and_late_ack_never_downgrade_text_or_voice(self) -> None:
         """Positive peer evidence survives acceptance-result races and later inventory updates.
 
@@ -441,20 +475,21 @@ class TextAdmissionTests(unittest.TestCase):
         self.gui.text.install(
             Update(0, 'event', ReadReceiptEvent('peer', identity, 'peer'))
         )
-        self.gui.text.install(Update(0, 'event', AckEvent(identity)))
+        self.gui.text.install(Update(0, 'event', AckEvent(identity, 'peer')))
         self.gui.text.install(
             Update(0, action, TextAcceptedEvent('peer', identity, Delivery.LIVE))
         )
         key = ('peer', Delivery.LIVE, MessageDirectionCode.OUT, identity)
         self.assertEqual(self.gui.transcript.items[key].status, MessageStatusCode.READ)
-        self.gui.transcript.install(AckEvent(identity))
+        self.gui.transcript.install(AckEvent(identity, 'peer'))
         self.gui.transcript.admit(
             TranscriptItem(*key, status=MessageStatusCode.PENDING)
         )
         self.assertEqual(self.gui.transcript.items[key].status, MessageStatusCode.READ)
         turn = Mock(status=MessageStatusCode.READ)
+        turn.binding.peer = 'peer'
         self.gui.voice.live_turns['voice'] = turn
-        self.gui.transcript.install(AckEvent('voice'))
+        self.gui.transcript.install(AckEvent('voice', 'peer'))
         self.assertEqual(turn.status, MessageStatusCode.READ)
 
     def test_starting_capture_reserves_metadata_before_core_result(self) -> None:

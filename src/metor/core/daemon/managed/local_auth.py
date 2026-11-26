@@ -233,6 +233,11 @@ class LocalAuthTracker:
             self._pending_challenges.clear()
             self._reset_rate_limit_locked()
 
+    def has_session_challenge(self, conn: socket.socket) -> bool:
+        """Reports whether this connection still owes a password proof."""
+        with self._lock:
+            return conn in self._pending_challenges
+
     def issue_session_challenge(
         self,
         conn: socket.socket,

@@ -5,7 +5,7 @@ import re
 import secrets
 from enum import Enum
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Callable, Protocol
 
 import nacl.bindings
 import nacl.exceptions
@@ -16,6 +16,10 @@ from nacl.encoding import RawEncoder
 from metor.shared import secure_clear_buffer
 from metor.utils import create_private_directory_tree
 from metor.versioning import BLOB_FORMAT_VERSION, BLOB_OBJECT_DERIVATION_VERSION
+
+if TYPE_CHECKING:
+    from metor.data.profile.manager import ProfileManager
+
 
 BLOB_FORMAT_MAGIC = b'METORB01'
 BLOB_ID_BYTES = 32
@@ -183,6 +187,25 @@ class BlobStore(Protocol):
             None
         """
         ...
+
+
+def open_blob_store(
+    profile: 'ProfileManager', load_key: Callable[[], bytes] | None
+) -> BlobStore:
+    """Open the profile's current storage mode and fetch its key only if encrypted."""
+    persistent = profile.paths.get_persistent_blob_dir()
+    temporary = profile.paths.get_temporary_blob_dir()
+    if profile.uses_encrypted_storage():
+        if load_key is None:
+            raise ValueError('Encrypted blob storage requires a profile key.')
+        return EncryptedBlobStore(persistent, temporary, load_key())
+    return PlaintextBlobStore(persistent, temporary)
+
+
+def delete_owned_blob(store: BlobStore, blob_id: str) -> None:
+    """Release a committed object, including an interrupted temporary promotion."""
+    store.delete(blob_id, BlobLifecycle.PERSISTENT)
+    store.delete(blob_id, BlobLifecycle.TEMPORARY)
 
 
 class EncryptedBlobStore:

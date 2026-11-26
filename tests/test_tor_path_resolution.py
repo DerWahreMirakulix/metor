@@ -4,13 +4,11 @@
 
 import sys
 import subprocess
-import threading
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock, patch
 
-import stem.process
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
@@ -96,39 +94,6 @@ class TorPathResolutionTests(unittest.TestCase):
                 TorManager._resolve_tor_command()
             self.assertNotIn(str(data_dir), str(raised.exception))
 
-    def test_stem_passes_profile_configuration_outside_process_argv(self) -> None:
-        """Pinned Stem sends modern Tor configuration through standard input.
-
-        Args:
-            None
-
-        Returns:
-            None
-        """
-        sentinel = Mock()
-        with (
-            patch(
-                'stem.version.get_system_tor_version',
-                return_value=stem.version.Requirement.TORRC_VIA_STDIN,
-            ),
-            patch('stem.process.launch_tor', return_value=sentinel) as launch,
-        ):
-            result = stem.process.launch_tor_with_config(
-                {
-                    'DataDirectory': '/owned/data',
-                    'HiddenServiceDir': '/owned/service',
-                },
-                tor_cmd='/usr/bin/tor',
-            )
-
-        self.assertIs(result, sentinel)
-        self.assertEqual(launch.call_args.args[1], ['-f', '-'])
-        self.assertIn('DataDirectory /owned/data', launch.call_args.kwargs['stdin'])
-        self.assertIn(
-            'HiddenServiceDir /owned/service',
-            launch.call_args.kwargs['stdin'],
-        )
-
 
 class TorLifecycleTests(unittest.TestCase):
     """Covers bounded Tor process and exported-key release outcomes."""
@@ -143,13 +108,11 @@ class TorLifecycleTests(unittest.TestCase):
             TorManager: Isolated lifecycle owner without a real Tor process.
         """
         root = Path(self.enterContext(TemporaryDirectory()))
-        manager = TorManager.__new__(TorManager)
-        manager._process_lock = threading.RLock()
+        manager = TorManager(Mock(), Mock())
         manager._tm_proc = process
         manager.socks_port = 12346
         manager.control_port = 12347
         manager.incoming_port = 12348
-        manager._pm = Mock()
         manager._pm.paths.get_hidden_service_dir.return_value = root
         manager._pm.paths.get_tor_data_dir.return_value = root
         return manager
@@ -168,15 +131,15 @@ class TorLifecycleTests(unittest.TestCase):
         process.wait.return_value = 0
         manager = self._manager(process)
 
-        with patch('metor.core.tor.secure_shred_file') as shred:
-            manager.stop()
-            manager.stop()
+        manager._control = controller = Mock()
+        manager.stop()
+        manager.stop()
 
         process.terminate.assert_called_once_with()
         process.wait.assert_called_once_with(timeout=Constants.TOR_KILL_TIMEOUT_SEC)
         process.kill.assert_not_called()
         self.assertIsNone(manager._tm_proc)
-        self.assertEqual(shred.call_count, 2)
+        controller.close.assert_called_once_with()
 
     def test_stop_wait_timeout_kills_and_waits_for_confirmed_exit(self) -> None:
         """A terminate timeout requires both kill and a second bounded wait.
@@ -195,8 +158,7 @@ class TorLifecycleTests(unittest.TestCase):
         ]
         manager = self._manager(process)
 
-        with patch('metor.core.tor.secure_shred_file'):
-            manager.stop()
+        manager.stop()
 
         process.kill.assert_called_once_with()
         self.assertEqual(process.wait.call_count, 2)
@@ -217,8 +179,7 @@ class TorLifecycleTests(unittest.TestCase):
         process.wait.return_value = 0
         manager = self._manager(process)
 
-        with patch('metor.core.tor.secure_shred_file'):
-            manager.stop()
+        manager.stop()
 
         process.kill.assert_called_once_with()
         process.wait.assert_called_once_with(timeout=Constants.TOR_KILL_TIMEOUT_SEC)
@@ -239,16 +200,12 @@ class TorLifecycleTests(unittest.TestCase):
         process.kill.side_effect = OSError('kill failed')
         manager = self._manager(process)
 
-        with (
-            patch('metor.core.tor.secure_shred_file') as shred,
-            self.assertRaisesRegex(RuntimeError, 'could not be confirmed'),
-        ):
+        manager._control = controller = Mock()
+        with self.assertRaisesRegex(RuntimeError, 'could not be confirmed'):
             manager.stop()
 
         process.kill.assert_called_once_with()
-        shred.assert_called_once_with(
-            manager._pm.paths.get_hidden_service_dir() / Constants.TOR_SECRET_KEY
-        )
+        controller.close.assert_called_once_with()
         self.assertIs(manager._tm_proc, process)
 
     def test_stop_retains_process_when_post_kill_wait_times_out(self) -> None:
@@ -267,10 +224,7 @@ class TorLifecycleTests(unittest.TestCase):
         )
         manager = self._manager(process)
 
-        with (
-            patch('metor.core.tor.secure_shred_file'),
-            self.assertRaisesRegex(RuntimeError, 'could not be confirmed'),
-        ):
+        with self.assertRaisesRegex(RuntimeError, 'could not be confirmed'):
             manager.stop()
 
         process.kill.assert_called_once_with()
@@ -290,45 +244,12 @@ class TorLifecycleTests(unittest.TestCase):
         process.poll.return_value = 0
         manager = self._manager(process)
 
-        with patch('metor.core.tor.secure_shred_file'):
-            manager.stop()
+        manager.stop()
 
         process.terminate.assert_not_called()
         process.kill.assert_not_called()
         process.wait.assert_not_called()
         self.assertIsNone(manager._tm_proc)
-
-    def test_stop_propagates_required_runtime_key_cleanup_failure(self) -> None:
-        """A denied exported-key cleanup cannot be reported as Tor release success.
-
-        Args:
-            None
-
-        Returns:
-            None
-        """
-        manager = self._manager(None)
-        with (
-            patch(
-                'metor.core.tor.secure_shred_file',
-                side_effect=PermissionError('cleanup denied'),
-            ),
-            self.assertRaisesRegex(PermissionError, 'cleanup denied'),
-        ):
-            manager.stop()
-
-    def test_stop_tolerates_an_already_missing_runtime_key(self) -> None:
-        """Repeated cleanup remains successful when no exported key exists.
-
-        Args:
-            None
-
-        Returns:
-            None
-        """
-        manager = self._manager(None)
-        manager.stop()
-        manager.stop()
 
     def test_launch_failure_never_publishes_os_error_detail(self) -> None:
         """A Tor startup error cannot expose host paths or secrets over IPC or logs.
@@ -355,22 +276,13 @@ class TorLifecycleTests(unittest.TestCase):
                     patch.object(TorManager, '_log_callback', messages.append),
                     patch('metor.core.tor._is_windows', return_value=windows),
                     patch(
-                        'metor.core.tor.stem.process.launch_tor_with_config',
+                        'metor.core.tor.launch_tor',
                         side_effect=OSError(private_detail),
-                    ) as unix_launch,
-                    patch(
-                        'metor.core.tor.launch_tor_without_console',
-                        side_effect=OSError(private_detail),
-                    ) as windows_launch,
+                    ) as launcher,
                 ):
                     result = manager._launch_process()
 
-                if windows:
-                    windows_launch.assert_called_once()
-                    unix_launch.assert_not_called()
-                else:
-                    unix_launch.assert_called_once()
-                    windows_launch.assert_not_called()
+                launcher.assert_called_once()
                 self.assertEqual(
                     result,
                     (
@@ -384,14 +296,10 @@ class TorLifecycleTests(unittest.TestCase):
 
     def test_both_launchers_receive_literal_single_line_torrc_paths(self) -> None:
         """Filesystem text cannot truncate a directory or add a Tor directive."""
-        for windows, launcher in (
-            (False, 'stem.process.launch_tor_with_config'),
-            (True, 'metor.core.tor.launch_tor_without_console'),
-        ):
+        for windows in (False, True):
             with self.subTest(windows=windows):
                 manager = self._manager(None)
-                manager._pm.paths.get_tor_data_dir.return_value = Path('data #1')
-                manager._pm.paths.get_hidden_service_dir.return_value = Path(
+                manager._pm.paths.get_tor_data_dir.return_value = Path(
                     'ü"\\\nControlPort 1'
                 )
                 manager._pm.config.get_int.return_value = 1
@@ -401,13 +309,13 @@ class TorLifecycleTests(unittest.TestCase):
                     patch.object(
                         TorManager, '_resolve_tor_command', return_value='tor'
                     ),
-                    patch(launcher, side_effect=OSError) as launch,
+                    patch('metor.core.tor.launch_tor', side_effect=OSError) as launch,
                 ):
                     manager._launch_process()
                 config = launch.call_args.kwargs['config']
-                self.assertEqual(config['DataDirectory'], '"data #1"')
+                self.assertNotIn('HiddenServiceDir', config)
                 self.assertEqual(
-                    config['HiddenServiceDir'],
+                    config['DataDirectory'],
                     r'"\374\042\134\012ControlPort 1"'
                     if windows
                     else r'"\303\274\042\134\012ControlPort 1"',
@@ -416,11 +324,11 @@ class TorLifecycleTests(unittest.TestCase):
     def test_unrepresentable_windows_directory_never_launches_tor(self) -> None:
         """Tor must not create its service keys under a substituted path."""
         manager = self._manager(None)
-        manager._pm.paths.get_hidden_service_dir.return_value = Path('service界')
+        manager._pm.paths.get_tor_data_dir.return_value = Path('service界')
         with (
             patch('metor.core.tor._is_windows', return_value=True),
             patch('metor.core.tor.locale.getencoding', return_value='cp1252'),
-            patch('metor.core.tor.launch_tor_without_console') as launch,
+            patch('metor.core.tor.launch_tor') as launch,
         ):
             self.assertEqual(
                 manager._launch_process(),
@@ -457,13 +365,9 @@ class TorLifecycleTests(unittest.TestCase):
                     ),
                     patch('metor.core.tor._is_windows', return_value=windows),
                     patch(
-                        'metor.core.tor.stem.process.launch_tor_with_config',
+                        'metor.core.tor.launch_tor',
                         return_value=process,
-                    ) as unix_launch,
-                    patch(
-                        'metor.core.tor.launch_tor_without_console',
-                        return_value=process,
-                    ) as windows_launch,
+                    ) as launcher,
                     patch(
                         'metor.core.tor.ProcessManager.process_identity_payload',
                         return_value='owned-process',
@@ -475,12 +379,7 @@ class TorLifecycleTests(unittest.TestCase):
                 ):
                     result = manager._launch_process()
 
-                if windows:
-                    windows_launch.assert_called_once()
-                    unix_launch.assert_not_called()
-                else:
-                    unix_launch.assert_called_once()
-                    windows_launch.assert_not_called()
+                launcher.assert_called_once()
                 self.assertEqual(
                     result,
                     (
@@ -506,10 +405,6 @@ class TorLifecycleTests(unittest.TestCase):
         with (
             patch.object(manager, '_is_process_running', return_value=True),
             patch.object(manager, '_restart_process', return_value=(False, None, {})),
-            patch(
-                'metor.core.tor.stem.control.Controller.from_port',
-                side_effect=OSError('private-control-path'),
-            ),
             patch('metor.core.tor.time.sleep'),
         ):
             result = manager.rotate_circuits()

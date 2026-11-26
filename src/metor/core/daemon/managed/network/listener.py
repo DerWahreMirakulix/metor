@@ -44,6 +44,7 @@ from metor.data import (
     SettingKey,
 )
 from metor.utils import Constants
+from metor.shared import clean_onion
 from metor.versioning import (
     PEER_PROTOCOL_MIN_SUPPORTED,
     PEER_PROTOCOL_VERSION,
@@ -405,8 +406,26 @@ class InboundListener:
                 )
                 if negotiated_version is None:
                     raise ValueError('Peer protocol ranges do not overlap')
-                if self._crypto.verify_signature(remote_onion, challenge, signature):
-                    onion = remote_onion
+                local_onion = self._tm.onion
+                if not local_onion:
+                    raise ValueError('Local onion unavailable.')
+                mode = HandshakeProtocol.auth_mode(
+                    is_call=is_call,
+                    is_async=is_async,
+                    origin=ConnectionOrigin.AUTO_RECONNECT
+                    if has_recovery_hint
+                    else None,
+                )
+                proof = HandshakeProtocol.proof(
+                    challenge,
+                    remote_onion,
+                    local_onion,
+                    mode,
+                    (peer_current, peer_minimum),
+                    (PEER_PROTOCOL_VERSION, PEER_PROTOCOL_MIN_SUPPORTED),
+                )
+                if self._crypto.verify_signature(remote_onion, proof, signature):
+                    onion = clean_onion(remote_onion)
                     auth_successful = True
         except MemoryError:
             self._hm.log_event(

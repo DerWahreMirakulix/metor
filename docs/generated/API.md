@@ -1023,10 +1023,11 @@ Requests the current connection state.
 
 Requests the structured address book.
 
-| Field        | Type               | Default |
-| ------------ | ------------------ | ------- |
-| `request_id` | `Union[str, None]` | `None`  |
-| `chat_mode`  | `bool`             | `False` |
+| Field        | Type                     | Default |
+| ------------ | ------------------------ | ------- |
+| `request_id` | `Union[str, None]`       | `None`  |
+| `chat_mode`  | `bool`                   | `False` |
+| `onions`     | `Union[List[str], None]` | `None`  |
 
 **Wire Value:** `get_contacts_list`
 
@@ -1198,11 +1199,13 @@ Reads this client's currently effective restricted grants and permitted call met
 
 ### `GetRuntimeSnapshotCommand`
 
-Requests one frontend-neutral aggregate runtime projection.
+Requests the first snapshot page, or a continuation of one frozen inventory.
 
-| Field        | Type               | Default |
-| ------------ | ------------------ | ------- |
-| `request_id` | `Union[str, None]` | `None`  |
+| Field         | Type               | Default |
+| ------------- | ------------------ | ------- |
+| `request_id`  | `Union[str, None]` | `None`  |
+| `snapshot_id` | `Union[str, None]` | `None`  |
+| `offset`      | `int`              | `0`     |
 
 **Wire Value:** `get_runtime_snapshot`
 
@@ -2107,6 +2110,7 @@ Confirms delivery of a live outbound message.
 | `revision`   | `Union[int, None]` | `None`   |
 | `epoch`      | `Union[str, None]` | `None`   |
 | `msg_id`     | `str`              | Required |
+| `onion`      | `str`              | Required |
 | `timestamp`  | `Union[str, None]` | `None`   |
 
 **Wire Value:** `ack`
@@ -2116,7 +2120,8 @@ Confirms delivery of a live outbound message.
 ```json
 {
   "event_type": "ack",
-  "msg_id": "string"
+  "msg_id": "string",
+  "onion": "string"
 }
 ```
 
@@ -3263,14 +3268,15 @@ Signals that the address book was cleared.
 
 Returns the structured address book.
 
-| Field        | Type                 | Default  |
-| ------------ | -------------------- | -------- |
-| `request_id` | `Union[str, None]`   | `None`   |
-| `revision`   | `Union[int, None]`   | `None`   |
-| `epoch`      | `Union[str, None]`   | `None`   |
-| `saved`      | `List[ContactEntry]` | Required |
-| `discovered` | `List[ContactEntry]` | Required |
-| `profile`    | `str`                | Required |
+| Field            | Type                     | Default  |
+| ---------------- | ------------------------ | -------- |
+| `request_id`     | `Union[str, None]`       | `None`   |
+| `revision`       | `Union[int, None]`       | `None`   |
+| `epoch`          | `Union[str, None]`       | `None`   |
+| `saved`          | `List[ContactEntry]`     | Required |
+| `discovered`     | `List[ContactEntry]`     | Required |
+| `profile`        | `str`                    | Required |
+| `checked_onions` | `Union[List[str], None]` | `None`   |
 
 **Wire Value:** `contacts_data`
 
@@ -3494,6 +3500,7 @@ Marks an asynchronous drop as failed.
 | `revision`   | `Union[int, None]` | `None`   |
 | `epoch`      | `Union[str, None]` | `None`   |
 | `msg_id`     | `str`              | Required |
+| `onion`      | `str`              | Required |
 | `reason`     | `Union[str, None]` | `None`   |
 
 **Wire Value:** `drop_failed`
@@ -3503,7 +3510,8 @@ Marks an asynchronous drop as failed.
 ```json
 {
   "event_type": "drop_failed",
-  "msg_id": "string"
+  "msg_id": "string",
+  "onion": "string"
 }
 ```
 
@@ -5378,6 +5386,9 @@ Returns one aggregate, content-free runtime projection for rich clients.
 | `settings_version`           | `str`                                | `1`         |
 | `profile_instance_id`        | `Union[str, None]`                   | `None`      |
 | `authenticated_client_count` | `Union[int, None]`                   | `None`      |
+| `snapshot_id`                | `Union[str, None]`                   | `None`      |
+| `page_offset`                | `int`                                | `0`         |
+| `next_offset`                | `Union[int, None]`                   | `None`      |
 
 **Wire Value:** `runtime_snapshot`
 

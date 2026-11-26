@@ -58,7 +58,11 @@ class ColdUnlockBudgetTests(unittest.TestCase):
         provider.get_unlock_password.return_value = 'test-password'
         port = daemon._ipc.port
         assert port is not None
-        client = MetorClient(port, auth_provider=provider)
+        client = MetorClient(
+            port,
+            daemon_certificate=profile.get_daemon_certificate(),
+            auth_provider=provider,
+        )
         entered = threading.Event()
         release = threading.Event()
         finished = threading.Event()
@@ -115,7 +119,7 @@ class ColdUnlockBudgetTests(unittest.TestCase):
                     side_effect=AssertionError('Native Tor resolution was attempted'),
                 ) as resolve,
                 patch(
-                    'stem.process.launch_tor_with_config',
+                    'metor.core.tor.launch_tor',
                     side_effect=AssertionError('Native Tor launch was attempted'),
                 ) as native_launch,
             ):
@@ -125,6 +129,12 @@ class ColdUnlockBudgetTests(unittest.TestCase):
                 )
                 self.assertIs(daemon._tm, launched[0])
                 self.assertIs(daemon._lifecycle, DaemonLifecycle.UNLOCKING)
+                # Other clients can observe a locked daemon while Tor is still
+                # bootstrapping. They cannot access installed private state.
+                acquired = daemon._domain_operation_lock.acquire(timeout=1)
+                self.assertTrue(acquired)
+                daemon._domain_operation_lock.release()
+
                 self.assertFalse(
                     finished.wait(
                         Constants.DEFAULT_IPC_TIMEOUT + COLD_UNLOCK_MARGIN_SEC

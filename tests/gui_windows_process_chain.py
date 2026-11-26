@@ -693,7 +693,7 @@ def _console_fixture(root: Path) -> Path:
 
 def _tor_child_worker(executable: Path, root: Path) -> int:
     """Spawn the fixture from a process with no inherited Windows console."""
-    from metor.core.tor_windows import launch_tor_without_console
+    from metor.core.tor_process import launch_tor
 
     if _console_handle():
         return 2
@@ -702,12 +702,10 @@ def _tor_child_worker(executable: Path, root: Path) -> int:
         'ControlPort': '10242',
         'CookieAuthentication': '1',
         'DataDirectory': str(root / 'tor-data'),
-        'HiddenServiceDir': str(root / 'hidden-service'),
-        'HiddenServicePort': '80 127.0.0.1:10243',
     }
     process: subprocess.Popen[bytes] | None = None
     try:
-        process = launch_tor_without_console(tor_cmd=str(executable), config=config)
+        process = launch_tor(tor_cmd=str(executable), config=config)
         try:
             return 0 if process.wait(timeout=FIXTURE_EXIT_SECONDS) == 0 else 4
         except subprocess.TimeoutExpired:

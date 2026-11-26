@@ -22,6 +22,12 @@ class Constants:
     VOICE_CODEC_MAX_CHARS: int = 64
     VOICE_PRESSURE_PERCENT: int = 90
     MESSAGE_ID_MAX_CHARS: int = 128
+    CONTACT_QR_MAX_BYTES: int = 4096
+    CONTACT_ALIAS_MAX_BYTES: int = 4096
+    CONTACT_RECHECK_ITEMS: int = 128
+    SNAPSHOT_PAGE_ITEMS: int = 256
+    SNAPSHOT_PAGE_BYTES: int = 256 * 1024
+    SNAPSHOT_PAGE_GENERATIONS: int = 4
     VOICE_OWNER_TOKEN_BYTES: int = 16
     LIVE_ATTEMPT_TOKEN_BYTES: int = 16
     DESTRUCTION_OPERATION_BYTES: int = 16
@@ -40,6 +46,9 @@ class Constants:
     MAX_CLIENT_CALLBACK_GENERATIONS: int = 2
     SESSION_AUTH_KEY_BYTES: int = (
         32  # Argon2-derived key length for IPC session-auth proofs
+    )
+    TEXT_RECEIPT_KEY_BYTES: int = (
+        32  # Profile HMAC-SHA256 key for inbound content binding
     )
     SESSION_AUTH_CHALLENGE_BYTES: int = (
         32  # Random challenge length for one IPC session-auth proof round

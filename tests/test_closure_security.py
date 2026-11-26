@@ -15,6 +15,9 @@ from metor.core.api import (
     RestrictClientCommand,
     ReauthorizeClientCommand,
     ConfigureQuickUnlockCommand,
+    SetConfigCommand,
+    SetSettingCommand,
+    SyncConfigCommand,
     ClientUnlockMethod,
     QuickUnlockAction,
     EventType,
@@ -28,6 +31,7 @@ from metor.core.auth import (
     build_pin_unlock_proof,
 )
 from metor.core.daemon.managed.local_auth import create_session_auth_context
+from metor.data import ProfileManager, SettingKey, Settings
 from metor.utils import Constants
 from metor.versioning import IPC_PROTOCOL_VERSION, IPC_PROTOCOL_MIN_SUPPORTED
 
@@ -54,6 +58,7 @@ class ClosureSecurityTests(unittest.TestCase):
                 _INTEGRATION_IPC_TIMEOUT_SEC,
                 lambda event: None,
                 lambda: None,
+                daemon_certificate=daemon._pm.get_daemon_certificate(),
             )
             self.addCleanup(raw.stop)
             self.assertTrue(raw.connect())
@@ -123,6 +128,30 @@ class ClosureSecurityTests(unittest.TestCase):
                     EventType.SESSION_AUTHENTICATED,
                 )
                 # Idempotent acknowledgement cannot grant SET authority.
+                manager = daemon._pm
+                manager.config.set(SettingKey.REQUIRE_LOCAL_AUTH, True)
+                global_auth = Settings.get_bool(SettingKey.REQUIRE_LOCAL_AUTH)
+                retained_retries = Settings.get_int(SettingKey.MAX_CONNECT_RETRIES) + 1
+                manager.config.set(SettingKey.MAX_CONNECT_RETRIES, retained_retries)
+                for protected in (
+                    SetConfigCommand(SettingKey.REQUIRE_LOCAL_AUTH.value, False),
+                    SetSettingCommand(
+                        SettingKey.REQUIRE_LOCAL_AUTH.value, not global_auth
+                    ),
+                    SyncConfigCommand(),
+                ):
+                    self.assertEqual(
+                        exchange(raw, protected).event_type, EventType.AUTH_REQUIRED
+                    )
+                reopened = ProfileManager(manager.profile_name)
+                self.assertTrue(reopened.config.get_bool(SettingKey.REQUIRE_LOCAL_AUTH))
+                self.assertEqual(
+                    reopened.config.get_int(SettingKey.MAX_CONNECT_RETRIES),
+                    retained_retries,
+                )
+                self.assertEqual(
+                    Settings.get_bool(SettingKey.REQUIRE_LOCAL_AUTH), global_auth
+                )
                 challenge = exchange(raw, configure())
                 self.assertEqual(challenge.event_type, EventType.AUTH_REQUIRED)
                 authenticate(raw, challenge)

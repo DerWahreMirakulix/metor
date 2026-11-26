@@ -99,8 +99,7 @@ python scripts/versioning.py set-min ipc 2
 ```
 
 The CLI edits only `src/metor/versioning/__init__.py`. Review the implementation and
-migration implications before invoking it. `set-app` is reserved for release
-automation.
+migration implications before invoking it. Use `set-app` in the release preparation PR, along with the regenerated references.
 
 Regenerate the machine-readable baseline after generating the IPC schema:
 
@@ -160,39 +159,34 @@ has an external deadline, and the retained log is capped at 64 KiB. This is a
 native accessibility contract check, not certification of every screen reader
 or evidence for Windows UIA.
 
-The workflow discovers every non-draft GitHub Release and selects the highest
-valid stable `vMAJOR.MINOR.PATCH` tag through parsed SemVer ordering. Prerelease
-tags do not establish the normal stable release baseline. It calculates and
-writes `APP_VERSION`, then runs Ruff, Ruff format, Mypy, the complete test
-suite, all generated-document producers twice for reproducibility, compatibility
-gates, Linux and Windows jobs, all four package builds, and wheel-metadata
-validation. The canonical generated outputs are `API.md`, `SETTINGS.md`,
-`api.schema.json`, and `compatibility.json`. Only a non-dry-run request from
-`main` can commit those release changes, create the application release tag,
-and publish a GitHub Release containing the generated compatibility matrix. A
-dry run performs the same gates from any branch without repository or release
-writes. When a first `current` release already has the correct registry and
-generated outputs, no release commit is created; the validated checked-out
-commit is tagged directly.
+Prepare the application version in a normal pull request with
+`python scripts/versioning.py set-app VERSION` and `npm run generate:docs`.
+In GitHub's default-branch rules, require the **Required CI result** check.
+After merging, wait for its `push` run on the exact `main` commit. Release
+validation checks the committed registry and generated files for agreement
+with the selected SemVer bump and the preceding published stable release.
 
-Release validation checks out the immutable requested candidate, applies the
-proposed version, and builds and accepts the native archives from that modified
-candidate. Publication downloads those archives from the same workflow run and
-refuses to update `main` if it moved after validation. It does not substitute a
-prior CI run or rebuild release assets from an untested branch state. Normal CI
-checks generated references without writing them; maintainers run
-`npm run generate:docs` when intentionally changing the API or settings. There
-is no branch-specific documentation bot that commits generated files after CI.
-The mandatory installed daemon acceptance starts a locked local daemon without
-the public Tor network. An optional native Tor startup check is described in
-[CONTRIBUTE.md](./CONTRIBUTE.md#portable-local-environments) and requires a
-separately provisioned Tor binary.
+Run **Release Metor** with `dry_run=true` to validate a candidate without
+publishing. The Linux and Windows quality jobs each build and test four
+CPython 3.11 x86-64 archives using the reviewed hashes in
+`requirements/release-distributions.sha256`. Update the affected hashes in the
+same PR as the package pins, taking them from the exact distribution files on
+PyPI. The release builder accepts binary distributions whose hashes were
+reviewed for those targets. Every ZIP identifies its source commit and includes
+`NATIVE-COMPONENTS.json`, which records per-wheel native binary hashes and,
+where present, the SQLite, SQLCipher and linked cryptographic provider versions.
+The OSV job records its UTC query time and checked Python and npm versions.
 
-Publication updates the validated `main` branch and its annotated version tag
-in one required atomic Git push. A server that cannot perform the transaction,
-or rejects either ref, fails closed without a non-atomic fallback. GitHub
-Release creation remains a separate downstream operation and is not described
-as part of that ref transaction.
+For publication, dispatch from `main` with `dry_run=false`. The workflow
+checks that the same commit is still at `main`, that the push CI workflow
+and its aggregate check succeeded, and that all eight tested ZIPs match the
+candidate. It creates a tag pointing at that commit. The publish job attests
+and verifies the exact ZIP bytes, uploads them to a draft, compares GitHub's
+remote asset digests with its approved inventory, then publishes. A retry
+reuses the original draft and its GitHub Actions build artifacts. Existing
+matching uploads are retained. A conflicting tag, body, asset, or expired
+source artifact requires investigation before publication. No release job
+writes a commit to the protected branch.
 
 The first stable tag is `v1.0.0`. With no previous stable tag, select the
 default `current` release type to use the registry version. Patch, minor and

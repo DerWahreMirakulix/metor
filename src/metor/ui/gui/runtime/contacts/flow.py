@@ -5,6 +5,7 @@ import json
 from typing import TYPE_CHECKING, Literal
 
 from metor.client import validate_contact_qr
+from metor.client.contact_qr import fits_contact_input
 from metor.core.api import (
     AddContactCommand,
     AliasInUseEvent,
@@ -173,7 +174,7 @@ class ContactFlow:
         form = self.form
         if form is None:
             return None
-        if len(raw.encode('utf-8')) > GuiLimits.CONTACT_BYTES:
+        if not fits_contact_input(raw, GuiLimits.CONTACT_BYTES):
             form.error = 'Contact data is too long'
             return None
         raw = raw.strip()
@@ -215,7 +216,7 @@ class ContactFlow:
             if not form.error:
                 form.error = 'Enter a local alias'
             return False
-        if len(form.alias.encode('utf-8')) > GuiLimits.CONTACT_BYTES:
+        if not fits_contact_input(form.alias, GuiLimits.CONTACT_BYTES):
             form.error = 'Local alias is too long'
             return False
         form.peer = peer
@@ -262,9 +263,12 @@ class ContactFlow:
             or self.controller.state.covered
         ):
             return False
+        if form.peer is None:
+            return False
+        command = GetContactsListCommand(onions=[form.peer])
         admitted = self.controller.submit(
             'contact:check:' + str(form.serial),
-            lambda: client.request(GetContactsListCommand(), ContactsDataEvent),
+            lambda: client.request(command, ContactsDataEvent),
             background=True,
         )
         if admitted:
@@ -362,7 +366,12 @@ class ContactFlow:
                 self.form.pending = False
                 self._check_needed = self.form.unknown
             return True
-        project_contact(self.controller.state, update.event)
+        snapshot = self.controller.state.snapshot
+        if project_contact(self.controller.state, update.event) and (
+            snapshot is not None and snapshot.next_offset is not None
+        ):
+            # A local delta cannot be combined with later frozen inventory pages.
+            self.controller.refresh_state()
         if isinstance(update.event, RenameSuccessEvent) and update.event.onion:
             renamed = update.event
             if renamed.is_demotion and self.form and self.form.peer == renamed.onion:

@@ -23,12 +23,16 @@ from metor.core.api import (
     GetRestrictedClientStateCommand,
     RejectCommand,
     PrepareProfileExitCommand,
+    SetConfigCommand,
+    SetSettingCommand,
+    SyncConfigCommand,
     SelfDestructCommand,
     EventType,
     IpcCommand,
     create_event,
 )
 from metor.utils import Constants
+from metor.data.settings import SettingKey
 
 # Local Package Imports
 from ...local_auth import (
@@ -42,6 +46,30 @@ from .restricted_state import restricted_state
 
 if TYPE_CHECKING:
     from .controller import SessionAccessController
+
+
+# These writes change trust, disclosure, retention, or authentication policy.
+# A sync can replace all of them in one transaction.
+_PROTECTED_SETTINGS = frozenset(
+    key.value
+    for key in (
+        SettingKey.REQUIRE_LOCAL_AUTH,
+        SettingKey.SELF_DESTRUCT_REQUIRES_UNLOCK,
+        SettingKey.LOCAL_AUTH_FAILURE_LIMIT,
+        SettingKey.LOCAL_AUTH_LOCKOUT_TIMEOUT,
+        SettingKey.ALLOW_PLAINTEXT_PROFILES,
+        SettingKey.ENABLE_TOR_LOGGING,
+        SettingKey.ENABLE_SQL_LOGGING,
+        SettingKey.ENABLE_RUNTIME_DB_MIRROR,
+        SettingKey.AUTO_ACCEPT_CONTACTS,
+        SettingKey.EPHEMERAL_MESSAGES,
+        SettingKey.RECORD_LIVE_HISTORY,
+        SettingKey.RECORD_DROP_HISTORY,
+        SettingKey.EXPOSE_DROP_REJECTION,
+        SettingKey.SEND_READ_RECEIPTS,
+        SettingKey.NOTIFICATION_SINK,
+    )
+)
 
 
 def authorize(
@@ -64,6 +92,10 @@ def authorize(
         is_authenticated: bool = conn in self._authenticated_clients
         sensitive_auth_pending = self._sensitive_auth_pending.get(conn)
         restricted_policy = self._restricted.get(conn)
+
+    if isinstance(cmd, PrepareProfileExitCommand) and not runtime_unlocked:
+        self._send(conn, create_event(EventType.DAEMON_LOCKED))
+        return False
 
     if restricted_policy is not None:
         if isinstance(cmd, GetRestrictedClientStateCommand):
@@ -112,6 +144,31 @@ def authorize(
                 {'command': cmd.command_type.value},
             ),
         )
+        return False
+
+    protected_write = isinstance(cmd, SyncConfigCommand) or (
+        isinstance(cmd, (SetSettingCommand, SetConfigCommand))
+        and cmd.setting_key in _PROTECTED_SETTINGS
+    )
+    if protected_write and runtime_unlocked and not self.is_full_authenticated(conn):
+        policy_retry_after = self.retry_after_seconds()
+        if policy_retry_after is not None:
+            self._send(conn, self._rate_limited_event(policy_retry_after))
+        else:
+            policy_prompt = self._local_auth.issue_session_challenge(conn)
+            if policy_prompt is not None:
+                self._send(
+                    conn,
+                    self._session_auth_event(EventType.AUTH_REQUIRED, policy_prompt),
+                )
+            else:
+                self._send(
+                    conn,
+                    create_event(
+                        EventType.CLIENT_ACCESS_RESTRICTED,
+                        {'command': cmd.command_type.value},
+                    ),
+                )
         return False
 
     if isinstance(cmd, ConfigureQuickUnlockCommand):
@@ -182,7 +239,11 @@ def authorize(
     if not runtime_unlocked:
         self._send(conn, create_event(EventType.DAEMON_LOCKED))
         return False
-    if is_authenticated and sensitive_auth_pending is None:
+    if (
+        is_authenticated
+        and sensitive_auth_pending is None
+        and not self._local_auth.has_session_challenge(conn)
+    ):
         self._send(conn, create_event(EventType.SESSION_AUTHENTICATED))
         return False
 

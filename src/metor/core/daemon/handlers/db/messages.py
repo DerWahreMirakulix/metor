@@ -244,20 +244,16 @@ class DatabaseCommandMessagesMixin(DatabaseCommandHandlerSupportMixin):
                 return create_event(EventType.PEER_NOT_FOUND, {'target': cmd.target})
             alias, onion = resolved
 
-        voice_payloads = self._mm.get_drop_voice_payloads(
-            onion=onion,
-            non_contacts_only=cmd.non_contacts_only,
-            include_pending=cmd.cancel_pending,
-        )
         result: MessageClearResult = self._mm.clear_messages(
             onion,
             cmd.non_contacts_only,
             cmd.cancel_pending,
         )
         if result.success:
-            self._delete_voice_payloads(voice_payloads)
             if self._cancel_drop_requests_cb is not None:
                 self._cancel_drop_requests_cb(result.cancelled_drop_ids)
+            if not self._mm.finish_voice_deletions(self._delete_persistent_blob_cb):
+                return create_event(EventType.MESSAGES_CLEAR_FAILED)
         params: Dict[str, str] = {}
         if (
             result.operation_type
@@ -372,28 +368,34 @@ class DatabaseCommandMessagesMixin(DatabaseCommandHandlerSupportMixin):
         direction = (
             MessageDirection(cmd.direction.value) if cmd.direction is not None else None
         )
-        voice_payloads = self._mm.get_drop_voice_payloads(
-            onion=onion,
-            msg_id=cmd.msg_id,
-            direction=direction,
-            include_pending=cmd.cancel_pending,
-        )
         outcome = self._mm.delete_drop_message(
             onion, cmd.msg_id, direction, cmd.cancel_pending
         )
         if outcome is MessageDeleteOutcome.DELETED:
-            self._delete_voice_payloads(voice_payloads)
             if (
                 cmd.cancel_pending
                 and direction is not MessageDirection.IN
                 and self._cancel_drop_requests_cb is not None
             ):
                 self._cancel_drop_requests_cb(((onion, cmd.msg_id),))
+            if not self._mm.finish_voice_deletions(self._delete_persistent_blob_cb):
+                return create_event(
+                    EventType.MESSAGE_DELETE_REJECTED,
+                    {
+                        'target': cmd.target,
+                        'onion': onion,
+                        'msg_id': cmd.msg_id,
+                        'reason': MessageOperationReason.PERSISTENCE_FAILED.value,
+                    },
+                )
             self._broadcast(RuntimeStateChangedEvent(scope='messages', onion=onion))
             return create_event(
                 EventType.MESSAGE_DELETED,
                 {'alias': alias, 'onion': onion, 'msg_id': cmd.msg_id},
             )
+        cleanup_complete = self._mm.finish_voice_deletions(
+            self._delete_persistent_blob_cb
+        )
         reason_map = {
             MessageDeleteOutcome.NOT_FOUND: MessageOperationReason.NOT_FOUND,
             MessageDeleteOutcome.NOT_DROP: MessageOperationReason.NOT_DROP,
@@ -410,6 +412,10 @@ class DatabaseCommandMessagesMixin(DatabaseCommandHandlerSupportMixin):
                 'target': cmd.target,
                 'onion': onion,
                 'msg_id': cmd.msg_id,
-                'reason': reason_map[outcome].value,
+                'reason': (
+                    reason_map[outcome]
+                    if cleanup_complete
+                    else MessageOperationReason.PERSISTENCE_FAILED
+                ).value,
             },
         )

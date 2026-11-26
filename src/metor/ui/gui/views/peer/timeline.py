@@ -374,6 +374,9 @@ class Timeline(BoxLayout):
         """Releases the discarded projection and all scheduled native layout work."""
         self._revoked = True
         self._layout_trigger.cancel()
+        for widget in self._widgets.values():
+            if isinstance(widget, MessageBubble):
+                widget.revoke()
         self._widgets.clear()
         self._context_keys.clear()
         self._rows.clear()
@@ -433,7 +436,10 @@ class Timeline(BoxLayout):
         visible = [row.key for row in selected]
         for key in list(self._widgets):
             if key not in visible:
-                self.column.remove_widget(self._widgets.pop(key))
+                removed = self._widgets.pop(key)
+                if isinstance(removed, MessageBubble):
+                    removed.revoke()
+                self.column.remove_widget(removed)
                 self._context_keys.discard(key)
         widgets_changed = False
         for row in selected:
@@ -462,6 +468,8 @@ class Timeline(BoxLayout):
                 (row.text is None) != isinstance(widget, VoiceCard)
                 or has_actions != (row.key in self._context_keys)
             ):
+                if isinstance(widget, MessageBubble):
+                    widget.revoke()
                 self.column.remove_widget(widget)
                 self._widgets.pop(row.key)
                 widget = None

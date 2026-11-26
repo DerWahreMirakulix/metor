@@ -4,6 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
+import hmac
 from typing import TYPE_CHECKING, List, Optional, Tuple, cast
 from metor.core.api import ContentType, Delivery
 from metor.data.message.models import MessageDirection, MessageStatus
@@ -35,6 +36,21 @@ class MessageReceiptStore:
     """Owns exact receipt lookup and common transaction primitives."""
 
     _sql: SqlManager
+
+    @staticmethod
+    def _inbound_text_tag(
+        cursor: SqlCipherCursor, peer: str, msg_id: str, payload: str
+    ) -> str:
+        """Authenticate the exact inbound content across LIVE discard and DROP promotion."""
+        key_row = cursor.execute(
+            "SELECT value FROM profile_metadata WHERE name = 'text_receipt_key'"
+        ).fetchone()
+        if not isinstance(key_row, tuple) or not isinstance(key_row[0], str):
+            raise ValueError('Profile receipt key unavailable.')
+        content = json.dumps(
+            [peer, msg_id, payload], ensure_ascii=False, separators=(',', ':')
+        ).encode()
+        return hmac.digest(bytes.fromhex(key_row[0]), content, 'sha256').hex()
 
     def drop_delivery_pending(self, receipt_id: int, onion: str, msg_id: str) -> bool:
         """Checks exact durable authority immediately before DROP frame emission.

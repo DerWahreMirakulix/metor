@@ -69,10 +69,10 @@ class EventHandler:
         self._has_auto_reconnect: Callable[[], bool] = has_auto_reconnect
         self._notification_lock: threading.Lock = threading.Lock()
         self._buffered_inbox_notifications: Dict[str, BufferedInboxNotification] = {}
-        self._pushed_live_msg_ids: OrderedDict[str, None] = OrderedDict()
+        self._pushed_live_msg_ids: OrderedDict[tuple[str, str], None] = OrderedDict()
         self._voice = VoiceNotices(self)
 
-    def _remember_pushed_live_msg_id(self, msg_id: str) -> None:
+    def _remember_pushed_live_msg_id(self, peer: str, msg_id: str) -> None:
         """
         Records one live message id that was pushed to this UI and rendered.
 
@@ -83,11 +83,11 @@ class EventHandler:
             None
         """
         with self._notification_lock:
-            self._pushed_live_msg_ids[msg_id] = None
+            self._pushed_live_msg_ids[(peer, msg_id)] = None
             if len(self._pushed_live_msg_ids) > Constants.PUSHED_LIVE_IDS:
                 self._pushed_live_msg_ids.popitem(last=False)
 
-    def _was_pushed_live_msg_id(self, msg_id: str) -> bool:
+    def _was_pushed_live_msg_id(self, peer: str, msg_id: str) -> bool:
         """
         Reports whether one live message id was already pushed to this UI.
 
@@ -98,9 +98,9 @@ class EventHandler:
             bool: True if the message was already pushed.
         """
         with self._notification_lock:
-            return msg_id in self._pushed_live_msg_ids
+            return (peer, msg_id) in self._pushed_live_msg_ids
 
-    def _consume_pushed_live_msg_ids(self, msg_ids: Iterable[str]) -> None:
+    def _consume_pushed_live_msg_ids(self, peer: str, msg_ids: Iterable[str]) -> None:
         """
         Forgets pushed message ids that were confirmed by an inbox consume.
 
@@ -112,7 +112,7 @@ class EventHandler:
         """
         with self._notification_lock:
             for msg_id in msg_ids:
-                self._pushed_live_msg_ids.pop(msg_id, None)
+                self._pushed_live_msg_ids.pop((peer, msg_id), None)
 
     @staticmethod
     def _notification_key(alias: Optional[str], onion: Optional[str]) -> Optional[str]:
@@ -180,8 +180,8 @@ class EventHandler:
             pending.onion,
             pending.alias,
         )
-        if alias and alias == self._session.focused_alias:
-            self._ipc.send_command(MarkReadCommand(target=alias))
+        if pending.onion and clean_onion(pending.onion) == self._session.focused_onion:
+            self._ipc.send_command(MarkReadCommand(target=pending.onion))
             return
 
         self._print_translated(
@@ -430,16 +430,19 @@ class EventHandler:
             None
         """
         old_alias: Optional[str] = self._session.focused_alias
-        old_onion: Optional[str] = self._session.get_peer_onion(old_alias)
+        old_onion = self._session.focused_onion
 
-        if old_alias == alias:
+        if old_alias == alias and old_onion == self._session.get_peer_onion(alias):
             return
 
         self._session.focused_alias = alias
         self._renderer.set_focus(alias, self._session.get_transport_state(alias))
 
         if sync_daemon:
-            self._ipc.send_command(SwitchCommand(target=alias))
+            if alias is None or self._session.focused_onion:
+                self._ipc.send_command(
+                    SwitchCommand(target=self._session.focused_onion)
+                )
 
         if not hide_message:
             if alias:
@@ -454,7 +457,8 @@ class EventHandler:
                     alias,
                     alias_onion,
                 )
-                self._ipc.send_command(MarkReadCommand(target=alias))
+                if alias_onion:
+                    self._ipc.send_command(MarkReadCommand(target=alias_onion))
             elif old_alias:
                 self._print_peer_status(
                     "Removed focus from '{alias}'.",

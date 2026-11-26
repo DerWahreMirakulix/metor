@@ -69,7 +69,11 @@ class RuntimeStartTransactionTests(unittest.TestCase):
         provider = Mock()
         provider.get_unlock_password.return_value = 'test-password'
         self.provider = provider
-        self.client = MetorClient(port, auth_provider=provider)
+        self.client = MetorClient(
+            port,
+            auth_provider=provider,
+            daemon_certificate=self.profile.get_daemon_certificate(),
+        )
         self.addCleanup(self.daemon.stop)
         self.addCleanup(self.client.disconnect)
 
@@ -256,7 +260,7 @@ class RuntimeStartTransactionTests(unittest.TestCase):
             None
         """
         entered = threading.Event()
-        release = threading.Event()
+        cancelled = threading.Event()
         finished = threading.Event()
         failures: list[Exception] = []
 
@@ -271,8 +275,9 @@ class RuntimeStartTransactionTests(unittest.TestCase):
                 tuple[bool, None, dict[str, JsonValue]]: Synthetic launch success.
             """
             entered.set()
-            if not release.wait(10):
-                raise TimeoutError('Controlled launch gate was not released')
+            if not manager._cancelled.wait(10):
+                raise TimeoutError('Daemon did not cancel Tor bootstrap')
+            cancelled.set()
             return self._synthetic_launch(manager)
 
         def bootstrap() -> None:
@@ -299,10 +304,10 @@ class RuntimeStartTransactionTests(unittest.TestCase):
                 closer.start()
                 self.assertTrue(self.daemon._stop_flag.wait(2))
             finally:
-                release.set()
                 worker.join(10)
                 if 'closer' in locals():
                     closer.join(10)
+        self.assertTrue(cancelled.is_set())
         self.assertTrue(finished.is_set())
         self.assertFalse(worker.is_alive())
         self.assertIsNot(self.daemon._lifecycle, DaemonLifecycle.UNLOCKED)
@@ -682,6 +687,7 @@ class ResourceConstructionTests(unittest.TestCase):
         data_patch.start()
         self.addCleanup(data_patch.stop)
         self.profile = ProfileManager('resource')
+        self.profile.initialize()
 
     def test_ipc_listener_start_failure_closes_owned_socket(self) -> None:
         """A pre-bind IPC error closes its local socket immediately.

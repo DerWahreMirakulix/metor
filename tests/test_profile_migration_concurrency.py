@@ -1,7 +1,12 @@
 """Profile migration and lifecycle gates against competing recovery and startup."""
 
+from __future__ import annotations
+
+from multiprocessing.queues import Queue
+from multiprocessing.synchronize import Event
 from pathlib import Path
 import threading
+import multiprocessing
 import unittest
 from unittest.mock import patch
 
@@ -13,6 +18,30 @@ from metor.core.key import KeyManager
 from metor.application.frontend.identity import profile_address
 from metor.client import FrontendProfileAddressRequest
 from metor.utils import Constants, FileLock
+
+
+def _child_with_instance(root: str, ready: Event, release: Event) -> None:
+    """Simulate the startup interval before PID publication in another process."""
+    Constants.DATA = Path(root)
+    pm = ProfileManager('migrated')
+    with FileLock(pm.paths.get_daemon_instance_lock_file()):
+        ready.set()
+        if not release.wait(15):
+            raise TimeoutError('Test process was not released.')
+
+
+def _child_after_start_gate(root: str, attempting: Event, outcome: Queue[bool]) -> None:
+    """Observe startup's existence decision inside the actual process gates."""
+    Constants.DATA = Path(root)
+    from metor.data.profile.paths import Paths
+
+    paths = Paths('migrated')
+    attempting.set()
+    with (
+        FileLock(paths.get_daemon_start_lock_file()),
+        FileLock(paths.get_daemon_instance_lock_file()),
+    ):
+        outcome.put(paths.exists())
 
 
 class ProfileMigrationConcurrencyTests(unittest.TestCase):
@@ -237,6 +266,63 @@ class ProfileMigrationConcurrencyTests(unittest.TestCase):
                 'old-password',
             )
         self.assertEqual(cleared, [True])
+
+    def test_global_purge_requires_instance_release_before_wiping(self) -> None:
+        context = multiprocessing.get_context('spawn')
+        ready, release = context.Event(), context.Event()
+        child = context.Process(
+            target=_child_with_instance, args=(str(Constants.DATA), ready, release)
+        )
+        child.start()
+        try:
+            self.assertTrue(ready.wait(10))
+
+            def short_lock(target: Path) -> FileLock:
+                return FileLock(target, timeout=0.25)
+
+            with patch('metor.data.profile.lifecycle.FileLock', side_effect=short_lock):
+                with self.assertRaises(TimeoutError):
+                    ProfileManager.purge_all_data()
+            self.assertTrue(self.profile.paths.get_keyslot_file().exists())
+        finally:
+            release.set()
+            child.join(10)
+            if child.is_alive():
+                child.kill()
+                child.join()
+        self.assertEqual(child.exitcode, 0)
+        ProfileManager.purge_all_data()
+        self.assertFalse(self.profile.exists())
+
+    def test_start_after_global_purge_observes_removed_profile(self) -> None:
+        context = multiprocessing.get_context('spawn')
+        attempting, outcome = context.Event(), context.Queue()
+        child = context.Process(
+            target=_child_after_start_gate,
+            args=(str(Constants.DATA), attempting, outcome),
+        )
+
+        def start_child() -> int:
+            child.start()
+            self.assertTrue(attempting.wait(10))
+            return 0
+
+        try:
+            with patch(
+                'metor.data.profile.lifecycle.ProcessManager.cleanup_processes',
+                side_effect=start_child,
+            ):
+                ProfileManager.purge_all_data()
+            self.assertFalse(outcome.get(timeout=5))
+        finally:
+            if child.pid is not None:
+                child.join(10)
+                if child.is_alive():
+                    child.kill()
+                    child.join()
+            outcome.close()
+            outcome.join_thread()
+        self.assertEqual(child.exitcode, 0)
 
 
 if __name__ == '__main__':

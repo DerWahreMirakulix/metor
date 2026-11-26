@@ -352,6 +352,7 @@ class Chat:
 
         self._ipc = IpcClient(
             port=ipc_port,
+            daemon_certificate=self._pm.daemon_certificate,
             timeout=self._pm.config.get_float('client.ipc_timeout'),
             on_event=self._on_ipc_event,
             on_disconnect=self._on_ipc_disconnect,
@@ -491,15 +492,20 @@ class Chat:
         is_live: bool = self._session.is_live_transport_available(target_alias)
         should_buffer: bool = self._session.should_buffer_outgoing(target_alias)
         timestamp: str = datetime.now(timezone.utc).isoformat()
-        peer_onion: Optional[str] = self._session.get_peer_onion(target_alias)
-        alias_policy: AliasPolicy = (
-            AliasPolicy.DYNAMIC if peer_onion else AliasPolicy.STATIC
-        )
+        peer_onion = self._session.focused_onion
+        if not peer_onion or self._session.get_peer_onion(target_alias) != peer_onion:
+            self._renderer.print_message(
+                'Contact identity unavailable. Select the peer again.',
+                msg_type=ChatMessageType.STATUS,
+                tone=StatusTone.SYSTEM,
+            )
+            return
+        alias_policy = AliasPolicy.DYNAMIC
 
         if is_live:
             self._ipc.send_command(
                 SendMessageCommand(
-                    target=target_alias,
+                    target=peer_onion,
                     delivery=Delivery.LIVE,
                     content=TextContent(msg_text),
                     msg_id=msg_id,
@@ -518,7 +524,7 @@ class Chat:
         elif should_buffer:
             self._ipc.send_command(
                 SendMessageCommand(
-                    target=target_alias,
+                    target=peer_onion,
                     delivery=Delivery.LIVE,
                     content=TextContent(msg_text),
                     msg_id=msg_id,
@@ -538,7 +544,7 @@ class Chat:
         else:
             self._ipc.send_command(
                 SendMessageCommand(
-                    target=target_alias,
+                    target=peer_onion,
                     delivery=Delivery.DROP,
                     content=TextContent(msg_text),
                     msg_id=msg_id,

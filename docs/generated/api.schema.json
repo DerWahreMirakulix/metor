@@ -1154,6 +1154,19 @@
         },
         "chat_mode": {
           "type": "boolean"
+        },
+        "onions": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false,
@@ -1493,6 +1506,19 @@
         "command_type": {
           "type": "string",
           "const": "get_runtime_snapshot"
+        },
+        "snapshot_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "offset": {
+          "type": "integer"
         }
       },
       "additionalProperties": false,
@@ -3000,6 +3026,9 @@
         "msg_id": {
           "type": "string"
         },
+        "onion": {
+          "type": "string"
+        },
         "timestamp": {
           "anyOf": [
             {
@@ -3014,7 +3043,8 @@
       "additionalProperties": false,
       "required": [
         "event_type",
-        "msg_id"
+        "msg_id",
+        "onion"
       ]
     },
     "AddressCantGenerateRunningEvent": {
@@ -6073,6 +6103,19 @@
         },
         "profile": {
           "type": "string"
+        },
+        "checked_onions": {
+          "anyOf": [
+            {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "additionalProperties": false,
@@ -6548,6 +6591,9 @@
         "msg_id": {
           "type": "string"
         },
+        "onion": {
+          "type": "string"
+        },
         "reason": {
           "anyOf": [
             {
@@ -6562,7 +6608,8 @@
       "additionalProperties": false,
       "required": [
         "event_type",
-        "msg_id"
+        "msg_id",
+        "onion"
       ]
     },
     "DropQueuedEvent": {
@@ -10737,6 +10784,7 @@
             "security_mode_unchanged",
             "security_mode_migrated",
             "security_migration_failed",
+            "security_cleanup_pending",
             "profile_not_found",
             "cannot_remove_active",
             "cannot_remove_default",
@@ -12006,6 +12054,29 @@
           ]
         },
         "authenticated_client_count": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "snapshot_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "page_offset": {
+          "type": "integer"
+        },
+        "next_offset": {
           "anyOf": [
             {
               "type": "integer"

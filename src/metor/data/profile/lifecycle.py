@@ -1,12 +1,14 @@
-"""Public profile lifecycle operations and compatibility entry points."""
+"""Create, rename, clear, and remove current profiles."""
 
-from typing import Optional
+import re
+from contextlib import ExitStack
+from functools import partial
+from typing import TYPE_CHECKING, Optional
 
 from metor.data import SettingKey, Settings, SettingValidationError, SqlManager
-from metor.utils import Constants, FileLock, secure_remove_path
+from metor.utils import Constants, FileLock, ProcessManager, secure_remove_path
 
 # Local Package Imports
-from metor.data.profile import migration
 from metor.data.profile.models import (
     ProfileConfigKey,
     ProfileOperationResult,
@@ -18,17 +20,8 @@ from metor.data.profile.locking import offline_profile_guard
 from metor.data.profile.support import normalize_profile_name
 from metor.data.profile.catalog import get_all_profiles, load_default_profile
 
-
-def recover_profile_security_migration(profile_name: str) -> None:
-    """Recovers an interrupted profile security migration before profile access.
-
-    Args:
-        profile_name (str): Local profile name whose sibling journal is checked.
-
-    Returns:
-        None
-    """
-    migration.recover_profile_security_migration(profile_name)
+if TYPE_CHECKING:
+    from metor.data.profile.manager import ProfileManager
 
 
 def add_profile_folder(
@@ -127,13 +120,11 @@ def _initialize_new_profile_locked(
     """Initializes complete storage while catalog, startup and instance gates are held."""
     from metor.data.profile.manager import ProfileManager
 
-    target_dir = Paths(safe_name).base_dir
-    if target_dir.exists():
+    pm = ProfileManager(safe_name)
+    if pm.paths.base_dir.exists():
         return ProfileOperationResult(
             False, ProfileOperationType.PROFILE_EXISTS, {'profile': safe_name}
         )
-    recover_profile_security_migration(safe_name)
-    pm = ProfileManager(safe_name)
     pm.initialize()
     if security_mode is not ProfileSecurityMode.ENCRYPTED:
         pm.config.set(
@@ -198,33 +189,6 @@ def _initialize_new_profile_locked(
         ProfileOperationType.PROFILE_CREATED,
         {'profile': safe_name, 'security_mode': security_mode.value},
     )
-
-
-def migrate_profile_security(
-    name: str,
-    target_mode: ProfileSecurityMode,
-    current_password: Optional[str] = None,
-    new_password: Optional[str] = None,
-) -> ProfileOperationResult:
-    """Migrates one local profile between encrypted and plaintext storage modes.
-
-    Args:
-        name (str): The target profile name.
-        target_mode (ProfileSecurityMode): The desired storage protection mode.
-        current_password (Optional[str]): The current password for encrypted source profiles.
-        new_password (Optional[str]): The new password for encrypted target profiles.
-
-    Returns:
-        ProfileOperationResult: Structured local outcome for the CLI layer.
-    """
-    if not Constants.DATA.exists():
-        return migration.migrate_profile_security(
-            name, target_mode, current_password, new_password
-        )
-    with FileLock(Constants.DATA / '.profile-catalog'):
-        return migration.migrate_profile_security(
-            name, target_mode, current_password, new_password
-        )
 
 
 def remove_profile_folder(
@@ -411,18 +375,30 @@ def clear_profile_db(
         return ProfileOperationResult(
             False, ProfileOperationType.PROFILE_NOT_FOUND, {'profile': safe_name}
         )
-    if pm.is_daemon_running() and not pm.is_remote():
-        return ProfileOperationResult(
-            False,
-            ProfileOperationType.CANNOT_CLEAR_RUNNING_DB,
-            {'profile': safe_name},
-        )
+    with offline_profile_guard(pm.paths) as offline:
+        if not offline or (pm.is_daemon_running() and not pm.is_remote()):
+            return ProfileOperationResult(
+                False,
+                ProfileOperationType.CANNOT_CLEAR_RUNNING_DB,
+                {'profile': safe_name},
+            )
+        return _clear_offline_storage(pm, master_password)
+
+
+def _clear_offline_storage(
+    pm: 'ProfileManager', master_password: str | None
+) -> ProfileOperationResult:
+    """Clear SQL and its owned objects under the offline profile lifecycle gate."""
+    safe_name = pm.profile_name
     db_path = pm.paths.get_db_file()
     if not db_path.exists():
         return ProfileOperationResult(
             False, ProfileOperationType.DATABASE_NOT_FOUND, {'profile': safe_name}
         )
+    from metor.data.blob import BlobStore, delete_owned_blob, open_blob_store
+
     key_manager = None
+    blob_store: BlobStore | None = None
     try:
         encryption_key = None
         if pm.uses_encrypted_storage():
@@ -431,7 +407,14 @@ def clear_profile_db(
             key_manager = KeyManager(pm, master_password)
             encryption_key = key_manager.get_database_key()
         sql = SqlManager(db_path, pm.config, encryption_key)
+        blob_store = open_blob_store(
+            pm, key_manager.get_blob_key if key_manager else None
+        )
         sql.clear_all_profile_data()
+        if not sql.messages.finish_voice_deletions(
+            partial(delete_owned_blob, blob_store)
+        ):
+            raise OSError('Voice object cleanup still pending.')
         SqlManager.close_connection(db_path)
         return ProfileOperationResult(
             True, ProfileOperationType.DATABASE_CLEARED, {'profile': safe_name}
@@ -442,6 +425,8 @@ def clear_profile_db(
             False, ProfileOperationType.DATABASE_CLEAR_FAILED, {}
         )
     finally:
+        if blob_store is not None:
+            blob_store.close()
         if key_manager is not None:
             key_manager.clear_sensitive_state()
 
@@ -461,6 +446,41 @@ def purge_all_profile_data() -> None:
 
     if not Constants.DATA.exists():
         return
-    for profile_name in get_all_profiles():
-        destroy_profile_storage(ProfileManager(profile_name))
-    secure_remove_path(Constants.DATA)
+    # Stable gate files must survive the wipe. Replacing a gate while it is
+    # locked would split present and future clients across different inodes.
+    catalog = FileLock(Constants.DATA / '.profile-catalog')
+    with catalog, ExitStack() as guards:
+        names = set(get_all_profiles())
+        # A mode change can briefly have its source renamed to backup before
+        # activating its target. The sibling journal still names that profile.
+        for entry in Constants.DATA.glob('.*.security-migration.json'):
+            name = entry.name[1:].removesuffix('.security-migration.json')
+            if normalize_profile_name(name) == name and name:
+                names.add(name)
+        for name in sorted(names):
+            guards.enter_context(FileLock(Paths(name).get_daemon_start_lock_file()))
+        profiles = [ProfileManager(name) for name in sorted(names)]
+        ProcessManager.cleanup_processes()
+        for pm in profiles:
+            guards.enter_context(FileLock(pm.paths.get_daemon_instance_lock_file()))
+            for pid_file, role in (
+                (pm.paths.get_daemon_pid_file(), Constants.PROCESS_ROLE_DAEMON),
+                (pm.paths.get_tor_data_dir() / 'tor.pid', Constants.PROCESS_ROLE_TOR),
+            ):
+                if pid_file.exists() and not ProcessManager.recorded_lifetime_ended(
+                    pid_file, pm.profile_name, role
+                ):
+                    raise OSError('Cannot confirm release of all managed processes.')
+        for pm in profiles:
+            destroy_profile_storage(pm)
+        for child in Constants.DATA.iterdir():
+            if child == catalog.lock_path or (
+                child.is_file()
+                and not child.is_symlink()
+                and re.fullmatch(
+                    r'\.(daemon-start|daemon-instance|security-migration)\.[a-f0-9]{64}\.lock',
+                    child.name,
+                )
+            ):
+                continue
+            secure_remove_path(child)

@@ -324,6 +324,15 @@
             ],
             [
               6,
+              "content_tag",
+              "TEXT",
+              0,
+              null,
+              0,
+              0
+            ],
+            [
+              7,
               "retained_bytes",
               "INTEGER",
               1,
@@ -332,7 +341,7 @@
               0
             ],
             [
-              7,
+              8,
               "status",
               "TEXT",
               1,
@@ -341,7 +350,7 @@
               0
             ],
             [
-              8,
+              9,
               "visible_in_history",
               "INTEGER",
               1,
@@ -350,7 +359,7 @@
               0
             ],
             [
-              9,
+              10,
               "created_at",
               "TEXT",
               1,
@@ -359,7 +368,7 @@
               0
             ],
             [
-              10,
+              11,
               "updated_at",
               "TEXT",
               1,
@@ -433,7 +442,7 @@
                 ],
                 [
                   1,
-                  7,
+                  8,
                   "status",
                   0,
                   "BINARY",
@@ -441,7 +450,7 @@
                 ],
                 [
                   2,
-                  9,
+                  10,
                   "created_at",
                   0,
                   "BINARY",
@@ -481,7 +490,7 @@
                 ],
                 [
                   2,
-                  7,
+                  8,
                   "status",
                   0,
                   "BINARY",
@@ -503,7 +512,7 @@
             }
           ],
           "name": "message_receipts",
-          "sql": "CREATE TABLE message_receipts (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    msg_id TEXT NOT NULL CHECK (msg_id <> ''),\n    peer_onion TEXT NOT NULL CHECK (peer_onion <> '') REFERENCES peers(onion) ON DELETE RESTRICT,\n    direction TEXT NOT NULL CHECK (direction IN ('in', 'out')),\n    delivery TEXT NOT NULL CHECK (delivery IN ('live', 'drop')),\n    content_type TEXT NOT NULL CHECK (content_type IN ('text', 'voice')),\n    retained_bytes INTEGER NOT NULL DEFAULT 0 CHECK (retained_bytes >= 0),\n    status TEXT NOT NULL CHECK (status IN ('pending', 'delivered', 'unread', 'read', 'draft')),\n    visible_in_history INTEGER NOT NULL DEFAULT 0 CHECK (visible_in_history IN (0, 1)),\n    created_at TEXT NOT NULL CHECK (created_at <> ''),\n    updated_at TEXT NOT NULL CHECK (updated_at <> '')\n)"
+          "sql": "CREATE TABLE message_receipts (\n    id INTEGER PRIMARY KEY AUTOINCREMENT,\n    msg_id TEXT NOT NULL CHECK (msg_id <> ''),\n    peer_onion TEXT NOT NULL CHECK (peer_onion <> '') REFERENCES peers(onion) ON DELETE RESTRICT,\n    direction TEXT NOT NULL CHECK (direction IN ('in', 'out')),\n    delivery TEXT NOT NULL CHECK (delivery IN ('live', 'drop')),\n    content_type TEXT NOT NULL CHECK (content_type IN ('text', 'voice')),\n    content_tag TEXT,\n    retained_bytes INTEGER NOT NULL DEFAULT 0 CHECK (retained_bytes >= 0),\n    status TEXT NOT NULL CHECK (status IN ('pending', 'delivered', 'unread', 'read', 'draft')),\n    visible_in_history INTEGER NOT NULL DEFAULT 0 CHECK (visible_in_history IN (0, 1)),\n    created_at TEXT NOT NULL CHECK (created_at <> ''),\n    updated_at TEXT NOT NULL CHECK (updated_at <> '')\n)"
         },
         {
           "columns": [
@@ -702,7 +711,49 @@
             }
           ],
           "name": "profile_metadata",
-          "sql": "CREATE TABLE profile_metadata (\n    name TEXT PRIMARY KEY NOT NULL CHECK (name IN ('instance_id', 'ui.gui')),\n    revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),\n    value TEXT NOT NULL\n)"
+          "sql": "CREATE TABLE profile_metadata (\n    name TEXT PRIMARY KEY NOT NULL CHECK (name IN ('instance_id', 'ui.gui', 'text_receipt_key')),\n    revision INTEGER NOT NULL DEFAULT 0 CHECK (revision >= 0),\n    value TEXT NOT NULL\n)"
+        },
+        {
+          "columns": [
+            [
+              0,
+              "object_id",
+              "TEXT",
+              1,
+              null,
+              1,
+              0
+            ]
+          ],
+          "foreign_keys": [],
+          "indexes": [
+            {
+              "columns": [
+                [
+                  0,
+                  0,
+                  "object_id",
+                  0,
+                  "BINARY",
+                  1
+                ],
+                [
+                  1,
+                  -1,
+                  null,
+                  0,
+                  "BINARY",
+                  0
+                ]
+              ],
+              "name": "sqlite_autoindex_voice_blob_deletions_1",
+              "origin": "pk",
+              "partial": 0,
+              "unique": 1
+            }
+          ],
+          "name": "voice_blob_deletions",
+          "sql": "CREATE TABLE voice_blob_deletions (object_id TEXT PRIMARY KEY NOT NULL)"
         },
         {
           "columns": [
@@ -1168,6 +1219,9 @@
             "msg_id": {
               "type": "string"
             },
+            "onion": {
+              "type": "string"
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -1201,7 +1255,8 @@
           },
           "required": [
             "event_type",
-            "msg_id"
+            "msg_id",
+            "onion"
           ],
           "title": "AckEvent",
           "type": "object"
@@ -4778,6 +4833,19 @@
         "ContactsDataEvent": {
           "additionalProperties": false,
           "properties": {
+            "checked_onions": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "discovered": {
               "items": {
                 "additionalProperties": false,
@@ -5443,6 +5511,9 @@
             "msg_id": {
               "type": "string"
             },
+            "onion": {
+              "type": "string"
+            },
             "reason": {
               "anyOf": [
                 {
@@ -5476,7 +5547,8 @@
           },
           "required": [
             "event_type",
-            "msg_id"
+            "msg_id",
+            "onion"
           ],
           "title": "DropFailedEvent",
           "type": "object"
@@ -6108,6 +6180,19 @@
               "const": "get_contacts_list",
               "type": "string"
             },
+            "onions": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "request_id": {
               "anyOf": [
                 {
@@ -6447,7 +6532,20 @@
               "const": "get_runtime_snapshot",
               "type": "string"
             },
+            "offset": {
+              "type": "integer"
+            },
             "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "snapshot_id": {
               "anyOf": [
                 {
                   "type": "string"
@@ -10824,6 +10922,7 @@
                 "security_mode_unchanged",
                 "security_mode_migrated",
                 "security_migration_failed",
+                "security_cleanup_pending",
                 "profile_not_found",
                 "cannot_remove_active",
                 "cannot_remove_default",
@@ -12500,8 +12599,21 @@
               },
               "type": "array"
             },
+            "next_offset": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
             "onion": {
               "type": "string"
+            },
+            "page_offset": {
+              "type": "integer"
             },
             "pending": {
               "items": {
@@ -12606,6 +12718,16 @@
             },
             "settings_version": {
               "type": "string"
+            },
+            "snapshot_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [

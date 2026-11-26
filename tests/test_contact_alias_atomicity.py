@@ -35,6 +35,19 @@ class ContactAliasAtomicityTests(unittest.TestCase):
         self.first = ContactManager(self.profile, key)
         self.second = ContactManager(self.profile, key)
 
+    def test_address_destination_survives_contact_alias_collision(self) -> None:
+        """The canonical peer stays the recipient even when it is also a saved label."""
+        first, second = address(51), address(52)
+        self.assertTrue(self.first.add_contact('first', first).success)
+        self.assertTrue(self.first.add_contact(first, second).success)
+        self.assertEqual(self.first.resolve_target(first), ('first', first))
+        self.assertEqual(
+            self.first.resolve_target_for_interaction(first + '.onion'),
+            ('first', first),
+        )
+        self.assertEqual(self.first.resolve_target('first'), ('first', first))
+        self.assertEqual(self.first.resolve_target(second), (first, second))
+
     def _contend(self, *, rename: bool) -> list[ContactOperationResult]:
         """Reproduces the old check/write interleaving without replacing SQL or domain operations.
 

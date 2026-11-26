@@ -460,6 +460,7 @@ class SqlManager:
             None
         """
         with self.transaction() as cursor:
+            self.messages.stage_all_voice_deletions(cursor)
             cursor.execute('DELETE FROM history_ledger')
             cursor.execute('DELETE FROM message_receipts')
             cursor.execute('DELETE FROM peers')

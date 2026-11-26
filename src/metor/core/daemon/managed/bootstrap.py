@@ -14,7 +14,7 @@ from metor.data import (
     MessageManager,
     SqlManager,
 )
-from metor.data.blob import BlobStore, EncryptedBlobStore, PlaintextBlobStore
+from metor.data.blob import BlobStore, open_blob_store
 from metor.data.profile import ProfileManager
 
 # Local Package Imports
@@ -179,17 +179,7 @@ def build_runtime(
         cm = ContactManager(pm, database_key)
         hm = HistoryManager(pm, database_key)
         mm = MessageManager(pm, database_key)
-        if pm.uses_encrypted_storage():
-            blob_store = EncryptedBlobStore(
-                pm.paths.get_persistent_blob_dir(),
-                pm.paths.get_temporary_blob_dir(),
-                km.get_blob_key(),
-            )
-        else:
-            blob_store = PlaintextBlobStore(
-                pm.paths.get_persistent_blob_dir(),
-                pm.paths.get_temporary_blob_dir(),
-            )
+        blob_store = open_blob_store(pm, km.get_blob_key)
         return DaemonRuntime(
             km=km,
             tm=TorManager(pm, km),

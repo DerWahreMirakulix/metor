@@ -4,7 +4,8 @@ Pending receipts survive without content after cancellation, recording an unknow
 remote outcome without granting further emission authority.
 """
 
-from typing import List, Optional, Tuple, cast
+import json
+from typing import Callable, List, Optional, Tuple, cast
 
 from metor.core.api import ContentType, Delivery, is_valid_message_id
 from metor.data.message.models import (
@@ -13,7 +14,8 @@ from metor.data.message.models import (
     MessageStatus,
     PendingLiveRecord,
 )
-from metor.data.sql.backends import SqlParam
+from metor.data.blob.store import BLOB_ID_PATTERN
+from metor.data.sql.backends import SqlCipherCursor, SqlParam
 from metor.shared import clean_onion
 
 from .receipts import MessageReceiptStore
@@ -85,6 +87,68 @@ class MessageMutationMixin(MessageReceiptStore):
             )
             return records
 
+    def _stage_voice_deletions(
+        self, cursor: SqlCipherCursor, receipt_ids: list[int], cancel_pending: bool
+    ) -> None:
+        """Journal owned persistent objects in the transaction releasing the last payload."""
+        block = self._placeholders(len(receipt_ids))
+        rows = cursor.execute(
+            'SELECT COALESCE(a.payload,i.payload,o.payload) FROM message_receipts r '
+            'LEFT JOIN message_archive a ON a.receipt_id = r.id '
+            'LEFT JOIN inbound_spool i ON i.receipt_id = r.id '
+            'LEFT JOIN outbox_spool o ON o.receipt_id = r.id '
+            f"WHERE r.id IN ({block}) AND r.content_type = 'voice' "
+            "AND (o.receipt_id IS NULL OR r.status <> 'pending' OR ? = 1) "
+            'AND COALESCE(a.payload,i.payload,o.payload) IS NOT NULL',
+            (*receipt_ids, int(cancel_pending)),
+        ).fetchall()
+        for (payload,) in rows:
+            metadata = json.loads(str(payload))
+            chunks = metadata.get('chunk_ids', [])
+            if not isinstance(chunks, list):
+                raise ValueError('Invalid stored Voice chunk list.')
+            for object_id in (metadata['blob_id'], *chunks):
+                if not isinstance(object_id, str) or not BLOB_ID_PATTERN.fullmatch(
+                    object_id
+                ):
+                    raise ValueError('Invalid stored Voice object ID.')
+                cursor.execute(
+                    'INSERT OR IGNORE INTO voice_blob_deletions VALUES (?)',
+                    (object_id,),
+                )
+
+    def stage_all_voice_deletions(self, cursor: SqlCipherCursor) -> None:
+        """Transfer every receipt's external objects to the full database clear transaction."""
+        rows = cursor.execute(
+            "SELECT id FROM message_receipts WHERE content_type = 'voice'"
+        ).fetchall()
+        for (receipt_id,) in rows:
+            self._stage_voice_deletions(
+                cursor, [int(str(receipt_id))], cancel_pending=True
+            )
+
+    def finish_voice_deletions(self, remove: Callable[[str], None] | None) -> bool:
+        """Retry committed deletions and acknowledge only successful idempotent removals."""
+        rows = self._sql.fetchall('SELECT object_id FROM voice_blob_deletions')
+        if remove is None:
+            return not rows
+        removed: list[str] = []
+        for (value,) in rows:
+            object_id = str(value)
+            try:
+                remove(object_id)
+            except (OSError, ValueError):
+                continue
+            removed.append(object_id)
+        if removed:
+            with self._sql.transaction() as cursor:
+                for object_id in removed:
+                    cursor.execute(
+                        'DELETE FROM voice_blob_deletions WHERE object_id = ?',
+                        (object_id,),
+                    )
+        return len(removed) == len(rows)
+
     def clear_messages(
         self,
         onion: Optional[str] = None,
@@ -137,6 +201,7 @@ class MessageMutationMixin(MessageReceiptStore):
             if not rows:
                 return ()
             receipt_ids = [int(str(row[0])) for row in rows]
+            self._stage_voice_deletions(cursor, receipt_ids, cancel_pending)
             block = self._placeholders(len(receipt_ids))
             cursor.execute(
                 f'DELETE FROM message_archive WHERE receipt_id IN ({block})',
@@ -237,6 +302,7 @@ class MessageMutationMixin(MessageReceiptStore):
                 pending and cancel_pending and int(str(rows[0][5])) == 1
             ):
                 return MessageDeleteOutcome.NOT_FOUND
+            self._stage_voice_deletions(cursor, [receipt_id], cancel_pending)
             if pending and cancel_pending:
                 cursor.execute(
                     'DELETE FROM outbox_spool WHERE receipt_id = ?', (receipt_id,)

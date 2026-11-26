@@ -68,6 +68,13 @@ class ClosureStreamTests(unittest.TestCase):
     """Barriers control socket ownership, not arbitrary scheduling sleeps."""
 
     def listener(self) -> tuple[socket.socket, IpcClient, socket.socket]:
+        # This fixture exercises a scripted clear byte stream below endpoint authentication.
+        self.enterContext(
+            patch(
+                'metor.client.ipc.authenticate_daemon',
+                side_effect=lambda sock, _cert: sock,
+            )
+        )
         server = socket.socket()
         server.bind(('127.0.0.1', 0))
         server.listen(2)
@@ -125,7 +132,7 @@ class ClosureStreamTests(unittest.TestCase):
             client.wait_for_response('same-id', old)
         with self.assertRaises(socket.timeout):
             replacement.recv(1)
-        response = AckEvent(msg_id='fresh', request_id='same-id')
+        response = AckEvent(onion='peer', msg_id='fresh', request_id='same-id')
         replacement.sendall((response.to_json() + '\n').encode())
         self.assertEqual(client.wait_for_response('same-id', current), response)
         client.end_request('same-id', current)
@@ -159,7 +166,7 @@ class ClosureStreamTests(unittest.TestCase):
         lease = client.begin_request('pending')
         worker = client._event_thread
         assert worker is not None
-        payload = (AckEvent(msg_id='async').to_json() + '\n').encode()
+        payload = (AckEvent(onion='peer', msg_id='async').to_json() + '\n').encode()
         peer.sendall(payload)
         self.assertTrue(entered.wait(1))
         peer.sendall(payload * (Constants.MAX_CLIENT_EVENT_QUEUE + 1))
@@ -275,6 +282,7 @@ class ClosureDaemonTests(unittest.TestCase):
         assert port is not None
         client = MetorClient(
             port,
+            daemon_certificate=daemon._pm.get_daemon_certificate(),
             timeout=2,
             on_event=(events if events is not None else []).append,
         )
@@ -364,7 +372,7 @@ class ClosureDaemonTests(unittest.TestCase):
             delivered.set()
 
         client._on_event = on_event
-        client._ipc.dispatch_async_event(AckEvent(msg_id='barrier'))
+        client._ipc.dispatch_async_event(AckEvent(onion='peer', msg_id='barrier'))
         self.assertTrue(delivered.wait(2))
         self.assertFalse(any(isinstance(e, FallbackSuccessEvent) for e in events))
         self.assertFalse(any(isinstance(e, VoiceFinalizedEvent) for e in events))
@@ -784,7 +792,11 @@ class ClosureDaemonTests(unittest.TestCase):
                     targets.append(target)
                     port = target._ipc.port
                     assert port is not None
-                    candidate = MetorClient(port, timeout=2)
+                    candidate = MetorClient(
+                        port,
+                        timeout=2,
+                        daemon_certificate=target._pm.get_daemon_certificate(),
+                    )
                     self.addCleanup(candidate.disconnect)
                     return candidate
 

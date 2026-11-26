@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       release_type:
-        description: Application SemVer bump (use current only for the first release)
+        description: Validate the product version already committed on the candidate (current for first release)
         required: true
         type: choice
         default: current
@@ -53,7 +53,7 @@ jobs:
       - name: Reject non-main publish requests
         shell: bash
         run: |
-          if [[ '${{ inputs.dry_run }}' == 'false' && "$GITHUB_REF_NAME" != 'main' ]]; then
+          if [[ '${{ inputs.dry_run }}' == 'false' && "$GITHUB_REF" != 'refs/heads/main' ]]; then
             echo 'Public releases may only be published from main.' >&2
             exit 1
           fi
@@ -63,16 +63,18 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TYPE: ${{ inputs.release_type }}
         run: |
           release_tags="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" --jq '.[] | select(.draft | not) | .tag_name')"
+          version="$(python -c "import sys; sys.path.insert(0, 'src'); from metor.versioning import APP_VERSION; print(APP_VERSION)")"
           baseline_args=()
           while IFS= read -r release_tag; do
-            if [[ -n "$release_tag" ]]; then
+            if [[ -n "$release_tag" && "$release_tag" != "v$version" ]]; then
               baseline_args+=(--available-release "$release_tag")
             fi
           done <<< "$release_tags"
           latest_tag="$(python scripts/calculate_release_version.py --select-baseline "${baseline_args[@]}")"
-          args=(--release-type '${{ inputs.release_type }}')
+          args=(--release-type "$RELEASE_TYPE")
           if [ -n "$latest_tag" ]; then
             args+=(--previous-release "$latest_tag")
           fi
@@ -80,8 +82,8 @@ jobs:
           echo "latest_tag=$latest_tag" >> "$GITHUB_OUTPUT"
           echo "next_version=$next_version" >> "$GITHUB_OUTPUT"
           echo "Candidate release: v$next_version"
-          if git ls-remote --exit-code --tags origin "refs/tags/v$next_version" >/dev/null 2>&1; then
-            echo "Release tag v$next_version already exists." >&2
+          if [[ "$next_version" != "$version" ]]; then
+            echo "Prepare version $next_version and its generated references in a reviewed PR." >&2
             exit 1
           fi
 
@@ -104,10 +106,6 @@ jobs:
           fetch-depth: 0
           ref: ${{ needs.prepare.outputs.candidate_sha }}
 
-      - name: Apply candidate application version
-        shell: bash
-        run: python scripts/versioning.py set-app '${{ needs.prepare.outputs.next_version }}'
-
       - name: Run Linux and Windows quality gates
         uses: ./.github/actions/python-quality
         with:
@@ -116,10 +114,9 @@ jobs:
           ruff-format-paths: "src/metor/ scripts/ tests/"
           mypy-paths: "src/metor/ scripts/"
 
-      - name: Generate and validate release documentation
+      - name: Verify committed release documentation
         shell: bash
         run: |
-          npm run generate:docs
           python scripts/validate_generated_docs.py
           python scripts/versioning.py validate
 
@@ -130,20 +127,20 @@ jobs:
       - name: Load previous public compatibility baseline
         if: needs.prepare.outputs.latest_tag != ''
         shell: bash
-        run: git show '${{ needs.prepare.outputs.latest_tag }}:docs/generated/compatibility.json' > previous-compatibility.json
+        run: git show '${{ needs.prepare.outputs.latest_tag }}:docs/generated/compatibility.json' > "$RUNNER_TEMP/previous-compatibility.json"
 
       - name: Check release compatibility
         shell: bash
         run: |
           args=(--current docs/generated/compatibility.json)
           if [ -n '${{ needs.prepare.outputs.latest_tag }}' ]; then
-            args+=(--previous previous-compatibility.json)
+            args+=(--previous "$RUNNER_TEMP/previous-compatibility.json")
           fi
           python scripts/check_release_compatibility.py "${args[@]}"
 
       - name: Build platform release bundles
         shell: bash
-        run: python scripts/build_release_wheelhouse.py --output-dir dist/release --skip-pip-upgrade --variant all
+        run: python scripts/build_release_wheelhouse.py --output-dir dist/release --skip-pip-upgrade --variant all --revision "${{ needs.prepare.outputs.candidate_sha }}"
 
       - name: Validate coordinated wheels in the release bundles
         shell: bash
@@ -197,94 +194,82 @@ jobs:
           path: dist/release/*.zip
           if-no-files-found: error
 
-      - name: Preserve generated release baseline
-        if: matrix.os == 'ubuntu-latest'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: release-compatibility-baseline
-          path: |
-            docs/generated/API.md
-            docs/generated/SETTINGS.md
-            docs/generated/api.schema.json
-            docs/generated/compatibility.json
-          if-no-files-found: error
-
-  publish:
-    needs:
-      - prepare
-      - quality
+  inventory:
+    needs: [prepare, quality]
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    if: inputs.dry_run == false && github.ref_name == 'main'
     permissions:
-      contents: write
+      contents: read
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          fetch-depth: 0
           ref: ${{ needs.prepare.outputs.candidate_sha }}
-
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: release-compatibility-baseline
-          path: release-state
-
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
           pattern: metor-release-bundles-*
           path: dist/release-assets
           merge-multiple: true
+      - name: Validate the complete eight-archive inventory
+        run: python -m scripts.release.publication inventory --revision "${{ needs.prepare.outputs.candidate_sha }}" --version "${{ needs.prepare.outputs.next_version }}" --directory dist/release-assets
 
-      - name: Create release commit and tag
+  publish:
+    needs: [prepare, quality, inventory]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: inputs.dry_run == false && github.ref == 'refs/heads/main'
+    permissions:
+      actions: read
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CANDIDATE: ${{ needs.prepare.outputs.candidate_sha }}
+      VERSION: ${{ needs.prepare.outputs.next_version }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.prepare.outputs.candidate_sha }}
+      - name: Select the verified artifacts bound to this draft
+        id: source
         shell: bash
         run: |
-          git fetch --no-tags origin main
-          if [ "$(git rev-parse refs/remotes/origin/main)" != '${{ needs.prepare.outputs.candidate_sha }}' ]; then
-            echo 'main moved after release validation; restart from the new commit.' >&2
-            exit 1
-          fi
-          if git ls-remote --exit-code --tags origin 'refs/tags/v${{ needs.prepare.outputs.next_version }}' >/dev/null 2>&1; then
-            echo 'Release tag already exists.' >&2
-            exit 1
-          fi
-          python scripts/versioning.py set-app '${{ needs.prepare.outputs.next_version }}'
-          cp release-state/API.md docs/generated/API.md
-          cp release-state/SETTINGS.md docs/generated/SETTINGS.md
-          cp release-state/api.schema.json docs/generated/api.schema.json
-          cp release-state/compatibility.json docs/generated/compatibility.json
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git config user.name 'github-actions[bot]'
-          git add src/metor/versioning/__init__.py docs/generated/API.md docs/generated/SETTINGS.md docs/generated/api.schema.json docs/generated/compatibility.json
-          if ! git diff --cached --quiet; then
-            git commit -m 'release: v${{ needs.prepare.outputs.next_version }}'
-          fi
-          git tag -a 'v${{ needs.prepare.outputs.next_version }}' -m 'Metor v${{ needs.prepare.outputs.next_version }}'
-          python -m scripts.release.refs --remote origin --branch main --tag 'v${{ needs.prepare.outputs.next_version }}'
-
-      - name: Publish GitHub release with compatibility matrix
+          python -m scripts.release.publication authorize --revision "$CANDIDATE" --version "$VERSION"
+          run_id="$(python -m scripts.release.publication source-run --revision "$CANDIDATE" --version "$VERSION")"
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: metor-release-bundles-*
+          path: dist/release-assets
+          merge-multiple: true
+          run-id: ${{ steps.source.outputs.run_id }}
+          github-token: ${{ github.token }}
+      - name: Verify the restored inventory before signing it
+        run: python -m scripts.release.publication inventory --revision "$CANDIDATE" --version "$VERSION" --directory dist/release-assets
+      - name: Attest the accepted ZIPs
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/release-assets/*.zip
+          create-storage-record: false
+      - name: Tag the approved commit and publish the verified draft
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN: ${{ steps.source.outputs.run_id }}
         run: |
-          {
-            echo '## Compatibility matrix'
-            echo
-            echo '```text'
-            python scripts/versioning.py status
-            echo '```'
-          } > release-notes.md
-          gh release create 'v${{ needs.prepare.outputs.next_version }}' --verify-tag --generate-notes --notes-file release-notes.md
-          while IFS= read -r -d '' archive_path; do
-            gh release upload 'v${{ needs.prepare.outputs.next_version }}' "$archive_path"
-          done < <(find dist/release-assets -type f -name '*.zip' -print0)
+          set -euo pipefail
+          for archive in dist/release-assets/*.zip; do
+            gh attestation verify "$archive" --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" --source-ref refs/heads/main --source-digest "$CANDIDATE"
+          done
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git config user.name 'github-actions[bot]'
+          python -m scripts.release.refs --remote origin --tag "v$VERSION" --revision "$CANDIDATE"
+          python -m scripts.release.publication publish --revision "$CANDIDATE" --version "$VERSION" --run-id "$SOURCE_RUN" --directory dist/release-assets
 
   dry-run-result:
-    needs:
-      - prepare
-      - quality
+    needs: [prepare, quality, inventory]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     if: inputs.dry_run == true
     permissions: {}
     steps:
-      - run: echo 'Dry run passed for v${{ needs.prepare.outputs.next_version }}; no repository or release state was changed.'
+      - run: echo 'Validated eight archives for the reviewed candidate.'

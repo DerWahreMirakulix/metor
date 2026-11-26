@@ -558,6 +558,55 @@ class ProfileStorageSecurityTests(unittest.TestCase):
                 protector.destroy()
             shred.assert_called_once_with(path)
 
+    def test_reopen_after_interrupted_rotation_discards_unactivated_wrapper(
+        self,
+    ) -> None:
+        with PrivateTemporaryDirectory() as directory:
+            pmk = bytes(range(PROFILE_MASTER_KEY_BYTES))
+            protector = self._keyslot(Path(directory), 'current', pmk)
+            pending = Path(directory) / 'keyslot.json.pending'
+            pending.write_bytes(protector._build_document(pmk, 'proposed'))
+            with self.assertRaises(InvalidCredentialError):
+                protector.unprotect('proposed')
+            self.assertTrue(pending.exists())
+            self.assertEqual(protector.unprotect('current'), pmk)
+            self.assertFalse(pending.exists())
+
+    def test_interrupted_rotation_wrapper_blocks_safe_until_it_is_removed(self) -> None:
+        with (
+            PrivateTemporaryDirectory() as temp_dir,
+            patch.object(Constants, 'DATA', Path(temp_dir)),
+        ):
+            pm = self._profile(Path(temp_dir))
+            path = pm.paths.get_keyslot_file()
+            protector = PasswordKeyProtector(path)
+            pmk = bytes(range(PROFILE_MASTER_KEY_BYTES))
+            protector.protect(pmk, 'current')
+            pending = path.with_suffix('.json.pending')
+            pending.write_bytes(protector._build_document(pmk, 'replacement'))
+            self.assertEqual(
+                PasswordKeyProtector(pending).unprotect('replacement'), pmk
+            )
+            safe = Mock()
+            from metor.utils import secure_shred_file
+
+            def locked_pending(target: Path) -> None:
+                if target == pending:
+                    raise PermissionError('unreleased staged wrapper')
+                secure_shred_file(target)
+
+            with patch(
+                'metor.core.profile_keys.secure_shred_file', side_effect=locked_pending
+            ):
+                with self.assertRaises(PermissionError):
+                    destroy_profile_storage(pm, safe_callback=safe)
+            safe.assert_not_called()
+            self.assertFalse(path.exists())
+            self.assertTrue(pending.exists())
+            destroy_profile_storage(pm, safe_callback=safe)
+            safe.assert_called_once_with()
+            self.assertFalse(path.exists() or pending.exists())
+
     def test_key_manager_change_password_preserves_all_derived_keys(self) -> None:
         """Verifies central password change rewraps, rather than replaces, the PMK.
 
@@ -1448,9 +1497,9 @@ class ProfileStorageSecurityTests(unittest.TestCase):
                             recovered_store.read(blob_id), b'committed blob'
                         )
                         recovered_store.close()
-                        self.assertTrue(
-                            result.success or stage == 'immediately_after_commit'
-                        )
+                        self.assertFalse(result.success)
+                        if stage == 'during_old_state_cleanup':
+                            self.assertIs(result.params.get('cleanup_pending'), True)
         finally:
             Constants.DATA = original_data
 
