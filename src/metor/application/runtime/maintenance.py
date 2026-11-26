@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Optional
 
 from metor.data.profile import ProfileManager
-from metor.utils import ProcessManager
+from metor.utils import Constants, ProcessManager
 
 
 @dataclass(frozen=True)
@@ -28,7 +28,14 @@ class _RuntimeStateSnapshot:
 
     @property
     def had_runtime_state(self) -> bool:
-        """Indicates whether the snapshot contained any daemon runtime-state files."""
+        """Indicates whether the snapshot contained any daemon runtime-state files.
+
+        Args:
+            None
+
+        Returns:
+            bool: Whether the documented condition holds.
+        """
 
         return self.had_pid_file or self.had_port_file
 
@@ -49,7 +56,7 @@ def _read_runtime_state_file(file_path: Path) -> Optional[int]:
     try:
         with file_path.open('r') as handle:
             raw_value: str = handle.read().strip()
-        return int(raw_value)
+        return int(raw_value.split(':', 1)[0])
     except (OSError, ValueError):
         return None
 
@@ -68,7 +75,11 @@ def _capture_runtime_state(profile_manager: ProfileManager) -> _RuntimeStateSnap
     daemon_port_file: Path = profile_manager.paths.get_daemon_port_file()
     return _RuntimeStateSnapshot(
         profile_name=profile_manager.profile_name,
-        daemon_pid=_read_runtime_state_file(daemon_pid_file),
+        daemon_pid=ProcessManager.managed_process_pid(
+            daemon_pid_file,
+            profile_manager.profile_name,
+            Constants.PROCESS_ROLE_DAEMON,
+        ),
         daemon_port=_read_runtime_state_file(daemon_port_file),
         had_pid_file=daemon_pid_file.exists(),
         had_port_file=daemon_port_file.exists(),
@@ -98,7 +109,13 @@ def _clear_stale_runtime_state(
     daemon_port_file: Path = profile_manager.paths.get_daemon_port_file()
 
     if snapshot.daemon_pid is not None:
-        if ProcessManager.is_pid_running(snapshot.daemon_pid):
+        if (
+            ProcessManager.is_managed_process_running(
+                daemon_pid_file,
+                snapshot.profile_name,
+            )
+            is not False
+        ):
             return False
 
         profile_manager.clear_daemon_port(

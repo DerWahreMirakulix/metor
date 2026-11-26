@@ -53,26 +53,14 @@ class ProfileCommandHandler:
             IpcEvent: The typed result event or UNKNOWN_COMMAND.
         """
         if isinstance(cmd, AddProfileCommand):
+            security_mode = ProfileSecurityMode(cmd.security_mode)
             result = ProfileManager.add_profile_folder(
                 cmd.name,
                 is_remote=cmd.is_remote,
                 port=cmd.port,
-                security_mode=ProfileSecurityMode(cmd.security_mode),
+                security_mode=security_mode,
+                master_password=cmd.master_password,
             )
-            if (
-                result.success
-                and cmd.master_password
-                and cmd.security_mode == ProfileSecurityMode.ENCRYPTED.value
-                and not cmd.is_remote
-            ):
-                from metor.core.key import KeyManager
-
-                km = KeyManager(
-                    ProfileManager(cmd.name),
-                    password=cmd.master_password,
-                )
-                km.generate_keys()
-                km.clear_sensitive_state()
             return self._build_result_event(result)
 
         if isinstance(cmd, MigrateProfileSecurityCommand):

@@ -7,6 +7,7 @@ and prevents Unicode decoding crashes (UTF-8 DoS) by parsing binary data before 
 import socket
 from typing import Optional
 
+from metor.shared import recv_before
 from metor.utils import Constants
 
 
@@ -34,13 +35,13 @@ class TcpStreamReader:
         self._buffer: bytearray = bytearray(initial_buffer)
         self._max_bytes: int = max_bytes
 
-    def read_line(self) -> Optional[str]:
+    def read_line(self, *, deadline: float | None = None) -> Optional[str]:
         """
         Reads from the socket until a newline delimiter is encountered or the connection drops.
         Strictly bounds the buffer size to prevent OOM DoS attacks and buffers bytes to prevent UTF-8 fragmentation.
 
         Args:
-            None
+            deadline: Optional monotonic deadline across all fragments of this frame.
 
         Raises:
             MemoryError: If the incoming payload exceeds the maximum buffer size without a delimiter.
@@ -58,17 +59,21 @@ class TcpStreamReader:
                 )
 
             try:
-                data: bytes = self._conn.recv(Constants.TCP_BUFFER_SIZE)
+                data = recv_before(self._conn, Constants.TCP_BUFFER_SIZE, deadline)
                 if not data:
                     return None
 
                 self._buffer.extend(data)
             except socket.timeout:
                 raise
-            except Exception as e:
-                raise ConnectionError(f'Socket error: {str(e)}')
+            except Exception:
+                raise ConnectionError('Socket read failed.') from None
 
         line_bytes, _, rest = self._buffer.partition(b'\n')
+        if len(line_bytes) > self._max_bytes:
+            raise MemoryError(
+                'Maximum TCP stream buffer size exceeded. Possible DoS attack.'
+            )
         self._buffer = bytearray(rest)
 
         try:

@@ -3,29 +3,137 @@ Module providing a cross-platform file locking mechanism via a Context Manager.
 Ensures that files are not concurrently modified by different processes.
 """
 
+import errno
+import math
 import os
+import stat
 import time
-import psutil
-from typing import Optional, Type
-from types import TracebackType
 from pathlib import Path
+from types import TracebackType
+from typing import Callable, Optional, Type, cast
+
+import psutil
 
 # Local Package Imports
 from metor.utils.constants import Constants
+from metor.utils.security import _WINDOWS_OPEN_ALWAYS, _open_windows_file
+
+
+def _current_posix_uid() -> int:
+    """Returns the current POSIX user identity without Windows-only typing drift.
+
+    Args:
+        None
+
+    Returns:
+        int: Current effective process owner used for lock-file validation.
+
+    Raises:
+        OSError: If the running platform does not expose a POSIX user identity.
+    """
+    get_uid = getattr(os, 'getuid', None)
+    if get_uid is None:
+        raise OSError(errno.ENOTSUP, 'POSIX owner validation is unavailable.')
+    return int(get_uid())
+
+
+def _set_private_descriptor_mode(descriptor: int) -> None:
+    """Applies owner-only POSIX permissions to an already opened descriptor.
+
+    Args:
+        descriptor (int): Exact lock descriptor to protect.
+
+    Returns:
+        None
+
+    Raises:
+        OSError: If descriptor-bound permission changes are unavailable or fail.
+    """
+    change_mode = getattr(os, 'fchmod', None)
+    if change_mode is None:
+        raise OSError(errno.ENOTSUP, 'Descriptor permission changes are unavailable.')
+    change_mode(descriptor, 0o600)
+
+
+def _try_lock_descriptor(descriptor: int) -> bool:
+    """Attempts one nonblocking exclusive operating-system file lock.
+
+    Args:
+        descriptor (int): Stable lock-object descriptor.
+
+    Returns:
+        bool: True when the exclusive lock was acquired, otherwise False.
+
+    Raises:
+        OSError: If the native lock operation fails for another reason.
+    """
+    if os.name == 'nt':
+        import msvcrt
+
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        locking = cast(Callable[[int, int, int], None], getattr(msvcrt, 'locking'))
+        nonblocking_mode = int(getattr(msvcrt, 'LK_NBLCK'))
+        try:
+            locking(descriptor, nonblocking_mode, 1)
+        except OSError as exc:
+            if exc.errno in (errno.EACCES, errno.EAGAIN, errno.EDEADLK):
+                return False
+            raise
+        return True
+
+    import fcntl
+
+    flock = cast(Callable[[int, int], None], getattr(fcntl, 'flock'))
+    exclusive = int(getattr(fcntl, 'LOCK_EX'))
+    nonblocking = int(getattr(fcntl, 'LOCK_NB'))
+    try:
+        flock(descriptor, exclusive | nonblocking)
+    except OSError as exc:
+        if exc.errno in (errno.EACCES, errno.EAGAIN):
+            return False
+        raise
+    return True
+
+
+def _unlock_descriptor(descriptor: int) -> None:
+    """Releases one descriptor's native exclusive lock.
+
+    Args:
+        descriptor (int): Owned locked descriptor.
+
+    Returns:
+        None
+
+    Raises:
+        OSError: If the native unlock operation fails.
+    """
+    if os.name == 'nt':
+        import msvcrt
+
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        locking = cast(Callable[[int, int, int], None], getattr(msvcrt, 'locking'))
+        unlock_mode = int(getattr(msvcrt, 'LK_UNLCK'))
+        locking(descriptor, unlock_mode, 1)
+        return
+
+    import fcntl
+
+    flock = cast(Callable[[int, int], None], getattr(fcntl, 'flock'))
+    unlock = int(getattr(fcntl, 'LOCK_UN'))
+    flock(descriptor, unlock)
 
 
 class FileLock:
     """
     A context manager for providing cross-process file locking.
-    Uses an atomic OS-level file creation flag. Cleans up stale ghost locks
-    by validating the stored Process ID (PID).
+    Uses one persistent private lock object and an OS-level exclusive lock.
+    Process exit releases ownership without renaming or unlinking that object.
     """
 
     def __init__(
         self,
         target_file_path: str | Path,
         timeout: float = Constants.FILE_LOCK_TIMEOUT_SEC,
-        stale_age: float = Constants.FILE_LOCK_STALE_AGE_SEC,
     ) -> None:
         """
         Initializes the FileLock instance.
@@ -33,92 +141,175 @@ class FileLock:
         Args:
             target_file_path (str | Path): The absolute path to the file that needs locking.
             timeout (float): Maximum time in seconds to wait for the lock to become available.
-            stale_age (float): Seconds before a lock is considered a 'ghost lock' from a crashed process.
 
         Returns:
             None
         """
         self.lock_path: Path = Path(f'{target_file_path}.lock')
         self.timeout: float = timeout
-        self.stale_age: float = stale_age
         self._pid: int = os.getpid()
         self._pid_create_time: float = psutil.Process(self._pid).create_time()
+        if not math.isfinite(self._pid_create_time) or self._pid_create_time <= 0:
+            raise RuntimeError('Current process lifetime is unavailable.')
         self._lock_fd: Optional[int] = None
 
     @staticmethod
-    def _parse_lock_metadata(raw_text: str) -> tuple[Optional[int], Optional[float]]:
-        """
-        Parses one lockfile metadata payload.
+    def _write_all(descriptor: int, payload: bytes) -> None:
+        """Writes one complete lock metadata payload.
 
         Args:
-            raw_text (str): The raw lockfile text.
+            descriptor (int): Owned lock descriptor.
+            payload (bytes): Metadata bytes to persist.
 
         Returns:
-            tuple[Optional[int], Optional[float]]: The parsed PID and create time.
+            None
+
+        Raises:
+            OSError: If writing fails or makes no progress.
         """
-        content: str = raw_text.strip()
-        if not content:
-            return None, None
+        remaining = memoryview(payload)
+        while remaining:
+            written = os.write(descriptor, remaining)
+            if written <= 0:
+                raise OSError(errno.EIO, 'Lock metadata write made no progress.')
+            remaining = remaining[written:]
 
-        if ':' not in content:
-            if content.isdigit():
-                return int(content), None
-            return None, None
-
-        pid_text, created_text = content.split(':', 1)
-        try:
-            return int(pid_text), float(created_text)
-        except ValueError:
-            return None, None
-
-    @staticmethod
-    def _is_same_process(pid: int, create_time: Optional[float]) -> bool:
-        """
-        Checks whether one PID still refers to the same process instance.
+    def _open_lock_descriptor(self) -> int:
+        """Opens or creates the stable private lock object without link traversal.
 
         Args:
-            pid (int): The process ID to inspect.
-            create_time (Optional[float]): The expected process create time.
+            None
 
         Returns:
-            bool: True if the process still exists and matches the expected lifetime.
-        """
-        try:
-            proc = psutil.Process(pid)
-            if create_time is None:
-                return bool(proc.is_running())
-            return bool(abs(proc.create_time() - create_time) < 0.01)
-        except (psutil.Error, ValueError):
-            return False
+            int: Owned descriptor for the persistent lock object.
 
-    def _unlink_if_unchanged(self, expected_stat: os.stat_result) -> bool:
+        Raises:
+            OSError: If the object is unsafe or cannot be opened.
         """
-        Removes the lock path only if it still references the expected inode.
+        if os.name == 'nt':
+            descriptor = _open_windows_file(
+                self.lock_path,
+                _WINDOWS_OPEN_ALWAYS,
+                share_delete=False,
+            )
+            if descriptor is None:
+                raise FileNotFoundError(self.lock_path)
+            return descriptor
+
+        no_follow = getattr(os, 'O_NOFOLLOW', None)
+        if no_follow is None:
+            raise OSError(errno.ENOTSUP, 'No-follow lock opening is unavailable.')
+        return os.open(
+            self.lock_path,
+            os.O_RDWR
+            | os.O_CREAT
+            | no_follow
+            | int(getattr(os, 'O_CLOEXEC', 0))
+            | int(getattr(os, 'O_NONBLOCK', 0)),
+            0o600,
+        )
+
+    def _validate_lock_descriptor(self, descriptor: int) -> os.stat_result:
+        """Validates type, ownership, permissions, and bounded metadata size.
 
         Args:
-            expected_stat (os.stat_result): The previously observed file stat.
+            descriptor (int): Exact opened lock descriptor.
 
         Returns:
-            bool: True if the lock path was removed.
+            os.stat_result: Stable identity of the validated lock object.
+
+        Raises:
+            OSError: If the object is linked, unsafe, or outside resource limits.
         """
+        opened = os.fstat(descriptor)
+        file_attributes = int(getattr(opened, 'st_file_attributes', 0))
+        if not stat.S_ISREG(opened.st_mode):
+            raise OSError(errno.EINVAL, 'Lock object is not a regular file.')
+        if opened.st_nlink != 1:
+            raise OSError(errno.EMLINK, 'Lock object has multiple links.')
+        if file_attributes & 0x00000400:
+            raise OSError(errno.ELOOP, 'Lock object is a reparse point.')
+        if opened.st_size > Constants.FILE_LOCK_METADATA_MAX_BYTES:
+            raise OSError(errno.EFBIG, 'Lock metadata exceeds its bounded size.')
+        if os.name != 'nt':
+            if opened.st_uid != _current_posix_uid():
+                raise OSError(errno.EPERM, 'Lock object belongs to another user.')
+            _set_private_descriptor_mode(descriptor)
+        return os.fstat(descriptor)
+
+    def _validate_path_identity(
+        self,
+        opened: os.stat_result,
+    ) -> None:
+        """Requires the canonical name to retain the exact opened lock object.
+
+        Args:
+            opened (os.stat_result): Identity of the locked descriptor.
+
+        Returns:
+            None
+
+        Raises:
+            OSError: If the path was replaced during acquisition.
+        """
+        current = self.lock_path.lstat()
+        if (current.st_dev, current.st_ino) != (opened.st_dev, opened.st_ino):
+            raise OSError(errno.ESTALE, 'Lock object changed during acquisition.')
+
+    def _write_metadata(self, descriptor: int) -> None:
+        """Replaces bounded informational owner metadata under the native lock.
+
+        Args:
+            descriptor (int): Exclusively locked stable descriptor.
+
+        Returns:
+            None
+
+        Raises:
+            OSError: If bounded metadata persistence fails.
+        """
+        payload = f'{self._pid}:{self._pid_create_time}'.encode('utf-8')
+        if len(payload) > Constants.FILE_LOCK_METADATA_MAX_BYTES:
+            raise OSError(errno.EFBIG, 'Lock metadata exceeds its bounded size.')
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        os.ftruncate(descriptor, 0)
+        self._write_all(descriptor, payload)
+        os.fsync(descriptor)
+
+    def _release_owned_lock(self) -> None:
+        """Releases this instance's OS lock and closes its owned descriptor.
+
+        Args:
+            None
+
+        Returns:
+            None
+
+        Raises:
+            OSError: If native unlock or descriptor close fails.
+        """
+        if self._lock_fd is None:
+            return
+
+        descriptor = self._lock_fd
+        self._lock_fd = None
+        unlock_error: Optional[BaseException] = None
         try:
-            current_stat: os.stat_result = self.lock_path.stat()
-        except OSError:
-            return False
-
-        if (
-            current_stat.st_ino != expected_stat.st_ino
-            or current_stat.st_dev != expected_stat.st_dev
-        ):
-            return False
-
-        self.lock_path.unlink(missing_ok=True)
-        return True
+            _unlock_descriptor(descriptor)
+        except BaseException as exc:
+            unlock_error = exc
+        try:
+            os.close(descriptor)
+        except BaseException as close_error:
+            if unlock_error is not None:
+                raise close_error from unlock_error
+            raise
+        if unlock_error is not None:
+            raise unlock_error
 
     def __enter__(self) -> 'FileLock':
         """
-        Acquires an exclusive file lock. Removes stale locks if necessary
-        by verifying if the owning PID is still alive.
+        Acquires the stable lock object's exclusive operating-system lock.
 
         Args:
             None
@@ -129,42 +320,42 @@ class FileLock:
         Returns:
             FileLock: The current instance.
         """
-        start_time: float = time.time()
+        start_time: float = time.monotonic()
 
-        while (time.time() - start_time) < self.timeout:
+        while (time.monotonic() - start_time) < self.timeout:
+            descriptor: Optional[int] = None
             try:
-                # O_CREAT | O_EXCL ensures atomic creation. Fails if the file already exists.
-                fd = os.open(str(self.lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-                self._lock_fd = fd
-                lock_payload: str = f'{self._pid}:{self._pid_create_time}'
-                os.write(fd, lock_payload.encode('utf-8'))
-                os.fsync(fd)
-                return self
-            except FileExistsError:
-                # Check if the lock file is old (crashed process)
+                descriptor = self._open_lock_descriptor()
+                opened = self._validate_lock_descriptor(descriptor)
+                if not _try_lock_descriptor(descriptor):
+                    waiting_descriptor = descriptor
+                    descriptor = None
+                    os.close(waiting_descriptor)
+                    time.sleep(Constants.LOCK_SLEEP_SEC)
+                    continue
+                locked_descriptor = descriptor
+                self._lock_fd = locked_descriptor
+                descriptor = None
                 try:
-                    stat_before: os.stat_result = self.lock_path.stat()
-                    if time.time() - stat_before.st_mtime > self.stale_age:
-                        with self.lock_path.open('r') as f:
-                            pid, create_time = self._parse_lock_metadata(f.read())
-
-                        stat_after: os.stat_result = self.lock_path.stat()
-                        if (
-                            stat_after.st_ino != stat_before.st_ino
-                            or stat_after.st_dev != stat_before.st_dev
-                        ):
-                            continue
-
-                        if pid is not None and not self._is_same_process(
-                            pid,
-                            create_time,
-                        ):
-                            if self._unlink_if_unchanged(stat_before):
-                                continue
-                except (OSError, ValueError):
-                    pass
-
-            time.sleep(Constants.LOCK_SLEEP_SEC)
+                    self._validate_path_identity(opened)
+                    self._write_metadata(locked_descriptor)
+                except BaseException as acquisition_error:
+                    try:
+                        self._release_owned_lock()
+                    except BaseException as cleanup_error:
+                        raise cleanup_error from acquisition_error
+                    raise
+                return self
+            except BaseException as acquisition_error:
+                if descriptor is None:
+                    raise
+                failed_descriptor = descriptor
+                descriptor = None
+                try:
+                    os.close(failed_descriptor)
+                except BaseException as close_error:
+                    raise close_error from acquisition_error
+                raise
 
         raise TimeoutError(
             f'Could not acquire lock for {self.lock_path}. Another process is currently writing.'
@@ -177,9 +368,8 @@ class FileLock:
         exc_tb: Optional[TracebackType],
     ) -> None:
         """
-        Releases the file lock by removing the lock file safely.
-        Guaranteed to run even if exceptions occur inside the 'with' block.
-        Verifies PID ownership before deletion to prevent race conditions.
+        Releases the descriptor's OS lock while retaining the stable lock object.
+        Guaranteed to run even if exceptions occur inside the with block.
 
         Args:
             exc_type (Optional[Type[BaseException]]): Exception type if raised.
@@ -189,26 +379,4 @@ class FileLock:
         Returns:
             None
         """
-        fd_stat: Optional[os.stat_result] = None
-        try:
-            if self._lock_fd is None:
-                return
-
-            fd_stat = os.fstat(self._lock_fd)
-        except (OSError, ValueError):
-            pass
-        finally:
-            if self._lock_fd is not None:
-                try:
-                    os.close(self._lock_fd)
-                except OSError:
-                    pass
-                self._lock_fd = None
-
-        if fd_stat is None:
-            return
-
-        try:
-            self._unlink_if_unchanged(fd_stat)
-        except (OSError, ValueError):
-            pass
+        self._release_owned_lock()

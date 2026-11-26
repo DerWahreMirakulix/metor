@@ -11,6 +11,12 @@ from enum import Enum
 class TorCommand(str, Enum):
     """Enumeration of all valid Tor protocol commands."""
 
+    CALL_OFFER = 'CALL_OFFER'
+    CALL_ACCEPT = 'CALL_ACCEPT'
+    CALL_END = 'CALL_END'
+    CALL_AUDIO = 'CALL_AUDIO'
+    CALL_PING = 'CALL_PING'
+    CALL_CHAT_END = 'CALL_CHAT_END'
     CHALLENGE = '/challenge'
     AUTH = '/auth'
     PENDING = '/pending'
@@ -19,8 +25,17 @@ class TorCommand(str, Enum):
     DISCONNECT = '/disconnect'
     MSG = '/msg'
     ACK = '/ack'
+    DROP_ACK = '/drop_ack'
     DROP = '/drop'
     READ = '/read'
+    VOICE_BEGIN = '/voice_begin'
+    VOICE_CHUNK = '/voice_chunk'
+    VOICE_END = '/voice_end'
+    VOICE_ACK = '/voice_ack'
+    VOICE_COMMIT_ACK = '/voice_commit_ack'
+    DROP_VOICE_BEGIN = '/drop_voice_begin'
+    DROP_VOICE_CHUNK = '/drop_voice_chunk'
+    DROP_VOICE_END = '/drop_voice_end'
 
 
 class DisconnectIntent(str, Enum):
@@ -52,6 +67,8 @@ class SessionState(str, Enum):
     PENDING = 'pending'
     CONNECTED = 'connected'
     RETUNNELING = 'retunneling'
+    RECONNECT_GRACE = 'reconnect_grace'
+    RECONNECT_SCHEDULED = 'reconnect_scheduled'
 
 
 @dataclass(frozen=True)

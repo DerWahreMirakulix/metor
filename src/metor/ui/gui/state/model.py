@@ -1,0 +1,202 @@
+"""Presentation routes and volatile drafts; authoritative facts remain SDK DTOs."""
+
+from collections.abc import Callable
+from dataclasses import dataclass, field
+
+from metor.core.api import Delivery, RuntimeSnapshotEvent, GuiPreferencesEvent
+from metor.ui.gui.constants import GuiLimits
+
+# Local Package Imports
+from .feedback import ActionFeedback
+
+
+@dataclass(frozen=True)
+class Route:
+    """One foreground projection, independently of root selection."""
+
+    view: str = 'V01'
+    peer: str | None = None
+    delivery: Delivery = Delivery.DROP
+    history_raw: bool = False
+
+
+@dataclass
+class GuiState:
+    """Owns bounded volatile presentation and never creates Core authorization."""
+
+    generation: int = 0
+    root_delivery: Delivery = Delivery.DROP
+    root_pages: dict[Delivery, int] = field(default_factory=dict)
+    ended_live_expanded: bool = False
+    ended_live_page: int = 0
+    secondary_scroll: dict[Route, float] = field(default_factory=dict)
+    route: Route = field(default_factory=Route)
+    back_stack: list[Route] = field(default_factory=list)
+    snapshot: RuntimeSnapshotEvent | None = None
+    preferences: GuiPreferencesEvent | None = None
+    capabilities: frozenset[str] = frozenset()
+    _covered: bool = field(default=True, init=False, repr=False)
+    privacy_fence: Callable[[], None] | None = field(
+        default=None, repr=False, compare=False
+    )
+    busy: bool = False
+    _status: str = field(default='', init=False, repr=False)
+    feedback: ActionFeedback = field(default_factory=ActionFeedback)
+    drafts: dict[tuple[str, Delivery], str] = field(default_factory=dict)
+    reserved_drafts: dict[tuple[str, Delivery], str] = field(default_factory=dict)
+
+    @property
+    def status(self) -> str:
+        """Returns local action/progress text without creating domain state."""
+        return self._status
+
+    @status.setter
+    def status(self, value: str) -> None:
+        """Publishes one result while retaining covered startup/recovery text.
+
+        Args:
+            value: Locally formatted presentation text, never authorization truth.
+        """
+        self._status = value
+        self.feedback.publish(value)
+
+    @property
+    def covered(self) -> bool:
+        """Reports the local privacy barrier independently of pending Core acknowledgment.
+
+        Args:
+            None
+        Returns:
+            bool: Whether normal presentation and actions are prohibited.
+        """
+        return self._covered
+
+    @covered.setter
+    def covered(self, value: bool) -> None:
+        """Revokes detached presentation synchronously when normal content is covered.
+
+        Args:
+            value: Local privacy state; Core remains the authorization authority.
+        Returns:
+            None
+        """
+        self._covered = value
+        if value:
+            self.feedback.clear()
+            self.ended_live_expanded = False
+            self.ended_live_page = 0
+        if value and self.privacy_fence is not None:
+            self.privacy_fence()
+
+    def navigate(self, route: Route, *, from_root: bool = False) -> None:
+        """Changes only presentation; callers perform input finalization first.
+
+        Args:
+            route: Destination with exact peer and projection.
+            from_root: Whether the persistent master pane invoked the destination.
+        Returns:
+            None
+        """
+        if from_root:
+            self.back_stack.clear()
+            if route.view not in {'V06', 'V07'}:
+                self.back_stack.append(
+                    Route(
+                        'V06' if self.root_delivery is Delivery.DROP else 'V07',
+                        delivery=self.root_delivery,
+                    )
+                )
+        if route != self.route:
+            same_conversation = (
+                self.route.view in {'V08', 'V09'}
+                and route.view in {'V08', 'V09'}
+                and route.peer == self.route.peer
+            )
+            if not from_root and not same_conversation:
+                if len(self.back_stack) >= GuiLimits.TEXT_CONTEXTS:
+                    self.back_stack.pop(0)
+                self.back_stack.append(self.route)
+            self.route = route
+            self.feedback.clear()
+
+    def back(self) -> None:
+        """Returns to the caller or the originating root without a command.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        self.feedback.clear()
+        self.route = (
+            self.back_stack.pop()
+            if self.back_stack
+            else Route(
+                'V06' if self.root_delivery == Delivery.DROP else 'V07',
+                delivery=self.root_delivery,
+            )
+        )
+
+    def select_root_delivery(self, delivery: Delivery) -> None:
+        """Changes the master list and its neutral Back target without changing detail.
+
+        Args:
+            delivery: Explicitly selected DROP or LIVE master projection.
+        Returns:
+            None
+        """
+        if delivery is not self.root_delivery and self.route.view in {'V06', 'V07'}:
+            self.feedback.clear()
+        self.root_delivery = delivery
+        root = Route('V06' if delivery is Delivery.DROP else 'V07', delivery=delivery)
+        if self.route.view in {'V06', 'V07'}:
+            self.route = root
+        elif self.back_stack and self.back_stack[0].view in {'V06', 'V07'}:
+            self.back_stack[0] = root
+
+    def set_draft(self, peer: str, delivery: Delivery, value: str) -> bool:
+        """Refuses excess text growth without evicting another context's draft.
+
+        Args:
+            peer: Canonical peer identity.
+            delivery: Explicit composer projection.
+            value: Proposed canonical text.
+        Returns:
+            bool: Whether the bounded draft was accepted.
+        """
+        key = (peer, delivery)
+        contexts = self.drafts.keys() | self.reserved_drafts.keys()
+        if key not in contexts and len(contexts) >= GuiLimits.TEXT_CONTEXTS:
+            return False
+        size = sum(
+            len(text.encode('utf-8')) for k, text in self.drafts.items() if k != key
+        ) + sum(len(text.encode('utf-8')) for text in self.reserved_drafts.values())
+        if size + len(value.encode('utf-8')) > GuiLimits.TEXT_BYTES:
+            return False
+        if value:
+            self.drafts[key] = value
+        else:
+            self.drafts.pop(key, None)
+        return True
+
+    def abandon(self) -> None:
+        """Invalidates jobs and releases all profile-owned presentation references.
+
+        Args:
+            None
+        Returns:
+            None
+        """
+        self.generation += 1
+        self.snapshot = None
+        self.preferences = None
+        self.capabilities = frozenset()
+        self.drafts.clear()
+        self.reserved_drafts.clear()
+        self.back_stack.clear()
+        self.root_pages.clear()
+        self.secondary_scroll.clear()
+        self.route = Route()
+        self.covered = True
+        self.busy = False
+        self.status = ''

@@ -8,6 +8,7 @@ types without touching the daemon core.
 """
 
 import json
+from collections import deque
 import threading
 from dataclasses import dataclass, field
 from typing import Callable, Dict, Optional, Protocol
@@ -122,21 +123,40 @@ class NotificationService:
         self,
         config_getter: Callable[[], str],
         error_callback: Optional[Callable[[str], None]] = None,
+        *,
+        queue_limit: int = 64,
+        stop_timeout: float = 1.0,
     ) -> None:
         """Initializes the NotificationService.
 
         Args:
             config_getter (Callable[[], str]): Returns the current `daemon.notification_sink` string.
             error_callback (Optional[Callable[[str], None]]): Optional console-safe error sink.
+            queue_limit: Maximum transient payload records awaiting the one worker.
+            stop_timeout: Maximum seconds spent joining a blocked optional sink.
 
         Returns:
             None
         """
         self._config_getter: Callable[[], str] = config_getter
         self._error_callback: Optional[Callable[[str], None]] = error_callback
-        self._lock: threading.Lock = threading.Lock()
+        if queue_limit < 1 or stop_timeout < 0:
+            raise ValueError('Notification queue bounds must be positive')
+        self._condition = threading.Condition()
+        self._queue: deque[tuple[str, int, NotificationPayload]] = deque()
+        self._generation = 0
+        self._queue_limit = queue_limit
+        self._stop_timeout = stop_timeout
+        self._closed = False
+        self._overloaded = False
         self._cached_raw: Optional[str] = None
         self._cached_sink: Optional[Sink] = None
+        self._worker = threading.Thread(
+            target=self._run,
+            name='metor-notification-sink',
+            daemon=True,
+        )
+        self._worker.start()
 
     def dispatch(self, payload: NotificationPayload) -> None:
         """Delivers one payload through the configured sink, defensively.
@@ -147,16 +167,91 @@ class NotificationService:
         Returns:
             None
         """
-        with self._lock:
-            sink: Optional[Sink] = self._resolve_sink()
-        if sink is None:
+        with self._condition:
+            generation = self._generation
+        raw = self._current_config()
+        if not raw.strip():
             return
-        try:
-            sink.deliver(payload)
-        except Exception as exc:
-            self._report(f'Notification sink delivery failed: {exc}')
+        with self._condition:
+            if self._closed or generation != self._generation:
+                return
+            if len(self._queue) >= self._queue_limit:
+                self._overloaded = True
+            else:
+                self._queue.append((raw, generation, payload))
+            self._condition.notify()
 
-    def _resolve_sink(self) -> Optional[Sink]:
+    def _run(self) -> None:
+        """Resolve and deliver on one finite worker outside domain callers.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        while True:
+            work = None
+            overloaded = False
+            with self._condition:
+                while not self._closed and not self._queue and not self._overloaded:
+                    self._condition.wait()
+                if self._closed:
+                    self._queue.clear()
+                    return
+                overloaded, self._overloaded = self._overloaded, False
+                if self._queue:
+                    work = self._queue.popleft()
+            if overloaded:
+                self._report('Notification sink queue is full; notification dropped')
+            if work is None:
+                continue
+            raw, generation, payload = work
+            if self._current_config() != raw:
+                continue
+            sink = self._resolve_sink(raw)
+            if sink is None:
+                continue
+            with self._condition:
+                if self._closed or generation != self._generation:
+                    continue
+            try:
+                sink.deliver(payload)
+            except Exception:
+                self._report('Notification sink delivery failed')
+
+    def close(self) -> None:
+        """Drop pending optional work and wait only a configured finite interval.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with self._condition:
+            self._closed = True
+            self._queue.clear()
+            self._overloaded = False
+            self._condition.notify_all()
+        self._worker.join(self._stop_timeout)
+
+    def discard_pending(self) -> None:
+        """Revoke queued work on a destination or profile-lifetime change."""
+        with self._condition:
+            self._generation += 1
+            self._queue.clear()
+            self._overloaded = False
+
+    def _current_config(self) -> str:
+        """Read the export policy, treating an unavailable setting as disabled."""
+        try:
+            return self._config_getter()
+        except Exception:
+            self._report('Notification configuration unavailable')
+            return ''
+
+    def _resolve_sink(self, raw: str) -> Optional[Sink]:
         """Resolves the cached sink for the current setting value.
 
         Args:
@@ -166,11 +261,6 @@ class NotificationService:
             Optional[Sink]: The configured sink, or None when disabled or misconfigured.
         """
         try:
-            raw: str = self._config_getter()
-            if not raw.strip():
-                self._cached_raw = None
-                self._cached_sink = None
-                return None
             if raw == self._cached_raw:
                 return self._cached_sink
             parsed: object = json.loads(raw)
@@ -179,10 +269,10 @@ class NotificationService:
             self._cached_sink = build_sink(parsed)
             self._cached_raw = raw
             return self._cached_sink
-        except Exception as exc:
+        except Exception:
             self._cached_raw = None
             self._cached_sink = None
-            self._report(f'Invalid notification sink config: {exc}')
+            self._report('Invalid notification sink configuration')
             return None
 
     def _report(self, message: str) -> None:

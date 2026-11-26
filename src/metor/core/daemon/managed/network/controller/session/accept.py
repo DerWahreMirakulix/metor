@@ -1,6 +1,7 @@
 """Pending-connection acceptance helpers for the connection controller."""
 
 from typing import Optional, Tuple
+import socket
 
 from metor.core.api import (
     ConnectedEvent,
@@ -25,6 +26,8 @@ def accept(
     controller: AcceptControllerProtocol,
     target: str,
     origin: ConnectionOrigin = ConnectionOrigin.INCOMING,
+    *,
+    expected_pending: Optional[socket.socket] = None,
 ) -> None:
     """
     Accepts one pending connection and transitions it into the active state.
@@ -44,9 +47,11 @@ def accept(
     alias, onion = resolved
 
     conn, initial_buffer, _, pending_origin = controller._state.pop_pending_connection(
-        onion
+        onion, expected_pending
     )
     if not conn:
+        if expected_pending is not None:
+            return
         if controller._state.is_retunneling(onion):
             controller._hm.log_event(
                 HistoryEvent.CONNECTION_LOST,
@@ -87,8 +92,23 @@ def accept(
         )
         return
 
+    is_recovery_pending = pending_origin in {
+        ConnectionOrigin.AUTO_RECONNECT,
+        ConnectionOrigin.GRACE_RECONNECT,
+        ConnectionOrigin.RETUNNEL,
+    }
+    recovery_generation = (
+        controller._state.accepted_live_context_generation(onion)
+        if is_recovery_pending
+        else None
+    )
+    if is_recovery_pending and recovery_generation is None:
+        controller._state.retire_connection(conn)
+        return
     try:
-        conn.sendall(f'{TorCommand.ACCEPTED.value}\n'.encode('utf-8'))
+        controller._state.send_frame(
+            conn, f'{TorCommand.ACCEPTED.value}\n'.encode('utf-8')
+        )
     except OSError:
         controller._hm.log_event(
             HistoryEvent.CONNECTION_LOST,
@@ -121,12 +141,16 @@ def accept(
                 )
             )
         try:
-            conn.close()
+            controller._state.retire_connection(conn)
         except OSError:
             pass
         return
 
-    controller._state.add_active_connection(onion, conn)
+    if not controller._state.add_active_connection(
+        onion, conn, expected_context_generation=recovery_generation
+    ):
+        controller._state.retire_connection(conn)
+        return
     controller._hm.log_event(
         HistoryEvent.CONNECTED,
         onion,

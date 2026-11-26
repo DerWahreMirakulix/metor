@@ -15,20 +15,64 @@ class SqlCipherCursor(Protocol):
         query: str,
         params: Tuple[SqlParam, ...] = (),
     ) -> 'SqlCipherCursor':
-        """Executes one SQL statement and returns the active cursor."""
+        """Executes one SQL statement and returns the active cursor.
+
+        Args:
+            query (str): The query input.
+            params (Tuple[SqlParam, ...]): The params input.
+
+        Returns:
+            'SqlCipherCursor': The resulting value.
+        """
+        ...
 
     def fetchone(self) -> object:
-        """Returns the next row from the current result set."""
+        """Returns the next row from the current result set.
+
+        Args:
+            None
+
+        Returns:
+            object: The resulting value.
+        """
+        ...
 
     def fetchall(self) -> list[tuple[object, ...]]:
-        """Returns all rows from the current result set."""
+        """Returns all rows from the current result set.
+
+        Args:
+            None
+
+        Returns:
+            list[tuple[object, ...]]: The resulting value.
+        """
+        ...
 
 
 class SqlCipherConnection(Protocol):
     """Protocol describing the connection features used by the SQL manager."""
 
+    def create_collation(self, name: str, callback: Callable[[str, str], int]) -> None:
+        """Registers a connection-local comparison without altering stored labels.
+
+        Args:
+            name: SQL comparison identifier.
+            callback: Comparison returning a negative, zero, or positive integer.
+        Returns:
+            None
+        """
+        ...
+
     def __enter__(self) -> 'SqlCipherConnection':
-        """Enters the transactional context manager."""
+        """Enters the transactional context manager.
+
+        Args:
+            None
+
+        Returns:
+            'SqlCipherConnection': The resulting value.
+        """
+        ...
 
     def __exit__(
         self,
@@ -36,23 +80,66 @@ class SqlCipherConnection(Protocol):
         exc: object,
         traceback: object,
     ) -> object:
-        """Exits the transactional context manager."""
+        """Exits the transactional context manager.
+
+        Args:
+            exc_type (object): The exc type input.
+            exc (object): The exc input.
+            traceback (object): The traceback input.
+
+        Returns:
+            object: The resulting value.
+        """
+        ...
 
     def cursor(self) -> SqlCipherCursor:
-        """Creates one database cursor."""
+        """Creates one database cursor.
+
+        Args:
+            None
+
+        Returns:
+            SqlCipherCursor: The resulting value.
+        """
+        ...
 
     def execute(
         self,
         query: str,
         params: Tuple[SqlParam, ...] = (),
-    ) -> object:
-        """Executes one SQL statement directly on the connection."""
+    ) -> SqlCipherCursor:
+        """Executes one SQL statement directly on the connection.
+
+        Args:
+            query (str): The query input.
+            params (Tuple[SqlParam, ...]): The params input.
+
+        Returns:
+            SqlCipherCursor: The resulting cursor.
+        """
+        ...
 
     def commit(self) -> None:
-        """Commits the current transaction."""
+        """Commits the current transaction.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        ...
 
     def close(self) -> None:
-        """Closes the database connection."""
+        """Closes the database connection.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        ...
 
 
 class SqlCipherDbApi(Protocol):
@@ -68,7 +155,16 @@ class SqlCipherDbApi(Protocol):
         database: str,
         check_same_thread: bool = False,
     ) -> SqlCipherConnection:
-        """Opens one SQLCipher connection."""
+        """Opens one SQLCipher connection.
+
+        Args:
+            database (str): The database input.
+            check_same_thread (bool): The check same thread input.
+
+        Returns:
+            SqlCipherConnection: The resulting value.
+        """
+        ...
 
 
 def _import_sqlcipher_module(module_name: str) -> SqlCipherDbApi:

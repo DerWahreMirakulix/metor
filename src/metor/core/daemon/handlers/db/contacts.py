@@ -14,6 +14,7 @@ from metor.core.api import (
     create_event,
 )
 from metor.data.contact import ContactOperationResult, ContactOperationType
+from metor.core.daemon.handlers.snapshot_pages import SnapshotPages
 
 # Local Package Imports
 from metor.core.daemon.handlers.db.support import DatabaseCommandHandlerSupportMixin
@@ -37,6 +38,7 @@ CONTACT_EVENT_TYPES: dict[ContactOperationType, EventType] = {
         EventType.DISCOVERED_PEER_NOT_FOUND
     ),
     ContactOperationType.INVALID_ONION: EventType.INVALID_TARGET,
+    ContactOperationType.INVALID_ALIAS: EventType.INVALID_TARGET,
     ContactOperationType.ONION_IN_USE: EventType.ONION_IN_USE,
     ContactOperationType.PEER_ANONYMIZED: EventType.PEER_ANONYMIZED,
     ContactOperationType.PEER_CANT_DELETE_ACTIVE: EventType.PEER_CANT_DELETE_ACTIVE,
@@ -48,6 +50,8 @@ CONTACT_EVENT_TYPES: dict[ContactOperationType, EventType] = {
 
 class DatabaseCommandContactsMixin(DatabaseCommandHandlerSupportMixin):
     """Handles address-book and alias database commands."""
+
+    _contact_pages: SnapshotPages
 
     @staticmethod
     def _create_contact_event(result: ContactOperationResult) -> IpcEvent:
@@ -63,18 +67,20 @@ class DatabaseCommandContactsMixin(DatabaseCommandHandlerSupportMixin):
         params: dict[str, JsonValue] = dict(result.params)
         return create_event(CONTACT_EVENT_TYPES[result.operation_type], params)
 
-    def _handle_get_contacts(self, _: GetContactsListCommand) -> IpcEvent:
+    def _handle_get_contacts(self, cmd: GetContactsListCommand) -> IpcEvent:
         """
         Returns the structured saved and discovered contact lists.
 
         Args:
-            _ (GetContactsListCommand): The incoming contacts-list command.
+            cmd (GetContactsListCommand): The incoming contacts-list command.
 
         Returns:
             IpcEvent: The contact list event DTO.
         """
-        snapshot = self._cm.get_contacts_data()
-        return ContactsDataEvent(
+        if cmd.snapshot_id is not None:
+            return self._contact_pages.read(cmd.snapshot_id, cmd.offset)
+        snapshot = self._cm.get_contacts_data(cmd.onions)
+        result = ContactsDataEvent(
             saved=[
                 ContactEntry(alias=entry.alias, onion=entry.onion)
                 for entry in snapshot.saved
@@ -84,7 +90,9 @@ class DatabaseCommandContactsMixin(DatabaseCommandHandlerSupportMixin):
                 for entry in snapshot.discovered
             ],
             profile=snapshot.profile,
+            checked_onions=cmd.onions,
         )
+        return self._contact_pages.begin(result) if cmd.onions is None else result
 
     def _handle_add_contact(self, cmd: AddContactCommand) -> IpcEvent:
         """
@@ -117,6 +125,7 @@ class DatabaseCommandContactsMixin(DatabaseCommandHandlerSupportMixin):
         result: ContactOperationResult = self._cm.remove_contact(
             cmd.alias,
             active_onions,
+            expected_onion=cmd.onion,
         )
         if result.success:
             self._emit_contact_side_effects(result.renames, result.removals)
@@ -137,14 +146,15 @@ class DatabaseCommandContactsMixin(DatabaseCommandHandlerSupportMixin):
         result: ContactOperationResult = self._cm.rename_contact(
             cmd.old_alias,
             cmd.new_alias,
+            expected_onion=cmd.onion,
         )
         if result.success:
-            self._broadcast(
+            self._broadcast_contact_event(
                 create_event(
                     EventType.RENAME_SUCCESS,
                     {
-                        'old_alias': cmd.old_alias,
-                        'new_alias': cmd.new_alias,
+                        'old_alias': str(result.params['old_alias']),
+                        'new_alias': str(result.params['new_alias']),
                         'onion': str(result.params.get('onion') or '') or None,
                     },
                 )

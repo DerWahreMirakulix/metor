@@ -2,7 +2,7 @@
 Module owning the registry for frontend-specific UI settings.
 
 Frontend-owned settings are namespaced as `ui.<frontend>.<key>` and are
-registered here by each frontend entry point. The registry lives inside the
+described by an inert base-owned catalog. The registry lives inside the
 data layer so that paradigm-neutral client settings (`client.*`) and daemon
 settings (`daemon.*`) never depend on a concrete UI implementation, while no
 data-layer module ever imports the UI layer.
@@ -211,3 +211,6 @@ TERMINAL_UI_SETTINGS: Tuple[UiSettingSpec, ...] = (
         category='Terminal UI',
     ),
 )
+
+# Official metadata remains available without loading any frontend implementation.
+register_ui_settings('terminal', TERMINAL_UI_SETTINGS)

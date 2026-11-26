@@ -1,0 +1,312 @@
+"""Native content-free Notification Center with explicit local selection and dismissal."""
+
+from collections.abc import Callable
+from datetime import datetime
+from functools import partial
+
+from kivy.metrics import dp
+from kivy.core.text import Label as TextMeasure
+from kivy.uix.boxlayout import BoxLayout
+from kivy.uix.scrollview import ScrollView
+
+from metor.ui.gui.runtime import GuiController
+from metor.ui.gui.state.notifications import Notice, NoticeKind
+from metor.ui.gui.widgets import Action, ActionRow, Label, Panel
+from metor.ui.gui.widgets.sheet import ActionSheet
+from metor.ui.gui.widgets.symbol import IconAction
+from metor.ui.gui.widgets.context import ContextAction
+from metor.ui.gui.widgets.preview import BoundedLabel
+
+
+TITLES: dict[NoticeKind, str] = {
+    NoticeKind.DROP: 'New Drop',
+    NoticeKind.LIVE: 'New Live activity',
+    NoticeKind.INVITATION: 'Incoming Live',
+    NoticeKind.PENDING: 'Pending Live',
+    NoticeKind.UNSTABLE: 'Connection unstable',
+    NoticeKind.FALLBACK: 'Queued as Drop',
+}
+
+
+def notification_center(
+    controller: GuiController, refresh: Callable[[], None]
+) -> BoxLayout:
+    """Builds a bounded center whose actions affect presentation entries only.
+
+    Args:
+        controller: Public state and volatile center owner.
+        refresh: Coalesced native repaint request.
+    Returns:
+        BoxLayout: Header, scrolling rows and selection-only action footer.
+    """
+    store = controller.notifications.store
+    store.mark_seen()
+    panel = BoxLayout(orientation='vertical', spacing=dp(16))
+    header = ActionRow(spacing=dp(12))
+
+    def back() -> None:
+        """Returns to the preceding presentation and clears local selection.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        controller.back()
+        refresh()
+
+    def clear() -> None:
+        """Clears volatile notification-center entries and refreshes the view.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        store.clear_center()
+        refresh()
+
+    header.add_widget(
+        IconAction(
+            'chevron-left',
+            'Back',
+            back,
+            pos_hint={'center_y': 0.5},
+        )
+    )
+    header.add_widget(
+        Label(
+            f'{len(store.selected)} selected' if store.selecting else 'Notifications',
+            role='peer',
+            pos_hint={'center_y': 0.5},
+        )
+    )
+    header.add_widget(
+        IconAction(
+            'trash-2',
+            'Clear notifications',
+            clear,
+            disabled=not store.items,
+            pos_hint={'center_y': 0.5},
+        )
+    )
+    panel.add_widget(header)
+    scroll = ScrollView(do_scroll_x=False, always_overscroll=False)
+    body = BoxLayout(orientation='vertical', spacing=dp(12), size_hint_y=None)
+    body.bind(minimum_height=body.setter('height'))
+    scroll.add_widget(body)
+    panel.add_widget(scroll)
+    if not store.items:
+        empty = Panel(
+            orientation='vertical', size_hint_y=None, padding=dp(16), spacing=dp(4)
+        )
+        empty.bind(minimum_height=empty.setter('height'))
+        empty.add_widget(Label('No notifications', role='row'))
+        empty.add_widget(
+            Label(
+                'New Drops and Live activity appear here.',
+                role='support',
+                tone='textSecondary',
+            )
+        )
+        body.add_widget(empty)
+    for notice in reversed(tuple(store.items.values())):
+        body.add_widget(notice_row(controller, notice, refresh))
+    if store.selecting:
+
+        def dismiss_selected() -> None:
+            """Dismisses the explicitly selected local notification entries.
+
+            Args:
+                None
+
+            Returns:
+                None
+            """
+            store.dismiss(set(store.selected))
+            refresh()
+
+        panel.add_widget(
+            Action('Dismiss selected', dismiss_selected, disabled=not store.selected)
+        )
+    return panel
+
+
+def notice_row(
+    controller: GuiController, notice: Notice, refresh: Callable[[], None]
+) -> BoxLayout:
+    """Builds an 88-unit entry from permitted kind/count/time and current canonical alias.
+
+    Args:
+        controller: Current public-state and label resolver.
+        notice: Strict content-free local entry.
+        refresh: Native repaint callback.
+    Returns:
+        BoxLayout: Native row with a distinct 48-unit More or selection target.
+    """
+    store = controller.notifications.store
+    key = notice.key
+    row = BoxLayout(size_hint_y=None, height=dp(88))
+
+    def activate() -> None:
+        """Selects or opens this exact notification entry.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        if store.selecting:
+            if key in store.selected:
+                store.selected.remove(key)
+            else:
+                store.selected.add(key)
+        else:
+            controller.notifications.open(key)
+        refresh()
+
+    action = ContextAction(
+        TITLES[notice.kind],
+        activate,
+        partial(notice_menu, controller, key, refresh),
+        surface='surface',
+    )
+    action.focus_key = ('notice', key[0].value, key[1])
+    action.height = dp(88)
+    action.padding = dp(16)
+    action.remove_widget(action.label)
+    group = BoxLayout(spacing=dp(8))
+    column = BoxLayout(orientation='vertical', spacing=dp(8))
+    kind = Label(TITLES[notice.kind], role='row')
+    column.add_widget(kind)
+    time_text = datetime.fromtimestamp(notice.created_at).strftime('%H:%M')
+    stamp = Label(
+        f'×{notice.count} · {time_text}' if notice.count > 1 else time_text,
+        role='meta',
+        tone='textSecondary',
+        wrap=False,
+    )
+    stamp.size_hint_x = None
+    measure_stamp = TextMeasure(
+        text=stamp.text, font_name=stamp.font_name, font_size=stamp.font_size
+    )
+    stamp.width = max(dp(40), measure_stamp.get_extents(stamp.text)[0] + dp(2))
+    stamp.shorten = False
+    alias = controller.contacts.alias(notice.peer)
+    summary_label = BoundedLabel(
+        alias, role='support', tone='textSecondary', max_lines=2
+    )
+    summary_row = BoxLayout(size_hint_y=None, height=dp(18), spacing=dp(8))
+    summary_row.add_widget(summary_label)
+    stamp.pos_hint = {'center_y': 0.5}
+    stamp.halign = 'right'
+    summary_row.add_widget(stamp)
+    summary_row.bind(minimum_height=summary_row.setter('height'))
+    column.add_widget(summary_row)
+    action.accessible_name = TITLES[notice.kind] + ': ' + alias
+    if notice.count > 1:
+        action.accessible_name += f' · {notice.count}'
+    group.add_widget(column)
+    action.add_widget(group)
+
+    def measure(*_args: object) -> None:
+        """Recomputes the native row height from rendered text metrics.
+
+        Args:
+            _args (object): The  args input.
+
+        Returns:
+            None
+        """
+        action.height = row.height = max(
+            dp(88), dp(16 + 8 + 16) + kind.height + summary_row.height
+        )
+
+    kind.bind(height=measure)
+    summary_row.bind(height=measure)
+    measure()
+    row.add_widget(action)
+    if store.selecting:
+        auxiliary = IconAction(
+            'square-check' if key in store.selected else 'square',
+            'Deselect notification' if key in store.selected else 'Select notification',
+            activate,
+            surface='surface',
+            pos_hint={'center_y': 0.5},
+        )
+        auxiliary.focus_key = ('notice_select', key[0].value, key[1])
+    else:
+        auxiliary = IconAction(
+            'ellipsis',
+            'Notification actions',
+            partial(notice_menu, controller, key, refresh),
+            surface='surface',
+            tone='textSecondary',
+            pos_hint={'center_y': 0.5},
+        )
+        auxiliary.focus_key = ('notice_more', key[0].value, key[1])
+    group.add_widget(auxiliary)
+    return row
+
+
+def notice_menu(
+    controller: GuiController, key: tuple[NoticeKind, str], refresh: Callable[[], None]
+) -> None:
+    """Offers local selection/dismissal while keeping its captured entry identity exact.
+
+    Args:
+        controller: Current notification and authorization owner.
+        key: Exact selected entry.
+        refresh: Native repaint callback.
+    Returns:
+        None
+    """
+    store = controller.notifications.store
+
+    def build(body: BoxLayout) -> None:
+        """Builds actions for the captured notification identity.
+
+        Args:
+            body (BoxLayout): The body input.
+
+        Returns:
+            None
+        """
+
+        def select() -> None:
+            """Enters notification selection mode without selecting stale entries.
+
+            Args:
+                None
+
+            Returns:
+                None
+            """
+            sheet.dismiss(animation=False)
+            store.selecting = True
+            store.selected.clear()
+            refresh()
+
+        def dismiss() -> None:
+            """Dismisses the captured notification when it still exists.
+
+            Args:
+                None
+
+            Returns:
+                None
+            """
+            sheet.dismiss(animation=False)
+            store.dismiss({key})
+            refresh()
+
+        body.add_widget(Action('Select notifications', select))
+        body.add_widget(Action('Dismiss', dismiss, disabled=key not in store.items))
+
+    sheet = ActionSheet(
+        controller, build, title='Notification actions', compact_menu=True
+    )
+    sheet.show()

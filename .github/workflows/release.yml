@@ -1,0 +1,275 @@
+name: Release Metor
+
+permissions: {}
+
+concurrency:
+  group: metor-release
+  cancel-in-progress: false
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_type:
+        description: Validate the product version already committed on the candidate (current for first release)
+        required: true
+        type: choice
+        default: current
+        options:
+          - current
+          - patch
+          - minor
+          - major
+      dry_run:
+        description: Validate and build without committing, tagging, or publishing
+        required: true
+        type: boolean
+        default: true
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    outputs:
+      candidate_sha: ${{ steps.candidate.outputs.sha }}
+      latest_tag: ${{ steps.version.outputs.latest_tag }}
+      next_version: ${{ steps.version.outputs.next_version }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+
+      - name: Record immutable candidate
+        id: candidate
+        shell: bash
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Reject non-main publish requests
+        shell: bash
+        run: |
+          if [[ '${{ inputs.dry_run }}' == 'false' && "$GITHUB_REF" != 'refs/heads/main' ]]; then
+            echo 'Public releases may only be published from main.' >&2
+            exit 1
+          fi
+
+      - name: Calculate application version
+        id: version
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TYPE: ${{ inputs.release_type }}
+        run: |
+          release_tags="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/releases?per_page=100" --jq '.[] | select(.draft | not) | .tag_name')"
+          version="$(python -c "import sys; sys.path.insert(0, 'src'); from metor.versioning import APP_VERSION; print(APP_VERSION)")"
+          baseline_args=()
+          while IFS= read -r release_tag; do
+            if [[ -n "$release_tag" && "$release_tag" != "v$version" ]]; then
+              baseline_args+=(--available-release "$release_tag")
+            fi
+          done <<< "$release_tags"
+          latest_tag="$(python scripts/calculate_release_version.py --select-baseline "${baseline_args[@]}")"
+          args=(--release-type "$RELEASE_TYPE")
+          if [ -n "$latest_tag" ]; then
+            args+=(--previous-release "$latest_tag")
+          fi
+          next_version="$(python scripts/calculate_release_version.py "${args[@]}")"
+          echo "latest_tag=$latest_tag" >> "$GITHUB_OUTPUT"
+          echo "next_version=$next_version" >> "$GITHUB_OUTPUT"
+          echo "Candidate release: v$next_version"
+          if [[ "$next_version" != "$version" ]]; then
+            echo "Prepare version $next_version and its generated references in a reviewed PR." >&2
+            exit 1
+          fi
+
+  quality:
+    needs: prepare
+    name: Release Quality (${{ matrix.os }})
+    timeout-minutes: 120
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.prepare.outputs.candidate_sha }}
+
+      - name: Run Linux and Windows quality gates
+        uses: ./.github/actions/python-quality
+        with:
+          python-version: "3.11"
+          ruff-check-paths: "src/metor/ scripts/ tests/"
+          ruff-format-paths: "src/metor/ scripts/ tests/"
+          mypy-paths: "src/metor/ scripts/"
+
+      - name: Verify committed release documentation
+        shell: bash
+        run: |
+          python scripts/validate_generated_docs.py
+          python scripts/versioning.py validate
+
+      - name: Run candidate test suite
+        shell: bash
+        run: python scripts/run_tests.py --suite all
+
+      - name: Load previous public compatibility baseline
+        if: needs.prepare.outputs.latest_tag != ''
+        shell: bash
+        run: git show '${{ needs.prepare.outputs.latest_tag }}:docs/generated/compatibility.json' > "$RUNNER_TEMP/previous-compatibility.json"
+
+      - name: Check release compatibility
+        shell: bash
+        run: |
+          args=(--current docs/generated/compatibility.json)
+          if [ -n '${{ needs.prepare.outputs.latest_tag }}' ]; then
+            args+=(--previous "$RUNNER_TEMP/previous-compatibility.json")
+          fi
+          python scripts/check_release_compatibility.py "${args[@]}"
+
+      - name: Build platform release bundles
+        shell: bash
+        run: python scripts/build_release_wheelhouse.py --output-dir dist/release --skip-pip-upgrade --variant all --revision "${{ needs.prepare.outputs.candidate_sha }}"
+
+      - name: Validate coordinated wheels in the release bundles
+        shell: bash
+        run: |
+          python scripts/validate_wheel_versions.py \
+            dist/release/metor-wheelhouse-*/wheelhouse/metor-*.whl \
+            dist/release/metor-sdk-wheelhouse-*/wheelhouse/metor_sdk-*.whl \
+            dist/release/metor-ui-terminal-wheelhouse-*/wheelhouse/metor_ui_terminal-*.whl \
+            dist/release/metor-ui-gui-wheelhouse-*/wheelhouse/metor_ui_gui-*.whl
+
+      - name: Provision a generic Linux GUI display
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends xvfb xauth libxtst6 libegl1 libegl-mesa0 libgl1-mesa-dri dbus-daemon dbus-x11 at-spi2-core python3-gi
+          python -c "import ctypes; ctypes.CDLL('libEGL.so.1')"
+
+      - name: Validate installed consumers and native GUI on Linux
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          KIVY_WINDOW: sdl2
+          KIVY_CLIPBOARD: dummy
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          SDL_VIDEODRIVER: x11
+        run: xvfb-run -a --server-args='-screen 0 1280x1024x24' python scripts/validate_installed_artifacts.py dist/release --gui-smoke
+
+      - name: Validate installed consumers on Windows
+        if: runner.os == 'Windows'
+        shell: bash
+        env:
+          KIVY_GL_BACKEND: angle_sdl2
+        run: python scripts/validate_installed_artifacts.py dist/release --gui-smoke --windows-launch
+
+      - name: Validate every native installer
+        shell: bash
+        run: python scripts/validate_release_installers.py dist/release
+
+      - name: Accept native GUI behavior from the release candidate
+        if: runner.os == 'Linux'
+        uses: ./.github/actions/gui-acceptance
+        with:
+          revision: ${{ needs.prepare.outputs.candidate_sha }}
+          artifact-name: release-gui-native-evidence-linux-py311
+
+      - name: Preserve platform release bundles
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: metor-release-bundles-${{ matrix.os }}
+          path: dist/release/*.zip
+          if-no-files-found: error
+
+  inventory:
+    needs: [prepare, quality]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.prepare.outputs.candidate_sha }}
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: metor-release-bundles-*
+          path: dist/release-assets
+          merge-multiple: true
+      - name: Validate the complete eight-archive inventory
+        run: python -m scripts.release.publication inventory --revision "${{ needs.prepare.outputs.candidate_sha }}" --version "${{ needs.prepare.outputs.next_version }}" --directory dist/release-assets
+
+  publish:
+    needs: [prepare, quality, inventory]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    if: inputs.dry_run == false && github.ref == 'refs/heads/main'
+    permissions:
+      actions: read
+      contents: write
+      id-token: write
+      attestations: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CANDIDATE: ${{ needs.prepare.outputs.candidate_sha }}
+      VERSION: ${{ needs.prepare.outputs.next_version }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.prepare.outputs.candidate_sha }}
+      - name: Select the verified artifacts bound to this draft
+        id: source
+        shell: bash
+        run: |
+          python -m scripts.release.publication authorize --revision "$CANDIDATE" --version "$VERSION"
+          run_id="$(python -m scripts.release.publication source-run --revision "$CANDIDATE" --version "$VERSION")"
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: metor-release-bundles-*
+          path: dist/release-assets
+          merge-multiple: true
+          run-id: ${{ steps.source.outputs.run_id }}
+          github-token: ${{ github.token }}
+      - name: Verify the restored inventory before signing it
+        run: python -m scripts.release.publication inventory --revision "$CANDIDATE" --version "$VERSION" --directory dist/release-assets
+      - name: Attest the accepted ZIPs
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/release-assets/*.zip
+          create-storage-record: false
+      - name: Tag the approved commit and publish the verified draft
+        shell: bash
+        env:
+          SOURCE_RUN: ${{ steps.source.outputs.run_id }}
+        run: |
+          set -euo pipefail
+          for archive in dist/release-assets/*.zip; do
+            gh attestation verify "$archive" --repo "$GITHUB_REPOSITORY" --signer-workflow "$GITHUB_REPOSITORY/.github/workflows/release.yml" --source-ref refs/heads/main --source-digest "$CANDIDATE"
+          done
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git config user.name 'github-actions[bot]'
+          python -m scripts.release.refs --remote origin --tag "v$VERSION" --revision "$CANDIDATE"
+          python -m scripts.release.publication publish --revision "$CANDIDATE" --version "$VERSION" --run-id "$SOURCE_RUN" --directory dist/release-assets
+
+  dry-run-result:
+    needs: [prepare, quality, inventory]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: inputs.dry_run == true
+    permissions: {}
+    steps:
+      - run: echo 'Validated eight archives for the reviewed candidate.'

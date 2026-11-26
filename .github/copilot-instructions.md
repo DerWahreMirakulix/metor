@@ -1,1 +1,1 @@
-Please strictly follow the architectural and coding guidelines defined in the `AGENTS.md` file located in the docs folder inside the root directory of this repository.
+Follow the root `AGENTS.md` router to the canonical `docs/AGENTS.md` instructions and task-specific references.

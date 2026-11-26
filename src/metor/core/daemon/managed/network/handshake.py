@@ -2,17 +2,22 @@
 Module encapsulating the Tor peer authentication protocol tie-breaker algorithms.
 """
 
+import json
 from typing import Optional, Tuple
+
+from metor.shared import clean_onion
 
 from metor.core.api import ConnectionOrigin
 from metor.core.daemon.managed.models import TorCommand
 from metor.utils import Constants
+from metor.versioning import PEER_PROTOCOL_MIN_SUPPORTED, PEER_PROTOCOL_VERSION
 
 
 _AUTH_ASYNC_FLAG: str = 'ASYNC'
 _AUTH_RECOVERY_FLAG: str = 'RECOVER'
 _RECOVERY_HINT_ORIGINS: tuple[ConnectionOrigin, ...] = (
     ConnectionOrigin.AUTO_RECONNECT,
+    ConnectionOrigin.GRACE_RECONNECT,
     ConnectionOrigin.RETUNNEL,
 )
 
@@ -21,11 +26,54 @@ class HandshakeProtocol:
     """Handles deterministic tie-breaking for mutual peer connections."""
 
     @staticmethod
+    def auth_mode(
+        *,
+        is_async: bool = False,
+        is_call: bool = False,
+        origin: Optional[ConnectionOrigin] = None,
+    ) -> str:
+        """Returns the authenticated transport intent also carried by AUTH."""
+        if is_call:
+            return Constants.CALL_AUTH_FLAG
+        if is_async:
+            return _AUTH_ASYNC_FLAG
+        if origin in _RECOVERY_HINT_ORIGINS:
+            return _AUTH_RECOVERY_FLAG
+        return 'LIVE'
+
+    @staticmethod
+    def proof(
+        challenge: str,
+        initiator: str,
+        responder: str,
+        mode: str,
+        initiator_range: tuple[int, int],
+        responder_range: tuple[int, int],
+    ) -> bytes:
+        """Binds AUTH to both ordered roles, advertised generations and transport intent."""
+        return json.dumps(
+            [
+                'metor/peer-auth',
+                'initiator',
+                clean_onion(initiator),
+                initiator_range,
+                'responder',
+                clean_onion(responder),
+                responder_range,
+                mode,
+                challenge,
+            ],
+            separators=(',', ':'),
+            ensure_ascii=True,
+        ).encode('ascii')
+
+    @staticmethod
     def build_auth_line(
         onion: str,
         signature: str,
         *,
         is_async: bool = False,
+        is_call: bool = False,
         origin: Optional[ConnectionOrigin] = None,
     ) -> str:
         """
@@ -41,16 +89,23 @@ class HandshakeProtocol:
         Returns:
             str: The newline-delimited AUTH frame.
         """
-        parts: list[str] = [TorCommand.AUTH.value, onion, signature]
-        if is_async:
-            parts.append(_AUTH_ASYNC_FLAG)
-        elif origin in _RECOVERY_HINT_ORIGINS:
-            parts.append(_AUTH_RECOVERY_FLAG)
+        parts: list[str] = [
+            TorCommand.AUTH.value,
+            onion,
+            signature,
+            str(PEER_PROTOCOL_VERSION),
+            str(PEER_PROTOCOL_MIN_SUPPORTED),
+        ]
+        mode = HandshakeProtocol.auth_mode(
+            is_async=is_async, is_call=is_call, origin=origin
+        )
+        if mode != 'LIVE':
+            parts.append(mode)
 
         return ' '.join(parts) + '\n'
 
     @staticmethod
-    def parse_challenge_line(line: str) -> Tuple[str, int]:
+    def parse_challenge_line(line: str) -> Tuple[str, int, int]:
         """
         Validates one peer-auth challenge frame and returns its nonce and version.
 
@@ -61,12 +116,11 @@ class HandshakeProtocol:
             ValueError: If the frame is malformed or the nonce is invalid.
 
         Returns:
-            Tuple[str, int]: The validated hexadecimal challenge string and the
-                peer's announced peer-wire protocol version (legacy frames without
-                a version token default to version 1).
+            Tuple[str, int, int]: The validated hexadecimal challenge and the
+                peer's current and minimum-supported protocol generations.
         """
         parts: list[str] = line.strip().split()
-        if len(parts) not in (2, 3) or parts[0] != TorCommand.CHALLENGE.value:
+        if len(parts) != 4 or parts[0] != TorCommand.CHALLENGE.value:
             raise ValueError('Invalid handshake challenge frame.')
 
         challenge_hex: str = parts[1]
@@ -78,14 +132,13 @@ class HandshakeProtocol:
         if len(challenge) != Constants.TOR_HANDSHAKE_CHALLENGE_BYTES:
             raise ValueError('Invalid handshake challenge length.')
 
-        peer_version: int = 1
-        if len(parts) == 3:
-            try:
-                peer_version = int(parts[2])
-            except ValueError as exc:
-                raise ValueError('Invalid handshake challenge version.') from exc
+        try:
+            peer_current: int = int(parts[2])
+            peer_minimum: int = int(parts[3])
+        except ValueError as exc:
+            raise ValueError('Invalid handshake challenge version range.') from exc
 
-        return challenge_hex, peer_version
+        return challenge_hex, peer_current, peer_minimum
 
     @staticmethod
     def build_challenge_line(challenge_hex: str) -> str:
@@ -100,13 +153,13 @@ class HandshakeProtocol:
         """
         return (
             f'{TorCommand.CHALLENGE.value} {challenge_hex} '
-            f'{Constants.PEER_PROTOCOL_VERSION}\n'
+            f'{PEER_PROTOCOL_VERSION} {PEER_PROTOCOL_MIN_SUPPORTED}\n'
         )
 
     @staticmethod
     def parse_auth_line(
         line: str,
-    ) -> Tuple[str, str, bool, bool]:
+    ) -> Tuple[str, str, int, int, bool, bool]:
         """
         Validates one peer-auth frame and returns its onion, signature, async flag,
         and generic recovery-hint flag.
@@ -118,25 +171,39 @@ class HandshakeProtocol:
             ValueError: If the frame shape is malformed.
 
         Returns:
-            Tuple[str, str, bool, bool]: The remote onion, signature, async-mode
-                flag, and generic recovery-hint flag.
+            Tuple[str, str, int, int, bool, bool]: The remote onion, signature,
+                current and minimum-supported peer generations, async-mode flag,
+                and generic recovery-hint flag.
         """
         parts: list[str] = line.strip().split()
-        if len(parts) not in (3, 4) or parts[0] != TorCommand.AUTH.value:
+        if len(parts) not in (5, 6) or parts[0] != TorCommand.AUTH.value:
             raise ValueError('Invalid handshake auth frame.')
+
+        try:
+            peer_current: int = int(parts[3])
+            peer_minimum: int = int(parts[4])
+        except ValueError as exc:
+            raise ValueError('Invalid handshake auth version range.') from exc
 
         is_async: bool = False
         is_recovery: bool = False
-        if len(parts) == 4:
-            extra_token: str = parts[3]
+        if len(parts) == 6:
+            extra_token: str = parts[5]
             if extra_token == _AUTH_ASYNC_FLAG:
                 is_async = True
             elif extra_token == _AUTH_RECOVERY_FLAG:
                 is_recovery = True
-            else:
+            elif extra_token != Constants.CALL_AUTH_FLAG:
                 raise ValueError('Invalid handshake auth frame.')
 
-        return parts[1], parts[2], is_async, is_recovery
+        return (
+            parts[1],
+            parts[2],
+            peer_current,
+            peer_minimum,
+            is_async,
+            is_recovery,
+        )
 
     @staticmethod
     def evaluate_tie_breaker(

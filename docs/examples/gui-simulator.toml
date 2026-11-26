@@ -1,0 +1,33 @@
+# Explicit simulation only; this is not a supported physical appliance driver.
+schema_version = 1
+
+[display]
+adapter = "simulator"
+width_px = 480
+height_px = 800
+rotation_deg = 0
+scale = 1
+
+[input]
+adapter = "simulator"
+ptt_binding = "ptt"
+power_binding = "power"
+touch = true
+
+[audio]
+adapter = "none"
+
+[camera]
+adapter = "none"
+
+[indicator]
+adapter = "none"
+
+[haptics]
+adapter = "none"
+
+[power]
+adapter = "none"
+
+[clipboard]
+policy = "disabled"

@@ -12,6 +12,7 @@ from metor.core.api import (
     PeerNotFoundEvent,
     RuntimeErrorCode,
     RetunnelInitiatedEvent,
+    LiveControlRejectedEvent,
     create_event,
 )
 from metor.data import HistoryActor, HistoryEvent
@@ -144,12 +145,13 @@ class ConnectionControllerRetunnelMixin(ConnectionControllerSupportMixin):
         ).start()
         return True
 
-    def retunnel(self, target: str) -> None:
+    def retunnel(self, target: str, context_generation: Optional[int] = None) -> None:
         """
         Forces a Tor circuit rotation and replaces the live route after safe teardown.
 
         Args:
             target (str): The target alias or onion address.
+            context_generation: Exact active context; rechecked after circuit rotation.
 
         Returns:
             None
@@ -159,6 +161,13 @@ class ConnectionControllerRetunnelMixin(ConnectionControllerSupportMixin):
             self._broadcast(PeerNotFoundEvent(target=target))
             return
         alias, onion = resolved
+
+        if context_generation is not None:
+            with self._operation_lock, self._state.snapshot_barrier():
+                if not self._matches_active_context(onion, context_generation):
+                    self._broadcast(LiveControlRejectedEvent(onion=onion))
+                    return
+                self._state.mark_retunnel_started(onion)
 
         if not self._state.is_connected_or_pending(onion):
             self._broadcast(
@@ -182,6 +191,13 @@ class ConnectionControllerRetunnelMixin(ConnectionControllerSupportMixin):
 
         success, event_type, params = self._tm.rotate_circuits()
         if not success:
+            if context_generation is not None:
+                with self._operation_lock, self._state.snapshot_barrier():
+                    if (
+                        self._state.get_live_media_generation(onion)
+                        == context_generation
+                    ):
+                        self._state.clear_retunnel_flow(onion)
             params['alias'] = alias
             params['onion'] = onion
             self._broadcast(
@@ -189,15 +205,24 @@ class ConnectionControllerRetunnelMixin(ConnectionControllerSupportMixin):
             )
             return
 
-        self._state.mark_retunnel_started(onion)
-        self._state.mark_retunnel_reconnect(onion)
-        self.disconnect(
-            onion,
-            initiated_by_self=True,
-            suppress_events=True,
-            origin=ConnectionOrigin.RETUNNEL,
-        )
-        self._mark_live_reconnect_grace(onion)
+        with self._operation_lock, self._state.snapshot_barrier():
+            if context_generation is not None and (
+                not self._state.is_live_active(onion)
+                or self._state.get_live_media_generation(onion) != context_generation
+                or not self._state.is_retunneling(onion)
+            ):
+                self._broadcast(LiveControlRejectedEvent(onion=onion))
+                return
+            if context_generation is None:
+                self._state.mark_retunnel_started(onion)
+            self._state.mark_retunnel_reconnect(onion)
+            self.disconnect(
+                onion,
+                initiated_by_self=True,
+                suppress_events=True,
+                origin=ConnectionOrigin.RETUNNEL,
+            )
+            self._mark_live_reconnect_grace(onion)
         self._sleep_retunnel_reconnect_delay()
         if self._stop_flag.is_set():
             return
@@ -205,4 +230,24 @@ class ConnectionControllerRetunnelMixin(ConnectionControllerSupportMixin):
             return
         if self._state.is_connected_or_pending(onion):
             return
+        if (
+            context_generation is not None
+            and self._state.get_live_media_generation(onion) != context_generation
+        ):
+            return
         self.connect_to(onion, origin=ConnectionOrigin.RETUNNEL)
+
+    def _matches_active_context(self, onion: str, context_generation: int) -> bool:
+        """Checks an active logical context while the caller holds the state barrier.
+
+        Args:
+            onion: Canonical original peer.
+            context_generation: Caller-captured logical context.
+        Returns:
+            bool: Whether route replacement can still target this active context.
+        """
+        return (
+            self._state.is_live_active(onion)
+            and self._state.get_live_media_generation(onion) == context_generation
+            and not self._state.is_retunneling(onion)
+        )

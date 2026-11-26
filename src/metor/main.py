@@ -1,65 +1,17 @@
-"""
-Module serving as the main entry point for the Metor application.
-Resolves the active frontend from the --ui argument, the METOR_UI environment
-variable, or the default terminal frontend, then delegates execution.
-"""
+"""Independent console and graphical entry points for Metor."""
 
+import ctypes
 import os
 import sys
-from typing import List, Optional, Tuple
-
-from metor.ui import get_frontend, get_registered_frontends
+from contextlib import redirect_stderr, redirect_stdout
 
 
-def _extract_ui_argument(argv: List[str]) -> Tuple[Optional[str], List[str]]:
-    """
-    Strips --ui / --ui=<id> tokens from argv and returns the requested id.
-
-    Args:
-        argv (List[str]): The raw argument vector excluding the program name.
-
-    Returns:
-        Tuple[Optional[str], List[str]]: The requested frontend id (or None when absent) and the filtered argv.
-    """
-    ui_id: Optional[str] = None
-    filtered: List[str] = []
-    index: int = 0
-    while index < len(argv):
-        token: str = argv[index]
-        if token == '--ui':
-            if index + 1 < len(argv):
-                ui_id = argv[index + 1]
-                index += 2
-                continue
-            index += 1
-            continue
-        if token.startswith('--ui='):
-            ui_id = token[len('--ui=') :]
-            index += 1
-            continue
-        filtered.append(token)
-        index += 1
-    return ui_id, filtered
-
-
-def _resolve_frontend_id(ui_argument: Optional[str]) -> str:
-    """
-    Resolves the effective frontend identifier with env fallback to 'terminal'.
-
-    Args:
-        ui_argument (Optional[str]): The --ui flag value, or None when absent.
-
-    Returns:
-        str: The effective frontend identifier.
-    """
-    if ui_argument is not None:
-        return ui_argument
-    return os.environ.get('METOR_UI', 'terminal')
+_WINDOWS_MESSAGE_BOX_ERROR_ICON: int = 0x10
 
 
 def main() -> None:
     """
-    Selects the active frontend and delegates the filtered argv to it.
+    Runs the base CLI without importing an interactive frontend.
 
     Args:
         None
@@ -67,22 +19,56 @@ def main() -> None:
     Returns:
         None
     """
-    ui_argument: Optional[str]
-    argv: List[str]
-    ui_argument, argv = _extract_ui_argument(sys.argv[1:])
+    argv: list[str] = sys.argv[1:]
+    from metor.cli.entry import run_cli
 
-    ui_id: str = _resolve_frontend_id(ui_argument)
+    sys.exit(run_cli(argv))
 
-    try:
-        frontend = get_frontend(ui_id)
-    except KeyError:
-        registered: str = ', '.join(sorted(get_registered_frontends())) or 'none'
-        sys.stderr.write(
-            f"Unknown frontend '{ui_id}'. Registered frontends: {registered}\n"
+
+def _run_gui_cli(argv: list[str]) -> int:
+    """Enter the Base CLI through its public frontend selection path.
+
+    Args:
+        argv: GUI chat arguments.
+
+    Returns:
+        int: CLI exit status.
+    """
+    from metor.cli.entry import run_cli
+
+    return run_cli(argv)
+
+
+def gui_main() -> None:
+    """Launch the GUI without a Windows console and report startup failure.
+
+    Args:
+        None
+
+    Returns:
+        None
+    """
+    argv: list[str] = ['chat', '--ui', 'gui', *sys.argv[1:]]
+    if sys.platform != 'win32' or (sys.stdout is not None and sys.stderr is not None):
+        sys.exit(_run_gui_cli(argv))
+
+    # pythonw-backed GUI scripts have no standard streams. Keep CLI and toolkit
+    # diagnostics bounded to a sink and show a fixed native failure message.
+    status: int = 1
+    with open(os.devnull, 'w', encoding='utf-8') as sink:
+        with redirect_stdout(sink), redirect_stderr(sink):
+            try:
+                status = _run_gui_cli(argv)
+            except BaseException:
+                status = 1
+    if status != 0:
+        ctypes.windll.user32.MessageBoxW(
+            None,
+            'Metor GUI could not start. Run metor chat --ui gui from PowerShell for diagnostics.',
+            'Metor GUI',
+            _WINDOWS_MESSAGE_BOX_ERROR_ICON,
         )
-        sys.exit(2)
-
-    sys.exit(frontend(argv))
+    sys.exit(status)
 
 
 if __name__ == '__main__':

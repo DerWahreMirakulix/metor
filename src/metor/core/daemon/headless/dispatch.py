@@ -4,6 +4,7 @@ import socket
 from typing import Optional
 
 from metor.core.api import (
+    ContactsDataEvent,
     AddProfileCommand,
     AddContactCommand,
     ClearContactsCommand,
@@ -19,6 +20,7 @@ from metor.core.api import (
     GetHistoryCommand,
     GetInboxCommand,
     GetMessagesCommand,
+    ListRetainedMessagesCommand,
     GetRawHistoryCommand,
     GetSettingCommand,
     GetSettingsListCommand,
@@ -41,6 +43,20 @@ from metor.data import DatabaseCorruptedError, SettingKey
 
 # Local Package Imports
 from metor.core.daemon.headless.protocols import HeadlessDaemonProtocol
+
+
+def is_profile_lifecycle_command(cmd: IpcCommand) -> bool:
+    """Reports commands whose catalog owner supplies its own lifecycle guards."""
+    return isinstance(
+        cmd,
+        (
+            AddProfileCommand,
+            MigrateProfileSecurityCommand,
+            RemoveProfileCommand,
+            RenameProfileCommand,
+            SetDefaultProfileCommand,
+        ),
+    )
 
 
 def _requires_headless_config_password(daemon: HeadlessDaemonProtocol) -> bool:
@@ -120,16 +136,7 @@ def process_command(
         daemon._send(conn, daemon._config_handler.handle(cmd))
         return
 
-    if isinstance(
-        cmd,
-        (
-            AddProfileCommand,
-            MigrateProfileSecurityCommand,
-            RemoveProfileCommand,
-            RenameProfileCommand,
-            SetDefaultProfileCommand,
-        ),
-    ):
+    if is_profile_lifecycle_command(cmd):
         daemon._send(conn, daemon._profile_handler.handle(cmd))
         return
 
@@ -146,6 +153,7 @@ def process_command(
             GetRawHistoryCommand,
             ClearHistoryCommand,
             GetMessagesCommand,
+            ListRetainedMessagesCommand,
             ClearMessagesCommand,
             GetInboxCommand,
             MarkReadCommand,
@@ -157,7 +165,24 @@ def process_command(
             return
 
         try:
-            daemon._send(conn, daemon._db_handler.handle(cmd))
+            result = daemon._db_handler.handle(cmd)
+            if isinstance(cmd, GetContactsListCommand):
+                # The private channel accepts one logical operation. Its remaining
+                # frozen pages follow on that same channel without another command.
+                while (
+                    isinstance(result, ContactsDataEvent)
+                    and result.next_offset is not None
+                ):
+                    result.request_id = cmd.request_id
+                    if not daemon._send(conn, result) or daemon._stop_event.is_set():
+                        return
+                    result = daemon._db_handler.handle(
+                        GetContactsListCommand(
+                            snapshot_id=result.snapshot_id, offset=result.next_offset
+                        )
+                    )
+                result.request_id = cmd.request_id
+            daemon._send(conn, result)
         except DatabaseCorruptedError:
             daemon._send(conn, create_event(EventType.DB_CORRUPTED))
         return

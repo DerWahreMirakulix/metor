@@ -1,5 +1,6 @@
 """Thin routing facade for the modular database command handlers."""
 
+import threading
 from typing import Callable, List, Optional
 
 from metor.core.api import (
@@ -8,11 +9,14 @@ from metor.core.api import (
     ClearHistoryCommand,
     ClearMessagesCommand,
     ClearProfileDbCommand,
+    DeleteMessageCommand,
     EventType,
     GetContactsListCommand,
     GetHistoryCommand,
     GetInboxCommand,
     GetMessagesCommand,
+    GetMessageOutcomeCommand,
+    ListRetainedMessagesCommand,
     GetRawHistoryCommand,
     IpcCommand,
     IpcEvent,
@@ -23,6 +27,7 @@ from metor.core.api import (
 )
 from metor.data import ContactManager, HistoryManager, MessageManager
 from metor.data.profile import ProfileManager
+from metor.core.daemon.handlers.snapshot_pages import SnapshotPages
 
 # Local Package Imports
 from metor.core.daemon.handlers.db.contacts import DatabaseCommandContactsMixin
@@ -50,6 +55,12 @@ class DatabaseCommandHandler(
         get_active_onions: Callable[[], List[str]],
         broadcast: Callable[[IpcEvent], None],
         send_read_receipt_cb: Optional[Callable[[str, List[str]], None]] = None,
+        release_consumed_voice_cb: Optional[Callable[[str, List[str]], None]] = None,
+        delete_persistent_blob_cb: Optional[Callable[[str], None]] = None,
+        operation_lock: Optional[threading.RLock] = None,
+        cancel_drop_requests_cb: Optional[
+            Callable[[tuple[tuple[str, str], ...]], None]
+        ] = None,
     ) -> None:
         """
         Initializes the DatabaseCommandHandler.
@@ -63,10 +74,17 @@ class DatabaseCommandHandler(
             broadcast (Callable[[IpcEvent], None]): Hook to broadcast side-effect events to all clients.
             send_read_receipt_cb (Optional[Callable[[str, List[str]], None]]): Hook to send transient
                 read receipts to a peer over its live session.
+            release_consumed_voice_cb (Optional[Callable]): Hook to release
+                consumed inbound LIVE Voice payloads.
+            delete_persistent_blob_cb (Optional[Callable]): Hook to delete one
+                Core-owned persistent Voice blob after explicit local removal.
+            operation_lock: Managed runtime barrier shared with DROP emission claims.
+            cancel_drop_requests_cb: Releases exact cancelled DROP request correlation.
 
         Returns:
             None
         """
+        self._contact_pages = SnapshotPages()
         self._pm: ProfileManager = pm
         self._cm: ContactManager = cm
         self._hm: HistoryManager = hm
@@ -76,6 +94,11 @@ class DatabaseCommandHandler(
         self._send_read_receipt_cb: Optional[Callable[[str, List[str]], None]] = (
             send_read_receipt_cb
         )
+        self._release_consumed_voice_cb = release_consumed_voice_cb
+        self._delete_persistent_blob_cb = delete_persistent_blob_cb
+        self._operation_lock = operation_lock or threading.RLock()
+        self._cancel_drop_requests_cb = cancel_drop_requests_cb
+        self._mm.finish_voice_deletions(self._delete_persistent_blob_cb)
 
     def handle(self, cmd: IpcCommand) -> IpcEvent:
         """
@@ -103,7 +126,8 @@ class DatabaseCommandHandler(
             return self._handle_clear_contacts(cmd)
 
         if isinstance(cmd, ClearProfileDbCommand):
-            return self._handle_clear_profile_db(cmd)
+            with self._operation_lock:
+                return self._handle_clear_profile_db(cmd)
 
         if isinstance(cmd, (GetHistoryCommand, GetRawHistoryCommand)):
             return self._handle_get_history(cmd)
@@ -111,11 +135,22 @@ class DatabaseCommandHandler(
         if isinstance(cmd, ClearHistoryCommand):
             return self._handle_clear_history(cmd)
 
+        if isinstance(cmd, GetMessageOutcomeCommand):
+            return self._handle_message_outcome(cmd)
+
         if isinstance(cmd, GetMessagesCommand):
             return self._handle_get_messages(cmd)
 
+        if isinstance(cmd, ListRetainedMessagesCommand):
+            return self._handle_list_retained_messages(cmd)
+
         if isinstance(cmd, ClearMessagesCommand):
-            return self._handle_clear_messages(cmd)
+            with self._operation_lock:
+                return self._handle_clear_messages(cmd)
+
+        if isinstance(cmd, DeleteMessageCommand):
+            with self._operation_lock:
+                return self._handle_delete_message(cmd)
 
         if isinstance(cmd, GetInboxCommand):
             return self._handle_get_inbox(cmd)

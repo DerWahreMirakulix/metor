@@ -3,69 +3,95 @@
 import socket
 import threading
 from typing import Dict, List, Optional, Set, Tuple
+from weakref import WeakSet
+
+from metor.core.daemon.managed.writer import BoundedSocketWriter
 
 from metor.utils import Constants
+from metor.core.api import Delivery
 
 
 class StateTrackerMessagesMixin:
     """Encapsulates in-flight message and raw socket state."""
 
-    _lock: threading.Lock
+    def retire_connection(
+        self, conn: socket.socket, *, preserve_final: bool = False
+    ) -> None:
+        """Delegates exact socket retirement to the state coordinator.
+
+        Args:
+            conn (socket.socket): Retiring transport.
+            preserve_final (bool): Preserve admitted local final control.
+
+        Returns:
+            None
+        """
+        raise NotImplementedError
+
+    _lock: threading.RLock
     _connections: Dict[str, socket.socket]
     _pending_connections: Dict[str, socket.socket]
+    _pending_connection_tokens: Dict[str, str]
     _outbound_sockets: Dict[str, socket.socket]
     _unacked_messages: Dict[str, Dict[str, Tuple[str, str]]]
-    _message_request_ids: Dict[str, str]
+    _message_request_ids: Dict[Tuple[str, str], Tuple[Delivery, str]]
     _recent_live_msg_ids: Dict[str, List[str]]
     _unauthenticated_connections: Set[socket.socket]
-    _locally_terminated_sockets: Set[socket.socket]
+    _locally_terminated_sockets: WeakSet[socket.socket]
+    _outbound_attempts: Set[str]
+    _outbound_attempt_ids: Dict[str, str]
+    _scheduled_auto_reconnects: Set[str]
+    _live_reconnect_grace: Dict[str, float]
+    _retunnel_in_progress: Set[str]
+    _socket_write_locks: Dict[socket.socket, threading.Lock]
+    _socket_writers: Dict[socket.socket, BoundedSocketWriter]
+    _live_generations: Dict[Tuple[str, str], int]
+    _next_live_generation: int
+    _accepted_live_contexts: Dict[str, int]
+    _accepted_live_context_deadlines: Dict[str, float]
 
     def remember_message_request_id(
-        self,
-        msg_id: str,
-        request_id: Optional[str],
+        self, peer: str, msg_id: str, request_id: Optional[str], delivery: Delivery
     ) -> None:
-        """
-        Remembers which IPC request created one logical outbound message.
+        """Bind request correlation to an exact outbound identity and current delivery."""
+        if request_id is not None:
+            with self._lock:
+                self._message_request_ids[(peer, msg_id)] = (delivery, request_id)
 
-        Args:
-            msg_id (str): The logical message identifier.
-            request_id (Optional[str]): The originating IPC request identifier.
-
-        Returns:
-            None
-        """
-        if request_id is None:
-            return
-
+    def promote_message_request(self, peer: str, msg_id: str) -> None:
+        """Follow an admitted LIVE request as its same-identity receipt becomes DROP."""
         with self._lock:
-            self._message_request_ids[msg_id] = request_id
+            item = self._message_request_ids.get((peer, msg_id))
+            if item is not None:
+                self._message_request_ids[(peer, msg_id)] = (Delivery.DROP, item[1])
 
-    def pop_message_request_id(self, msg_id: str) -> Optional[str]:
-        """
-        Retrieves and removes the originating IPC request identifier for one message.
-
-        Args:
-            msg_id (str): The logical message identifier.
-
-        Returns:
-            Optional[str]: The originating request identifier, if one was tracked.
-        """
+    def pop_message_request_id(self, peer: str, msg_id: str) -> Optional[str]:
+        """Consume correlation only for the acknowledged peer and message."""
         with self._lock:
-            return self._message_request_ids.pop(msg_id, None)
+            item = self._message_request_ids.pop((peer, msg_id), None)
+            return item[1] if item is not None else None
 
-    def clear_message_request_id(self, msg_id: str) -> None:
-        """
-        Removes any tracked originating request identifier for one message.
-
-        Args:
-            msg_id (str): The logical message identifier.
-
-        Returns:
-            None
-        """
+    def _forget_requests(
+        self, identities: tuple[tuple[str, str], ...], delivery: Delivery
+    ) -> None:
+        """Forget a cancelled delivery while preserving a replacement in another mode."""
         with self._lock:
-            self._message_request_ids.pop(msg_id, None)
+            for identity in identities:
+                current = self._message_request_ids.get(identity)
+                if current is not None and current[0] is delivery:
+                    del self._message_request_ids[identity]
+
+    def forget_cancelled_drop_requests(
+        self, identities: tuple[tuple[str, str], ...]
+    ) -> None:
+        """Forget only the cancelled outbound DROP identities."""
+        self._forget_requests(identities, Delivery.DROP)
+
+    def forget_cancelled_live_requests(self, onion: str, msg_ids: list[str]) -> None:
+        """Forget only the cancelled outbound LIVE identities."""
+        self._forget_requests(
+            tuple((onion, msg_id) for msg_id in msg_ids), Delivery.LIVE
+        )
 
     def pop_unacked_messages(self, onion: str) -> Dict[str, Tuple[str, str]]:
         """
@@ -138,6 +164,10 @@ class StateTrackerMessagesMixin:
         """
         with self._lock:
             self._unacked_messages.setdefault(onion, {})[msg_id] = (msg, timestamp)
+            key = (onion, msg_id)
+            if key not in self._live_generations:
+                self._live_generations[key] = self._next_live_generation
+                self._next_live_generation += 1
 
     def remove_unacked_message(
         self, onion: str, msg_id: str
@@ -266,18 +296,54 @@ class StateTrackerMessagesMixin:
 
     def get_tracked_live_socket_count(self) -> int:
         """
-        Returns the total number of live sockets currently tracked by the daemon.
+        Returns the number of distinct peer sockets owned by the daemon.
 
         Args:
             None
 
         Returns:
-            int: Active, pending, outbound, and unauthenticated live sockets.
+            int: Active, pending, outbound, unauthenticated, and dedicated
+                DROP/CALL sockets, counted once across ownership transitions.
         """
         with self._lock:
-            return (
-                len(self._connections)
-                + len(self._pending_connections)
-                + len(self._outbound_sockets)
-                + len(self._unauthenticated_connections)
+            return len(
+                set(self._connections.values())
+                | set(self._pending_connections.values())
+                | set(self._outbound_sockets.values())
+                | self._unauthenticated_connections
+                | set(self._socket_writers)
             )
+
+    def abort_all_sockets(self) -> None:
+        """Closes every tracked peer socket without protocol or reliability work.
+
+        Args:
+            None
+
+        Returns:
+            None
+        """
+        with self._lock:
+            sockets = (
+                set(self._connections.values())
+                | set(self._pending_connections.values())
+                | set(self._outbound_sockets.values())
+                | set(self._unauthenticated_connections)
+                | set(self._socket_writers)
+            )
+            self._connections.clear()
+            self._pending_connections.clear()
+            self._pending_connection_tokens.clear()
+            self._outbound_sockets.clear()
+            self._unauthenticated_connections.clear()
+            self._outbound_attempts.clear()
+            self._outbound_attempt_ids.clear()
+            self._scheduled_auto_reconnects.clear()
+            self._live_reconnect_grace.clear()
+            self._retunnel_in_progress.clear()
+            self._socket_write_locks.clear()
+            self._live_generations.clear()
+            self._accepted_live_contexts.clear()
+            self._accepted_live_context_deadlines.clear()
+        for sock in sockets:
+            self.retire_connection(sock)
