@@ -27,6 +27,7 @@ from metor.core.api import (
 )
 from metor.data import ContactManager, HistoryManager, MessageManager
 from metor.data.profile import ProfileManager
+from metor.core.daemon.handlers.snapshot_pages import SnapshotPages
 
 # Local Package Imports
 from metor.core.daemon.handlers.db.contacts import DatabaseCommandContactsMixin
@@ -83,6 +84,7 @@ class DatabaseCommandHandler(
         Returns:
             None
         """
+        self._contact_pages = SnapshotPages()
         self._pm: ProfileManager = pm
         self._cm: ContactManager = cm
         self._hm: HistoryManager = hm

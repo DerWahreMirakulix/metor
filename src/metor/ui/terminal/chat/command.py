@@ -10,7 +10,6 @@ from metor.core.api import (
     DisconnectCommand,
     FallbackCommand,
     GetConnectionsCommand,
-    GetContactsListCommand,
     GetInboxCommand,
     GetTransportStateCommand,
     MarkReadCommand,
@@ -235,7 +234,7 @@ class CommandDispatcher:
         subcmd: str = parts[1] if len(parts) > 1 else 'list'
 
         if subcmd == 'list' and len(parts) <= 2:
-            self._ipc.send_command(GetContactsListCommand(chat_mode=True))
+            self._ipc.send_command(self._session.begin_contact_listing())
         elif subcmd == 'add':
             if len(parts) == 2 and self._session.focused_alias:
                 self._ipc.send_command(

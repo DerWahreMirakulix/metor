@@ -4883,6 +4883,19 @@
               "const": "contacts_data",
               "type": "string"
             },
+            "next_offset": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "page_offset": {
+              "type": "integer"
+            },
             "profile": {
               "type": "string"
             },
@@ -4928,6 +4941,16 @@
                 "type": "object"
               },
               "type": "array"
+            },
+            "snapshot_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
@@ -6180,6 +6203,9 @@
               "const": "get_contacts_list",
               "type": "string"
             },
+            "offset": {
+              "type": "integer"
+            },
             "onions": {
               "anyOf": [
                 {
@@ -6194,6 +6220,16 @@
               ]
             },
             "request_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "snapshot_id": {
               "anyOf": [
                 {
                   "type": "string"

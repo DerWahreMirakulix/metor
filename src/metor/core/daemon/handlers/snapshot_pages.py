@@ -6,10 +6,15 @@ from secrets import token_hex
 from threading import Lock
 from typing import TypeVar
 
-from metor.core.api import RuntimeSnapshotEvent, RuntimeSnapshotUnavailableEvent
+from metor.core.api import (
+    ContactsDataEvent,
+    RuntimeSnapshotEvent,
+    RuntimeSnapshotUnavailableEvent,
+)
 from metor.shared.constants import Constants
 
 Row = TypeVar('Row')
+Snapshot = RuntimeSnapshotEvent | ContactsDataEvent
 
 
 class SnapshotPages:
@@ -17,10 +22,10 @@ class SnapshotPages:
 
     def __init__(self) -> None:
         """Start with an empty inventory cache for this daemon runtime."""
-        self._snapshots: OrderedDict[str, RuntimeSnapshotEvent] = OrderedDict()
+        self._snapshots: OrderedDict[str, Snapshot] = OrderedDict()
         self._lock = Lock()
 
-    def begin(self, snapshot: RuntimeSnapshotEvent) -> RuntimeSnapshotEvent:
+    def begin(self, snapshot: Snapshot) -> Snapshot:
         """Publish the first bounded page and retain only inventories needing another."""
         identity = token_hex(16)
         page = self._page(snapshot, identity, 0)
@@ -33,7 +38,7 @@ class SnapshotPages:
 
     def read(
         self, identity: str, offset: int
-    ) -> RuntimeSnapshotEvent | RuntimeSnapshotUnavailableEvent:
+    ) -> Snapshot | RuntimeSnapshotUnavailableEvent:
         """Return a page of that exact inventory, or require a fresh first page."""
         with self._lock:
             snapshot = self._snapshots.get(identity)
@@ -45,8 +50,10 @@ class SnapshotPages:
         return self._page(snapshot, identity, offset)
 
     @staticmethod
-    def _size(snapshot: RuntimeSnapshotEvent) -> int:
+    def _size(snapshot: Snapshot) -> int:
         """Count every row in traversal order."""
+        if isinstance(snapshot, ContactsDataEvent):
+            return len(snapshot.saved) + len(snapshot.discovered)
         return (
             len(snapshot.pending)
             + len(snapshot.live_contexts)
@@ -55,9 +62,7 @@ class SnapshotPages:
         )
 
     @classmethod
-    def _page(
-        cls, snapshot: RuntimeSnapshotEvent, identity: str, offset: int
-    ) -> RuntimeSnapshotEvent:
+    def _page(cls, snapshot: Snapshot, identity: str, offset: int) -> Snapshot:
         """Select consecutive entries that fit both the item and wire budgets."""
         total = cls._size(snapshot)
         count = min(total - offset, Constants.SNAPSHOT_PAGE_ITEMS)
@@ -74,21 +79,29 @@ class SnapshotPages:
                 return chunk
 
             end = offset + count
-            page = replace(
-                snapshot,
-                pending=take(snapshot.pending),
-                live_contexts=take(snapshot.live_contexts),
-                conversations=take(snapshot.conversations),
-                contacts=take(snapshot.contacts),
-                snapshot_id=identity if total > count else None,
-                page_offset=offset,
-                next_offset=end if end < total else None,
-            )
-            # Reserve the IPC envelope and each recipient's projected invitation
-            # handles, which are assigned after the common page is selected.
-            projected_overhead = 1024 + 64 * (
-                len(page.pending) + len(page.live_contexts)
-            )
+            page: Snapshot
+            if isinstance(snapshot, ContactsDataEvent):
+                page = replace(
+                    snapshot,
+                    saved=take(snapshot.saved),
+                    discovered=take(snapshot.discovered),
+                )
+                projected_overhead = 1024
+            else:
+                page = replace(
+                    snapshot,
+                    pending=take(snapshot.pending),
+                    live_contexts=take(snapshot.live_contexts),
+                    conversations=take(snapshot.conversations),
+                    contacts=take(snapshot.contacts),
+                )
+                # Recipient-specific invitation handles are assigned after paging.
+                projected_overhead = 1024 + 64 * (
+                    len(page.pending) + len(page.live_contexts)
+                )
+            page.snapshot_id = identity if total > count else None
+            page.page_offset = offset
+            page.next_offset = end if end < total else None
             if (
                 len(page.to_json().encode('utf-8')) + projected_overhead
                 <= Constants.SNAPSHOT_PAGE_BYTES

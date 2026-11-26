@@ -200,7 +200,7 @@ def format_contacts(event: ContactsDataEvent, chat_mode: bool) -> str:
                 f'   {Theme.GREEN}{escape_terminal_text(entry.alias)}{Theme.RESET}'
                 f' -> {escape_terminal_text(entry.onion)}'
             )
-    else:
+    elif not event.page_offset:
         lines.append(f'No contacts in address book{profile_suffix}.')
 
     if event.discovered:

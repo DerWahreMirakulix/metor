@@ -32,6 +32,32 @@ from metor.versioning import IPC_PROTOCOL_MIN_SUPPORTED, IPC_PROTOCOL_VERSION
 class BootstrapTransportTests(unittest.TestCase):
     """Scripted peer evidence is distinct from actual Core/Tor integration."""
 
+    def test_expired_tls_deadline_preserves_already_buffered_data(self) -> None:
+        from metor.shared.ipc_tls import authenticate_daemon
+
+        profile = Path(self.enterContext(PrivateTemporaryDirectory()))
+        tls = daemon_tls_context(profile)
+        tls.sslsocket_class = ssl.SSLSocket
+        remote, local = socket.socketpair()
+        self.addCleanup(remote.close)
+        self.addCleanup(local.close)
+        remote.settimeout(3)
+        local.settimeout(3)
+
+        def serve() -> None:
+            with tls.wrap_socket(remote, server_side=True) as stream:
+                stream.sendall(b'ab')
+
+        worker = threading.Thread(target=serve, daemon=True)
+        worker.start()
+        with authenticate_daemon(local, read_daemon_certificate(profile)) as client:
+            self.assertEqual(client.recv(1), b'a')
+            with self.assertRaises(TimeoutError):
+                client.read_before(1, 0)
+            self.assertEqual(client.recv(1), b'b')
+        worker.join(3)
+        self.assertFalse(worker.is_alive())
+
     def test_wrong_daemon_certificate_rejects_socket_before_prompt(self) -> None:
         """A different valid profile listener cannot obtain the selected profile's credentials."""
         from metor.client import MetorClient

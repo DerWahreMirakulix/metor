@@ -1,6 +1,7 @@
 """Exercise the remote SDK over a disposable, loopback-only OpenSSH forward."""
 
 import os
+from contextlib import suppress
 from pathlib import Path
 import shutil
 import signal
@@ -42,7 +43,7 @@ class SshTunnelTests(unittest.TestCase):
         root = Path(self.enterContext(PrivateTemporaryDirectory()))
         other = Path(self.enterContext(PrivateTemporaryDirectory()))
         daemon_tls_context(other)
-        for name in ('host', 'user'):
+        for name in ('host', 'user', 'ca'):
             subprocess.run(
                 [
                     keygen,
@@ -63,11 +64,31 @@ class SshTunnelTests(unittest.TestCase):
                 timeout=10,
             )
         username = pwd.getpwuid(os.geteuid()).pw_name
+        subprocess.run(
+            [
+                keygen,
+                '-q',
+                '-s',
+                str(root / 'ca'),
+                '-I',
+                'metor-test',
+                '-n',
+                username,
+                '-V',
+                '-1m:+5m',
+                str(root / 'user.pub'),
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=True,
+            timeout=10,
+        )
         config = root / 'sshd_config'
         config.write_text(
-            f'HostKey "{root / "host"}"\nAuthorizedKeysFile "{root / "user.pub"}"\n'
-            # The 0700 fixture can reside under /tmp, outside the account's home.
-            'StrictModes no\nUsePAM no\nPasswordAuthentication no\nKbdInteractiveAuthentication no\n'
+            f'HostKey "{root / "host"}"\nTrustedUserCAKeys "{root / "ca.pub"}"\n'
+            f'AuthorizedKeysFile none\nAllowUsers {username}\n'
+            'UsePAM no\nPasswordAuthentication no\nKbdInteractiveAuthentication no\n'
             'AuthenticationMethods publickey\nPermitRootLogin no\nAllowTcpForwarding local\n'
             f'PermitOpen {address}:{profile.port}\n'
             'AllowAgentForwarding no\nAllowStreamLocalForwarding no\nMaxSessions 0\n',
@@ -77,15 +98,15 @@ class SshTunnelTests(unittest.TestCase):
         known.write_text(
             'metor-test ' + (root / 'host.pub').read_text('ascii'), encoding='ascii'
         )
-        with socket.socket() as reservation:
-            reservation.bind((address, 0))
-            local_port = reservation.getsockname()[1]
         # Supplying one accepted TCP connection to sshd's inetd mode keeps it
         # outside system service management and prevents any other SSH sessions.
         with socket.socket() as listener:
             listener.bind((address, 0))
             listener.listen(1)
             listener.settimeout(10)
+            with socket.socket() as reservation:
+                reservation.bind((address, 0))
+                local_port = reservation.getsockname()[1]
             client_process = subprocess.Popen(
                 [
                     ssh,
@@ -173,9 +194,11 @@ class SshTunnelTests(unittest.TestCase):
     def _stop(process: subprocess.Popen[bytes]) -> None:
         """Reap the temporary SSH subprocess and any connection children."""
         if process.poll() is None:
-            os.killpg(process.pid, signal.SIGTERM)
+            with suppress(ProcessLookupError):
+                os.killpg(process.pid, signal.SIGTERM)
             try:
                 process.wait(5)
             except subprocess.TimeoutExpired:
-                os.killpg(process.pid, signal.SIGKILL)
+                with suppress(ProcessLookupError):
+                    os.killpg(process.pid, signal.SIGKILL)
                 process.wait(5)

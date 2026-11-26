@@ -14,6 +14,7 @@ from metor.core.api import (
     create_event,
 )
 from metor.data.contact import ContactOperationResult, ContactOperationType
+from metor.core.daemon.handlers.snapshot_pages import SnapshotPages
 
 # Local Package Imports
 from metor.core.daemon.handlers.db.support import DatabaseCommandHandlerSupportMixin
@@ -50,6 +51,8 @@ CONTACT_EVENT_TYPES: dict[ContactOperationType, EventType] = {
 class DatabaseCommandContactsMixin(DatabaseCommandHandlerSupportMixin):
     """Handles address-book and alias database commands."""
 
+    _contact_pages: SnapshotPages
+
     @staticmethod
     def _create_contact_event(result: ContactOperationResult) -> IpcEvent:
         """
@@ -74,8 +77,10 @@ class DatabaseCommandContactsMixin(DatabaseCommandHandlerSupportMixin):
         Returns:
             IpcEvent: The contact list event DTO.
         """
+        if cmd.snapshot_id is not None:
+            return self._contact_pages.read(cmd.snapshot_id, cmd.offset)
         snapshot = self._cm.get_contacts_data(cmd.onions)
-        return ContactsDataEvent(
+        result = ContactsDataEvent(
             saved=[
                 ContactEntry(alias=entry.alias, onion=entry.onion)
                 for entry in snapshot.saved
@@ -87,6 +92,7 @@ class DatabaseCommandContactsMixin(DatabaseCommandHandlerSupportMixin):
             profile=snapshot.profile,
             checked_onions=cmd.onions,
         )
+        return self._contact_pages.begin(result) if cmd.onions is None else result
 
     def _handle_add_contact(self, cmd: AddContactCommand) -> IpcEvent:
         """

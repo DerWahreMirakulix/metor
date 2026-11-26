@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from typing import Optional
 
 # Local Package Imports
-from metor.core.api.base import IpcCommand
+from metor.core.api.base import IpcCommand, validate_snapshot_cursor
 from metor.core.api.codes import CommandType
 from metor.core.api.registry import register_command
 from metor.shared.constants import Constants
@@ -17,6 +17,8 @@ class GetContactsListCommand(IpcCommand):
 
     chat_mode: bool = False
     onions: Optional[list[str]] = None
+    snapshot_id: Optional[str] = None
+    offset: int = 0
     command_type: CommandType = field(
         default=CommandType.GET_CONTACTS_LIST,
         init=False,
@@ -24,8 +26,10 @@ class GetContactsListCommand(IpcCommand):
 
     def __post_init__(self) -> None:
         """Limit identity-scoped lookups to one bounded contact selection."""
+        validate_snapshot_cursor(self.snapshot_id, self.offset)
         if self.onions is not None and (
-            len(self.onions) > Constants.CONTACT_RECHECK_ITEMS
+            self.snapshot_id is not None
+            or len(self.onions) > Constants.CONTACT_RECHECK_ITEMS
             or any(not 0 < len(onion) <= 62 for onion in self.onions)
         ):
             raise ValueError('Invalid contact selection')

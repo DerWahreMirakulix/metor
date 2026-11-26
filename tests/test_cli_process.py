@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import socket
+import ssl
 import subprocess
 import sys
 from tempfile import TemporaryDirectory
@@ -334,6 +335,12 @@ class CliProcessTests(unittest.TestCase):
 
     def test_eof_or_malformed_result_is_unknown_and_never_success(self) -> None:
         """Neither EOF nor an invalid event confirms a command or prints peer data."""
+        from private_fixtures import PrivateTemporaryDirectory
+        from metor.data.profile.ipc_identity import daemon_tls_context
+
+        profile = Path(self.enterContext(PrivateTemporaryDirectory()))
+        tls = daemon_tls_context(profile)
+        tls.sslsocket_class = ssl.SSLSocket
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
             listener.bind((Constants.LOCALHOST, 0))
             listener.listen(1)
@@ -344,7 +351,10 @@ class CliProcessTests(unittest.TestCase):
             def close_after_frame() -> None:
                 """Read a real request and lose its result at the transport boundary."""
                 for reply in replies:
-                    with listener.accept()[0] as connection:
+                    with (
+                        listener.accept()[0] as raw,
+                        tls.wrap_socket(raw, server_side=True) as connection,
+                    ):
                         connection.settimeout(PROCESS_WAIT_SECONDS)
                         data = bytearray()
                         while b'\n' not in data:
@@ -358,6 +368,12 @@ class CliProcessTests(unittest.TestCase):
             self.assertEqual(
                 self.run_cli(
                     'profiles', 'add', 'Uncertain', '--remote', '--port', str(port)
+                ).returncode,
+                0,
+            )
+            self.assertEqual(
+                self.run_cli(
+                    'profiles', 'trust', 'Uncertain', str(profile / 'ipc-daemon.crt')
                 ).returncode,
                 0,
             )

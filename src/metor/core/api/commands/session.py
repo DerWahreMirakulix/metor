@@ -6,7 +6,7 @@ from typing import Optional
 from metor.shared import Constants
 
 # Local Package Imports
-from metor.core.api.base import IpcCommand
+from metor.core.api.base import validate_snapshot_cursor, IpcCommand
 from metor.core.api.codes import CommandType
 from metor.core.api.codes import (
     ClientUnlockMethod,
@@ -79,13 +79,7 @@ class GetRuntimeSnapshotCommand(IpcCommand):
 
     def __post_init__(self) -> None:
         """Require one coherent first-page or continuation request."""
-        if type(self.offset) is not int or self.offset < 0:
-            raise ValueError('Invalid snapshot offset')
-        if self.snapshot_id is None:
-            if self.offset:
-                raise ValueError('Missing snapshot identity')
-        elif len(self.snapshot_id) != 32 or not self.offset:
-            raise ValueError('Invalid snapshot continuation')
+        validate_snapshot_cursor(self.snapshot_id, self.offset)
 
 
 @register_command(CommandType.REGISTER_LIVE_CONSUMER)

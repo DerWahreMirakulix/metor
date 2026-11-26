@@ -1023,11 +1023,13 @@ Requests the current connection state.
 
 Requests the structured address book.
 
-| Field        | Type                     | Default |
-| ------------ | ------------------------ | ------- |
-| `request_id` | `Union[str, None]`       | `None`  |
-| `chat_mode`  | `bool`                   | `False` |
-| `onions`     | `Union[List[str], None]` | `None`  |
+| Field         | Type                     | Default |
+| ------------- | ------------------------ | ------- |
+| `request_id`  | `Union[str, None]`       | `None`  |
+| `chat_mode`   | `bool`                   | `False` |
+| `onions`      | `Union[List[str], None]` | `None`  |
+| `snapshot_id` | `Union[str, None]`       | `None`  |
+| `offset`      | `int`                    | `0`     |
 
 **Wire Value:** `get_contacts_list`
 
@@ -3277,6 +3279,9 @@ Returns the structured address book.
 | `discovered`     | `List[ContactEntry]`     | Required |
 | `profile`        | `str`                    | Required |
 | `checked_onions` | `Union[List[str], None]` | `None`   |
+| `snapshot_id`    | `Union[str, None]`       | `None`   |
+| `page_offset`    | `int`                    | `0`      |
+| `next_offset`    | `Union[int, None]`       | `None`   |
 
 **Wire Value:** `contacts_data`
 

@@ -100,7 +100,7 @@ class HeadlessDaemonProtocol(Protocol):
         """
         ...
 
-    def _send(self, conn: socket.socket, event: IpcEvent) -> None:
+    def _send(self, conn: socket.socket, event: IpcEvent) -> bool:
         """
         Sends one IPC event back to the connected headless client.
 
@@ -109,7 +109,7 @@ class HeadlessDaemonProtocol(Protocol):
             event (IpcEvent): The event to serialize and send.
 
         Returns:
-            None
+            bool: Whether the frame reached the connected socket.
         """
         ...
 

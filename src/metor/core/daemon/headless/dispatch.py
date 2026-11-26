@@ -4,6 +4,7 @@ import socket
 from typing import Optional
 
 from metor.core.api import (
+    ContactsDataEvent,
     AddProfileCommand,
     AddContactCommand,
     ClearContactsCommand,
@@ -164,7 +165,24 @@ def process_command(
             return
 
         try:
-            daemon._send(conn, daemon._db_handler.handle(cmd))
+            result = daemon._db_handler.handle(cmd)
+            if isinstance(cmd, GetContactsListCommand):
+                # The private channel accepts one logical operation. Its remaining
+                # frozen pages follow on that same channel without another command.
+                while (
+                    isinstance(result, ContactsDataEvent)
+                    and result.next_offset is not None
+                ):
+                    result.request_id = cmd.request_id
+                    if not daemon._send(conn, result) or daemon._stop_event.is_set():
+                        return
+                    result = daemon._db_handler.handle(
+                        GetContactsListCommand(
+                            snapshot_id=result.snapshot_id, offset=result.next_offset
+                        )
+                    )
+                result.request_id = cmd.request_id
+            daemon._send(conn, result)
         except DatabaseCorruptedError:
             daemon._send(conn, create_event(EventType.DB_CORRUPTED))
         return

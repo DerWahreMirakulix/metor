@@ -73,7 +73,7 @@ from metor.versioning import (
 # Local Package Imports
 from metor.core.daemon.managed.outbox import OutboxWorker
 from .snapshot import RuntimeSnapshotProjectionMixin
-from .snapshot_pages import SnapshotPages
+from metor.core.daemon.handlers.snapshot_pages import SnapshotPages
 from .text import TextCommandHandler
 from .calls import CallCommandHandler, CALL_COMMANDS
 

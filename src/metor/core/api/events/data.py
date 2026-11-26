@@ -61,6 +61,9 @@ class ContactsDataEvent(NestedEntryCastingMixin, IpcEvent):
     discovered: List[ContactEntry]
     profile: str
     checked_onions: Optional[List[str]] = None
+    snapshot_id: Optional[str] = None
+    page_offset: int = 0
+    next_offset: Optional[int] = None
     _nested_entry_types: ClassVar[Mapping[str, type[object]]] = {
         'saved': ContactEntry,
         'discovered': ContactEntry,

@@ -57,9 +57,15 @@ class CliLiteralBoundaryTests(unittest.TestCase):
         """The registered pre-boundary option reaches only the final operation."""
         dispatcher, args = self.dispatcher(['purge', '--nuke-remote'])
         self.assertTrue(args.nuke_remote)
-        with patch.object(CommandHandlers, 'handle_purge') as operation:
-            self.assertEqual(dispatcher.dispatch(), 0)
-        operation.assert_called_once_with(True)
+        for expected in (0, 1):
+            with (
+                self.subTest(expected=expected),
+                patch.object(
+                    CommandHandlers, 'handle_purge', return_value=expected
+                ) as operation,
+            ):
+                self.assertEqual(dispatcher.dispatch(), expected)
+                operation.assert_called_once_with(True)
 
     def test_purge_help_exits_without_profile_or_operation(self) -> None:
         """The real entry help path remains side-effect free."""

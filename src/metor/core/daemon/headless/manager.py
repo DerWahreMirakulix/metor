@@ -365,7 +365,7 @@ class HeadlessDaemon:
         """
         handle_client(self, conn)
 
-    def _send(self, conn: socket.socket, event: IpcEvent) -> None:
+    def _send(self, conn: socket.socket, event: IpcEvent) -> bool:
         """
         Serializes and pushes the command response back to the client UI.
 
@@ -374,13 +374,14 @@ class HeadlessDaemon:
             event (IpcEvent): The event payload.
 
         Returns:
-            None
+            bool: Whether the frame reached the connected socket.
         """
         try:
             msg: bytes = (event.to_json() + '\n').encode('utf-8')
             conn.sendall(msg)
+            return True
         except OSError:
-            pass
+            return False
 
     def _validate_password(self) -> Optional[IpcEvent]:
         """

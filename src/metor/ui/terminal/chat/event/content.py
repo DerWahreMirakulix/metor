@@ -24,6 +24,7 @@ from metor.core.api import (
     MessagesDataEvent,
     ProfilesDataEvent,
     ReadReceiptEvent,
+    RuntimeSnapshotUnavailableEvent,
     MessageReceivedEvent,
     TransportStateEvent,
     UnreadMessageEntry,
@@ -51,6 +52,14 @@ def handle_content_event(handler: EventHandlerProtocol, event: IpcEvent) -> bool
     Returns:
         bool: True when the event was handled.
     """
+    if isinstance(event, RuntimeSnapshotUnavailableEvent):
+        if handler._session.abandon_contact_listing(event.request_id):
+            handler._renderer.print_message(
+                'Contact listing expired. Run /contacts list again.',
+                msg_type=ChatMessageType.STATUS,
+            )
+            return True
+
     if isinstance(event, InitEvent):
         handler._session.my_onion = event.onion or 'unknown'
         handler._init_event.set()
@@ -68,6 +77,18 @@ def handle_content_event(handler: EventHandlerProtocol, event: IpcEvent) -> bool
         ),
     ):
         if isinstance(event, ContactsDataEvent):
+            try:
+                accepted, following = handler._session.accept_contact_page(event)
+            except ValueError:
+                handler._renderer.print_message(
+                    'Contact listing changed. Run /contacts list again.',
+                    msg_type=ChatMessageType.STATUS,
+                )
+                return True
+            if not accepted:
+                return True
+            if following is not None:
+                handler._ipc.send_command(following)
             for contact_entry in event.saved:
                 handler._remember_peer(contact_entry.alias, contact_entry.onion)
             for discovered_entry in event.discovered:

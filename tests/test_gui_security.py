@@ -350,6 +350,121 @@ class GuiSecurityIntegrationTests(unittest.TestCase):
         complete = self.client.runtime_snapshot()
         assert complete is not None
         self.assertEqual({row.onion: row.alias for row in complete.contacts}, expected)
+        self.assert_text_frontends_list_all_contacts(expected)
+
+    def assert_text_frontends_list_all_contacts(self, expected: dict[str, str]) -> None:
+        """Invoke the real CLI and Terminal list actions over the encrypted runtime socket."""
+        from metor.cli.proxy import CliProxy
+        from metor.ui.terminal.chat.command import CommandDispatcher
+        from metor.ui.terminal.chat.event.handler import EventHandler
+        from metor.ui.terminal.chat.session import Session
+
+        pm = self.daemon._pm
+        proxy = CliProxy(pm)
+        with (
+            patch.object(pm, 'get_daemon_port', return_value=self.daemon._ipc.port),
+            patch(
+                'metor.cli.ipc.request.session.prompt_session_auth_proof',
+                side_effect=lambda _prompt, challenge, salt: build_session_auth_proof(
+                    'test-password', challenge, salt
+                ),
+            ),
+        ):
+            listing = proxy.contacts_list()
+        self.assertFalse(proxy.consume_error_flag())
+        cli_rows = [
+            line.split(' -> ')[1] for line in listing.splitlines() if ' -> ' in line
+        ]
+        self.assertEqual(len(cli_rows), len(expected))
+        self.assertEqual(set(cli_rows), set(expected))
+
+        session, renderer = Session(), Mock()
+        received: list[ContactsDataEvent] = []
+        complete = threading.Event()
+
+        def on_contact(event: IpcEvent) -> None:
+            if isinstance(event, ContactsDataEvent):
+                received.append(event)
+                handler.handle(event)
+                if event.next_offset is None:
+                    complete.set()
+
+        terminal = self.make_client(on_contact)
+        handler = EventHandler(
+            terminal._ipc,
+            session,
+            renderer,
+            threading.Event(),
+            threading.Event(),
+            lambda: 0.0,
+            lambda: False,
+        )
+        dispatcher = CommandDispatcher(terminal._ipc, session, renderer)
+        self.assertTrue(dispatcher.dispatch('/contacts list'))
+        self.assertTrue(complete.wait(60))
+        self.assertGreater(len(received), 1)
+        self.assertEqual(len({page.snapshot_id for page in received}), 1)
+        self.assertTrue(
+            all(
+                len(page.to_json().encode()) <= Constants.SNAPSHOT_PAGE_BYTES
+                for page in received
+            )
+        )
+        rendered = [
+            line.split(' -> ')[1]
+            for call in renderer.print_message.call_args_list
+            for line in call.args[0].splitlines()
+            if ' -> ' in line
+        ]
+        self.assertEqual(len(rendered), len(expected))
+        self.assertEqual(set(rendered), set(expected))
+        self.assertEqual(rendered, cli_rows)
+
+    def test_offline_cli_contact_list_finishes_on_the_original_headless_channel(
+        self,
+    ) -> None:
+        """The temporary Core stays alive across the full explicit CLI listing."""
+        from metor.cli.proxy import CliProxy
+
+        offline = ProfileManager('offline-book')
+        offline.initialize()
+        key = KeyManager(offline, 'offline-password').get_database_key()
+        assert key is not None
+        self.addCleanup(SqlManager.close_connection, offline.paths.get_db_file())
+        contacts = ContactManager(offline, key)
+        with contacts._peers.alias_mutation() as repository:
+            for index, token in enumerate('abc'):
+                repository.insert(token * 56, f'contact {index}', True)
+        SqlManager.close_connection(offline.paths.get_db_file())
+        from metor.core.daemon.headless import HeadlessDaemon
+
+        send = HeadlessDaemon._send
+        with (
+            patch(
+                'metor.core.daemon.handlers.snapshot_pages.Constants.SNAPSHOT_PAGE_ITEMS',
+                1,
+            ),
+            patch(
+                'metor.core.daemon.headless.manager.HeadlessDaemon._send',
+                autospec=True,
+                side_effect=send,
+            ) as sent,
+            patch.object(CliProxy, '_prompt_password', return_value='offline-password'),
+        ):
+            proxy = CliProxy(offline)
+            listing = proxy.contacts_list()
+        self.assertFalse(proxy.consume_error_flag(), listing[:160])
+        self.assertEqual(
+            sum(
+                isinstance(call.args[2], ContactsDataEvent)
+                for call in sent.call_args_list
+            ),
+            3,
+        )
+        self.assertEqual(
+            [line.split(' -> ')[1] for line in listing.splitlines() if ' -> ' in line],
+            [token * 56 for token in 'abc'],
+        )
 
     def test_device_menu_screen_lock_restricts_real_core_session(self) -> None:
         """A reversible hardware overlay cannot stand in for Core authorization."""

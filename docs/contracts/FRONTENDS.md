@@ -444,3 +444,11 @@ with spaces, so labels created by another frontend remain usable in Terminal.
 
 The complete wire shapes and defaults are generated in
 [API.md](../generated/API.md) and [SETTINGS.md](../generated/SETTINGS.md).
+
+Explicit contact listings use the same bounded inventory paging as graphical
+startup. The CLI collects pages over its originating authenticated channel
+before formatting its output. A temporary offline Core streams those pages on
+its single-operation private socket. Terminal chat renders each confirmed page and a
+new `/contacts list` supersedes the previous cursor. An expired listing reports
+that the user can reissue the read. GUI reconciliation after an uncertain
+contact mutation reads only the identities that operation targeted.

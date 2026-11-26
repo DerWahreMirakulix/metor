@@ -386,7 +386,9 @@ class CliProxyTransport:
                 send_socket_command=self._send_socket_command,
             )
             if isinstance(endpoint, socket.socket):
-                return session.execute_socket_result(endpoint, cmd, wait_for_response)
+                return session.execute_socket_result(
+                    endpoint, cmd, wait_for_response, private_headless=True
+                )
             return session.execute_result(endpoint, cmd, wait_for_response)
         except PromptAbortedError:
             return IpcRequestResult(

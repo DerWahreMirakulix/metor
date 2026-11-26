@@ -41,6 +41,8 @@ class IpcTlsSocket(ssl.SSLSocket):
     def _operate(self, operation: Callable[[], _T], deadline: float | None) -> _T:
         while True:
             with self._tls_lock:
+                if deadline is not None and time.monotonic() >= deadline:
+                    raise TimeoutError('IPC TLS operation timed out.')
                 try:
                     return operation()
                 except ssl.SSLWantReadError:
@@ -62,7 +64,9 @@ class IpcTlsSocket(ssl.SSLSocket):
 
     def read_before(self, size: int, deadline: float | None) -> bytes:
         reader = super().recv
-        return self._operate(lambda: reader(size), deadline or self._deadline())
+        return self._operate(
+            lambda: reader(size), self._deadline() if deadline is None else deadline
+        )
 
     def recv(self, buflen: int = 1024, flags: int = 0) -> bytes:
         if flags:

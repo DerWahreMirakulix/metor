@@ -1,17 +1,23 @@
 """Stateful CLI-side IPC request orchestration for one command exchange."""
 
+from dataclasses import replace
 import socket
 import time
 from typing import Callable, Optional
 
 from metor.core.api import (
     ensure_request_id,
+    ContactEntry,
+    ContactsDataEvent,
+    GetContactsListCommand,
+    RuntimeSnapshotUnavailableEvent,
     EventType,
     IpcCommand,
     IpcEvent,
 )
 from metor.data import ProfileManager, SettingKey
 from metor.client import BufferedIpcEventReader, IpcAuthExchange
+from metor.client.contact_pages import ContactListRead
 from metor.shared.ipc_tls import authenticate_daemon
 
 # Local Package Imports
@@ -117,11 +123,14 @@ class IpcRequestSession:
         sock: socket.socket,
         cmd: IpcCommand,
         wait_for_response: bool,
+        *,
+        private_headless: bool = False,
     ) -> IpcRequestResult:
         """Executes one typed exchange on a caller-owned connected IPC socket.
 
         Args:
             sock: Connected endpoint; the caller retains close ownership.
+            private_headless: The one-operation channel streams all requested contact pages.
             cmd: Outbound command.
             wait_for_response: Whether to await the terminal result.
         Returns:
@@ -135,6 +144,15 @@ class IpcRequestSession:
             sock,
             request_id,
         )
+        contact_read = (
+            ContactListRead(cmd)
+            if isinstance(cmd, GetContactsListCommand)
+            and cmd.onions is None
+            and cmd.snapshot_id is None
+            else None
+        )
+        saved: list[ContactEntry] = []
+        discovered: list[ContactEntry] = []
         send_failed: bool = False
         auth_prompt_used: bool = False
         try:
@@ -215,6 +233,38 @@ class IpcRequestSession:
                 and event.request_id != request_id
             ):
                 continue
+
+            if contact_read is not None:
+                if isinstance(event, RuntimeSnapshotUnavailableEvent):
+                    return IpcRequestResult(
+                        message='Contact listing expired. Run contacts list again.',
+                        failed=True,
+                    )
+                if isinstance(event, ContactsDataEvent):
+                    try:
+                        following = contact_read.advance(event)
+                    except ValueError:
+                        return IpcRequestResult(
+                            message='Contact listing changed. Run contacts list again.',
+                            failed=True,
+                        )
+                    saved.extend(event.saved)
+                    discovered.extend(event.discovered)
+                    if following is not None:
+                        if not private_headless:
+                            cmd = following
+                            request_id = ensure_request_id(following)
+                            auth_exchange = self._build_auth_exchange(sock, request_id)
+                            self._send_socket_command(sock, following)
+                        deadline = time.monotonic() + timeout
+                        continue
+                    event = replace(
+                        event,
+                        saved=saved,
+                        discovered=discovered,
+                        snapshot_id=None,
+                        page_offset=0,
+                    )
 
             return IpcRequestResult(
                 event=event,

@@ -407,6 +407,17 @@ def create_request_id() -> str:
     return secrets.token_hex(16)
 
 
+def validate_snapshot_cursor(identity: Optional[str], offset: int) -> None:
+    """Accept a first page or an exact opaque inventory continuation."""
+    if type(offset) is not int or offset < 0:
+        raise ValueError('Invalid snapshot offset')
+    if identity is None:
+        if offset:
+            raise ValueError('Missing snapshot identity')
+    elif len(identity) != 32 or not offset:
+        raise ValueError('Invalid snapshot continuation')
+
+
 def ensure_request_id(message: IpcMessage) -> str:
     """
     Ensures one IPC DTO carries a stable request identifier.

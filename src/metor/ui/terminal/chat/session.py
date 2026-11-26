@@ -2,8 +2,11 @@
 Module managing the active connection states and focus targets for the UI.
 """
 
+from threading import Lock
 from typing import Dict, List, Optional, Set
 
+from metor.client.contact_pages import ContactListRead
+from metor.core.api import ContactsDataEvent, GetContactsListCommand
 from metor.shared import clean_onion
 
 # Local Package Imports
@@ -43,6 +46,50 @@ class Session:
         self.header_contacts: List[str] = []
 
         self.my_onion: str = 'unknown'
+        self._contact_pages_lock = Lock()
+        self._contact_listing: ContactListRead | None = None
+
+    def begin_contact_listing(self) -> GetContactsListCommand:
+        """Supersede any earlier listing before sending the newly correlated request."""
+        with self._contact_pages_lock:
+            self._contact_listing = ContactListRead(
+                GetContactsListCommand(chat_mode=True)
+            )
+            return self._contact_listing.command
+
+    def abandon_contact_listing(self, request_id: str | None) -> bool:
+        """Retire an expired cursor only if it still belongs to the visible listing."""
+        with self._contact_pages_lock:
+            if (
+                self._contact_listing is None
+                or request_id != self._contact_listing.command.request_id
+            ):
+                return False
+            self._contact_listing = None
+            return True
+
+    def accept_contact_page(
+        self, page: ContactsDataEvent
+    ) -> tuple[bool, GetContactsListCommand | None]:
+        """Advance the current request atomically with respect to a new slash command."""
+        with self._contact_pages_lock:
+            listing = self._contact_listing
+            if listing is None:
+                return (
+                    page.request_id is None
+                    and page.page_offset == 0
+                    and page.next_offset is None
+                ), None
+            if page.request_id != listing.command.request_id:
+                return False, None
+            try:
+                following = listing.advance(page)
+            except ValueError:
+                self._contact_listing = None
+                raise
+            if following is None:
+                self._contact_listing = None
+            return True, following
 
     @property
     def focused_alias(self) -> Optional[str]:
