@@ -143,17 +143,20 @@ class SshTunnelTests(unittest.TestCase):
                 stderr=subprocess.DEVNULL,
                 start_new_session=True,
             )
-            self.addCleanup(self._stop, client_process)
-            accepted, _ = listener.accept()
-            with accepted:
-                server_process = subprocess.Popen(
-                    [sshd, '-i', '-e', '-f', str(config)],
-                    stdin=accepted,
-                    stdout=accepted,
-                    stderr=subprocess.DEVNULL,
-                    start_new_session=True,
-                )
-            self.addCleanup(self._stop, server_process)
+            try:
+                accepted, _ = listener.accept()
+                with accepted:
+                    server_process = subprocess.Popen(
+                        [sshd, '-i', '-e', '-f', str(config)],
+                        stdin=accepted,
+                        stdout=accepted,
+                        stderr=subprocess.DEVNULL,
+                        start_new_session=True,
+                    )
+            except BaseException:
+                self._stop(client_process)
+                raise
+            self.addCleanup(self._close_tunnel, client_process, server_process)
 
         remote = ProfileManager(profile.endpoint_profile_name)
         sdk = MetorClient(
@@ -189,6 +192,19 @@ class SshTunnelTests(unittest.TestCase):
         self.addCleanup(wrong.disconnect)
         self.assertIsNone(wrong.bootstrap())
         self.assertEqual(attempted.mock_calls, [])
+
+    @staticmethod
+    def _close_tunnel(
+        client: subprocess.Popen[bytes], server: subprocess.Popen[bytes]
+    ) -> None:
+        """Close SSH first so the server can reap its own session child."""
+        try:
+            SshTunnelTests._stop(client)
+        finally:
+            try:
+                server.wait(5)
+            except subprocess.TimeoutExpired:
+                SshTunnelTests._stop(server)
 
     @staticmethod
     def _stop(process: subprocess.Popen[bytes]) -> None:

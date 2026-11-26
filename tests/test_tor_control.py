@@ -44,12 +44,16 @@ class TorControlTests(unittest.TestCase):
             )
 
     def test_real_offline_tor_registers_same_identity_after_restart(self) -> None:
-        try:
-            executable = TorManager._resolve_tor_command()
-        except (PermissionError, FileNotFoundError):
-            if os.environ.get('METOR_TOR_PATH'):
-                raise
-            self.skipTest('No trusted native Tor executable available.')
+        # Resolve the binary provisioned for this job. Other CLI tests initialize
+        # the process-wide settings under their own isolated environment.
+        configured = os.environ.get('METOR_TOR_PATH', '').strip()
+        with patch.object(Constants, 'TOR_PATH', configured):
+            try:
+                executable = TorManager._resolve_tor_command()
+            except (PermissionError, FileNotFoundError):
+                if configured:
+                    raise
+                self.skipTest('No trusted native Tor executable available.')
         with (
             PrivateTemporaryDirectory() as directory,
             patch.object(Constants, 'DATA', Path(directory)),

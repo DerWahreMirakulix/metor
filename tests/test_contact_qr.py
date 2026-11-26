@@ -4,6 +4,7 @@ import base64
 import hashlib
 import json
 import unittest
+from unittest.mock import patch
 
 from metor.client import ContactQrError, validate_contact_qr
 
@@ -43,6 +44,24 @@ class ContactQrContractTests(unittest.TestCase):
                 result = validate_contact_qr(raw)
                 self.assertFalse(result.valid)
                 self.assertIs(result.error, expected)
+
+    def test_nested_containers_are_rejected_before_json_decoding(self) -> None:
+        """Depth rejection must be independent of the Python parser's recursion budget."""
+        with patch('metor.client.contact_qr.json.loads') as decode:
+            for nested in ([1], {'note': 'value'}):
+                self.assertIs(
+                    validate_contact_qr(json.dumps({'version': nested})).error,
+                    ContactQrError.MALFORMED,
+                )
+            decode.assert_not_called()
+
+    def test_quoted_delimiters_and_escaped_quotes_in_alias_are_plain_text(self) -> None:
+        """Braces in a legal string, including after an escaped quote, are data."""
+        alias = 'Alice "A" {[peer]} \\'
+        contact = json.dumps({'version': 1, 'onion': address(17), 'alias': alias})
+        result = validate_contact_qr(contact)
+        assert result.payload is not None
+        self.assertEqual(result.payload.alias, alias)
 
     def test_accepts_version_one_identity_and_normalizes_fields(self) -> None:
         """A valid payload yields the canonical onion suffix and trimmed alias."""

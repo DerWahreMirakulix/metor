@@ -49,6 +49,28 @@ class ContactQrValidationResult:
         return self.payload is not None
 
 
+def _is_flat_object(text: str) -> bool:
+    """Check the contact schema's sole container before entering the JSON decoder."""
+    value = text.strip(' \t\r\n')
+    if not value.startswith('{') or not value.endswith('}'):
+        return False
+    quoted = False
+    escaped = False
+    for character in value[1:-1]:
+        if quoted:
+            if escaped:
+                escaped = False
+            elif character == '\\':
+                escaped = True
+            elif character == '"':
+                quoted = False
+        elif character == '"':
+            quoted = True
+        elif character in '{[':
+            return False
+    return True
+
+
 def _unique_fields(pairs: list[tuple[str, object]]) -> dict[str, object]:
     """Reject ambiguous duplicate fields instead of accepting the final value."""
     fields = dict(pairs)
@@ -82,9 +104,10 @@ def validate_contact_qr(raw: bytes | str) -> ContactQrValidationResult:
         encoded = raw.encode('utf-8') if isinstance(raw, str) else raw
         if len(encoded) > Constants.CONTACT_QR_MAX_BYTES:
             return ContactQrValidationResult(error=ContactQrError.MALFORMED)
-        decoded: object = json.loads(
-            encoded.decode('utf-8'), object_pairs_hook=_unique_fields
-        )
+        text = encoded.decode('utf-8')
+        if not _is_flat_object(text):
+            return ContactQrValidationResult(error=ContactQrError.MALFORMED)
+        decoded: object = json.loads(text, object_pairs_hook=_unique_fields)
     except (UnicodeError, ValueError, RecursionError):
         return ContactQrValidationResult(error=ContactQrError.MALFORMED)
     if not isinstance(decoded, dict):
