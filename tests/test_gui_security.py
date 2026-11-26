@@ -642,7 +642,11 @@ class GuiSecurityIntegrationTests(unittest.TestCase):
         controller.poll()
         self.settle()
         self.assertIsNotNone(controller.security.restriction)
-        entered, release = threading.Event(), threading.Event()
+        entered, release, relocked = (
+            threading.Event(),
+            threading.Event(),
+            threading.Event(),
+        )
         self.addCleanup(release.set)
         request = self.client.request
         replies: list[IpcEvent | None] = []
@@ -652,6 +656,10 @@ class GuiSecurityIntegrationTests(unittest.TestCase):
         ) -> IpcEvent | None:
             """Runs the actual authenticated exchange before delaying GUI delivery."""
             result = request(command, expected)
+            if isinstance(command, RestrictClientCommand) and isinstance(
+                result, ClientRestrictedEvent
+            ):
+                relocked.set()
             if isinstance(command, gate_command):
                 replies.append(result)
                 entered.set()
@@ -683,6 +691,12 @@ class GuiSecurityIntegrationTests(unittest.TestCase):
                 old_generation = controller.state.generation
                 if ordinary_lock:
                     controller.screen_lock()
+                    self.assertTrue(relocked.wait(_SECURITY_WORKER_TIMEOUT_SEC))
+                    self.assertIsInstance(
+                        request(GetRuntimeSnapshotCommand(), IpcEvent),
+                        ClientAccessRestrictedEvent,
+                    )
+                    self.assertTrue(worker.is_alive())
                 else:
                     controller.fail_native_lifecycle()
                     self.assertTrue(controller.native_lifecycle_failed)

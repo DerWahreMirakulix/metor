@@ -1,7 +1,9 @@
 """Per-client restriction, one-use reauthorization and graphical PIN management."""
 
+from concurrent.futures import Future
 from dataclasses import replace
 import math
+import threading
 import time
 from typing import TYPE_CHECKING
 
@@ -54,6 +56,8 @@ class SecurityController:
         self._unlock_pending = False
         self._restoration_active = False
         self._native_relock = False
+        self._native_epoch = 0
+        self._early_restriction: Future[IpcEvent | None] | None = None
         self.retry_at = 0.0
         self._retry_display_seconds = 0
         self.profile_label = ''
@@ -151,8 +155,38 @@ class SecurityController:
         self.restoring = False
         return True
 
+    def _restriction_command(self) -> RestrictClientCommand:
+        """Freeze the approved restriction policy for this exact GUI socket."""
+        return RestrictClientCommand(
+            unlock_method=self._policy.unlock_method,
+            accept_calls_locked=self._policy.accept_calls_locked,
+            notification_privacy=self._policy.notifications_locked,
+            device_lifecycle=self.controller.device.enabled,
+        )
+
+    def _interrupt_authorization(self) -> None:
+        """Restrict the daemon without waiting for a superseded worker's reply."""
+        client = self.controller.client
+        if client is None or self._early_restriction is not None:
+            return
+        command = self._restriction_command()
+        receipt: Future[IpcEvent | None] = Future()
+        self._early_restriction = receipt
+
+        def restrict() -> None:
+            """An already restricted socket may reject this overlap; reconcile after the older work."""
+            try:
+                receipt.set_result(client.request(command, IpcEvent))
+            except Exception:
+                receipt.set_result(None)
+
+        threading.Thread(
+            target=restrict, name='metor-gui-native-restrict', daemon=True
+        ).start()
+
     def native_lock(self) -> None:
         """Fence earlier authorization while retaining any independently owned call."""
+        self._native_epoch += 1
         if self.controller.state.route.view == 'V05' and (
             self._unlock_pending or self._restoration_active
         ):
@@ -164,6 +198,8 @@ class SecurityController:
                 self._restoration_active = False
                 self._native_relock = False
                 self.pending = True
+            else:
+                self._interrupt_authorization()
             return
         self.lock()
 
@@ -178,7 +214,12 @@ class SecurityController:
         """
         client = self.controller.client
         restriction = self.restriction
-        if client is None or restriction is None or time.monotonic() < self.retry_at:
+        if (
+            client is None
+            or restriction is None
+            or self._early_restriction is not None
+            or time.monotonic() < self.retry_at
+        ):
             return False
         method = (
             ClientUnlockMethod.PROFILE_PASSWORD
@@ -186,6 +227,7 @@ class SecurityController:
             else restriction.unlock_method
         )
         challenge, salt = restriction.challenge, restriction.salt
+        native_epoch = self._native_epoch
 
         def request() -> IpcEvent | None:
             """Derives credentials off the native loop and sends no plaintext PIN.
@@ -204,6 +246,8 @@ class SecurityController:
                     if method is ClientUnlockMethod.PIN
                     else build_session_auth_proof(secret, challenge, salt)
                 )
+            if native_epoch != self._native_epoch:
+                return restriction
             return client.request(ReauthorizeClientCommand(method, proof), IpcEvent)
 
         admitted = self.controller.submit('security:unlock', request)
@@ -384,15 +428,19 @@ class SecurityController:
             )
             if timeout and time.monotonic() - self._last_input >= timeout:
                 self.lock()
+        if self._early_restriction is not None:
+            if self._native_relock or not self._early_restriction.done():
+                return
+            receipt = self._early_restriction.result()
+            self._early_restriction = None
+            if isinstance(receipt, ClientRestrictedEvent):
+                self.restriction = receipt
+                self.pending = False
+                state.status = ''
         if self.pending:
             if controller.voice.running or controller.playback.running:
                 return
-            command = RestrictClientCommand(
-                unlock_method=self._policy.unlock_method,
-                accept_calls_locked=self._policy.accept_calls_locked,
-                notification_privacy=self._policy.notifications_locked,
-                device_lifecycle=controller.device.enabled,
-            )
+            command = self._restriction_command()
             if controller.submit(
                 'security:restrict',
                 lambda: client.request(command, ClientRestrictedEvent),
